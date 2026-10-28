@@ -8,6 +8,8 @@ A lightweight, responsive, and modern dual-pane file manager for Linux, blending
 
 Written in **Vala** and compiled directly to a compact native binary via `valac` and GCC with sub-second incremental builds and zero heavy runtime dependencies.
 
+We are all familiar with classic file managers like Midnight Commander (`mc`), Nautilus, Total Commander, Norton Commander, and Volkov Commander, along with many other legendary tools. This project is an attempt to create a lightweight graphical file manager that brings together diverse features from all of them. However, covering every single feature is impossible without a community — any like-minded developers and enthusiasts who would like to support the project and join its development are warmly welcome!
+
 ---
 
 ## Key Features

@@ -12,6 +12,9 @@ namespace VCommander {
         public bool is_hidden { get; construct set; default = false; }
         public Icon? icon { get; construct set; default = null; }
         public string file_type { get; construct set; default = ""; }
+        public string owner { get; construct set; default = ""; }
+        public string group { get; construct set; default = ""; }
+        public uint32 mode { get; construct set; default = 0; }
 
         public bool is_calculating_size { get; set; default = false; }
         public int64 custom_size { get; set; default = -1; }
@@ -44,6 +47,65 @@ namespace VCommander {
             }
         }
 
+        public string formatted_permissions {
+            owned get {
+                if (is_parent_dir) {
+                    return "";
+                }
+                if (mode == 0) {
+                    return is_dir ? "drwxr-xr-x" : "-rw-r--r--";
+                }
+
+                var sb = new StringBuilder();
+
+                // File type
+                if (is_symlink) {
+                    sb.append_c('l');
+                } else if (is_dir) {
+                    sb.append_c('d');
+                } else if ((mode & 0170000) == 0060000) {
+                    sb.append_c('b');
+                } else if ((mode & 0170000) == 0020000) {
+                    sb.append_c('c');
+                } else if ((mode & 0170000) == 0010000) {
+                    sb.append_c('p');
+                } else if ((mode & 0170000) == 0140000) {
+                    sb.append_c('s');
+                } else {
+                    sb.append_c('-');
+                }
+
+                // User permissions
+                sb.append_c(((mode & 0400) != 0) ? 'r' : '-');
+                sb.append_c(((mode & 0200) != 0) ? 'w' : '-');
+                if ((mode & 04000) != 0) {
+                    sb.append_c(((mode & 0100) != 0) ? 's' : 'S');
+                } else {
+                    sb.append_c(((mode & 0100) != 0) ? 'x' : '-');
+                }
+
+                // Group permissions
+                sb.append_c(((mode & 0040) != 0) ? 'r' : '-');
+                sb.append_c(((mode & 0020) != 0) ? 'w' : '-');
+                if ((mode & 02000) != 0) {
+                    sb.append_c(((mode & 0010) != 0) ? 's' : 'S');
+                } else {
+                    sb.append_c(((mode & 0010) != 0) ? 'x' : '-');
+                }
+
+                // Other permissions
+                sb.append_c(((mode & 0004) != 0) ? 'r' : '-');
+                sb.append_c(((mode & 0002) != 0) ? 'w' : '-');
+                if ((mode & 01000) != 0) {
+                    sb.append_c(((mode & 0001) != 0) ? 't' : 'T');
+                } else {
+                    sb.append_c(((mode & 0001) != 0) ? 'x' : '-');
+                }
+
+                return sb.str;
+            }
+        }
+
         public FileItem.for_parent(File parent_file) {
             Object(
                 file: parent_file,
@@ -55,7 +117,10 @@ namespace VCommander {
                 is_parent_dir: true,
                 is_hidden: false,
                 icon: new ThemedIcon("go-up-symbolic"),
-                file_type: "Folder"
+                file_type: "Folder",
+                owner: "",
+                group: "",
+                mode: 0
             );
         }
 
@@ -90,6 +155,37 @@ namespace VCommander {
 
             bool symlink = info.get_is_symlink();
 
+            string item_owner = "";
+            string? o_user = info.get_attribute_string("owner::user");
+            if (o_user != null && o_user.length > 0) {
+                item_owner = o_user;
+            } else {
+                string? u_name = info.get_attribute_string("unix::user-name");
+                if (u_name != null && u_name.length > 0) {
+                    item_owner = u_name;
+                } else if (info.has_attribute("unix::uid")) {
+                    item_owner = info.get_attribute_uint32("unix::uid").to_string();
+                }
+            }
+
+            string item_group = "";
+            string? o_group = info.get_attribute_string("owner::group");
+            if (o_group != null && o_group.length > 0) {
+                item_group = o_group;
+            } else {
+                string? g_name = info.get_attribute_string("unix::group-name");
+                if (g_name != null && g_name.length > 0) {
+                    item_group = g_name;
+                } else if (info.has_attribute("unix::gid")) {
+                    item_group = info.get_attribute_uint32("unix::gid").to_string();
+                }
+            }
+
+            uint32 item_mode = 0;
+            if (info.has_attribute("unix::mode")) {
+                item_mode = info.get_attribute_uint32("unix::mode");
+            }
+
             Object(
                 file: file,
                 name: item_name,
@@ -101,7 +197,10 @@ namespace VCommander {
                 is_symlink: symlink,
                 is_hidden: hidden,
                 icon: item_icon,
-                file_type: ftype
+                file_type: ftype,
+                owner: item_owner,
+                group: item_group,
+                mode: item_mode
             );
         }
 
@@ -169,6 +268,42 @@ namespace VCommander {
 
             if (time_a < time_b) return -1;
             if (time_a > time_b) return 1;
+            return a.display_name.collate(b.display_name);
+        }
+
+        public static int compare_by_owner(FileItem a, FileItem b) {
+            if (a.is_parent_dir) return -1;
+            if (b.is_parent_dir) return 1;
+
+            if (a.is_dir && !b.is_dir) return -1;
+            if (!a.is_dir && b.is_dir) return 1;
+
+            int res = a.owner.collate(b.owner);
+            if (res != 0) return res;
+            return a.display_name.collate(b.display_name);
+        }
+
+        public static int compare_by_group(FileItem a, FileItem b) {
+            if (a.is_parent_dir) return -1;
+            if (b.is_parent_dir) return 1;
+
+            if (a.is_dir && !b.is_dir) return -1;
+            if (!a.is_dir && b.is_dir) return 1;
+
+            int res = a.group.collate(b.group);
+            if (res != 0) return res;
+            return a.display_name.collate(b.display_name);
+        }
+
+        public static int compare_by_permissions(FileItem a, FileItem b) {
+            if (a.is_parent_dir) return -1;
+            if (b.is_parent_dir) return 1;
+
+            if (a.is_dir && !b.is_dir) return -1;
+            if (!a.is_dir && b.is_dir) return 1;
+
+            int res = a.formatted_permissions.collate(b.formatted_permissions);
+            if (res != 0) return res;
             return a.display_name.collate(b.display_name);
         }
     }

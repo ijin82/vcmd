@@ -11,7 +11,7 @@ This document tracks the original 7-stage architectural plan for **Vala Commande
 | **Stage 1** | Base UI Skeleton, Navigation & File Launching | **Completed (100%)** | Dual panes (`Gtk.Paned`), `Gtk.ColumnView`, `Gtk.GridView` (Brief), layout-agnostic hotkeys, MIME associations (`AppInfo.launch_default_for_uri`). |
 | **Stage 2** | Tabs, Configuration & State Persistence | **Completed (100%)** | `Adw.TabBar` + `Adw.TabView`, `Ctrl+T`, `Ctrl+W`, `Ctrl+Shift+T` rename, `~/.config/vcmd/config` via `GLib.KeyFile`, Preferences dialog (`Ctrl+,`). |
 | **Stage 3** | File Operations & Unified Error Handling (F5, F6, F7, F8) | **Completed (100%)** | Centralized `FileOperationService` (`GLib.IOError` handler), F7 mkdir, F8 recursive delete, F5 copy, F6 move/rename with conflict resolution, bottom F1-F10 bar. |
-| **Stage 4** | File Viewing & Editing (F3, F4) | **Pending** | Configurable external editor/viewer execution (Vim/default terminal) or terminal integration. |
+| **Stage 4** | File Viewing & Editing (F3, F4) | **Completed (100%)** | Configurable external editor/viewer execution (gnome-text-editor, gvim, code, terminal fallback). |
 | **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) | **Pending** | Midnight Commander-style directory bookmark popup, add/remove hotlist, persistent storage. |
 | **Stage 6** | Search Engine (`Alt+F7`) | **Pending** | Background recursive directory search by filename mask and file contents. |
 | **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Pending** | GVfs SFTP connection prompt and integration. |
@@ -101,12 +101,12 @@ This document tracks the original 7-stage architectural plan for **Vala Commande
 
 ---
 
-### [ ] Stage 4: File Viewing & Editing (F3, F4)
-- [ ] `F3`: View File:
-  - Launch external viewer command (default `vim -R` or configured command) in system terminal (`ptyxis`, `gnome-terminal`, `x-terminal-emulator`).
-- [ ] `F4`: Edit File:
-  - Launch external editor command (default `vim` or configured editor) in system terminal.
-- [ ] Configuration options in `~/.config/vcmd/config` for custom F3/F4 viewer/editor commands.
+### [x] Stage 4: File Viewing & Editing (F3, F4)
+- [x] `F3`: View File:
+  - Launch external viewer command (default `gnome-text-editor`, `gvim`, `code`, or configured command with terminal fallback).
+- [x] `F4`: Edit File:
+  - Launch external editor command (default `gnome-text-editor`, `gvim`, `code`, or configured editor with terminal fallback).
+- [x] Configuration options in `~/.config/vcmd/config` and Preferences Dialog for custom F3/F4 viewer/editor commands.
 
 ---
 

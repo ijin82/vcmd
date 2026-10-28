@@ -1,9 +1,30 @@
 namespace VCommander {
+    public enum PanelViewMode {
+        BRIEF = 0,
+        DETAILED = 1,
+        SUPER = 2;
+
+        public static PanelViewMode parse(string val) {
+            if (val == "super" || val == "2") return SUPER;
+            if (val == "brief" || val == "0" || val == "true") return BRIEF;
+            return DETAILED; // "detailed", "full", "1", "false"
+        }
+
+        public string to_string_id() {
+            switch (this) {
+                case BRIEF: return "brief";
+                case DETAILED: return "detailed";
+                case SUPER: return "super";
+                default: return "detailed";
+            }
+        }
+    }
 
     public class FilePanelPage : Gtk.Box {
         public File current_directory { get; private set; }
         public bool show_hidden { get; set; default = false; }
-        public bool is_brief_view { get; private set; default = false; }
+        public PanelViewMode view_mode { get; private set; default = PanelViewMode.DETAILED; }
+        public bool is_brief_view { get { return view_mode == PanelViewMode.BRIEF; } }
         public bool is_active { get; private set; default = false; }
         public string? custom_title { get; set; default = null; }
 
@@ -13,9 +34,13 @@ namespace VCommander {
         private Gtk.SortListModel sort_model;
         private Gtk.SingleSelection selection_model;
         private uint saved_selected_pos = Gtk.INVALID_LIST_POSITION;
+
+        // Views
         private Gtk.ColumnView column_view;
+        private Gtk.ColumnView super_column_view;
         private Gtk.GridView grid_view;
         private Gtk.ScrolledWindow full_scrolled;
+        private Gtk.ScrolledWindow super_scrolled;
         private Gtk.ScrolledWindow brief_scrolled;
         private Gtk.Stack view_stack;
         private Gtk.CustomSorter custom_master_sorter;
@@ -26,30 +51,48 @@ namespace VCommander {
         private Gtk.Entry filter_entry;
         private string filter_text = "";
         private string current_dir_stats = "";
+        private Gtk.Box status_box;
         private Gtk.Label status_label;
         private Gtk.Button view_toggle_button;
         private Cancellable? load_cancellable = null;
         private Cancellable? dir_calc_cancellable = null;
         private FileItem? calculating_item = null;
 
+        // Detailed view columns (no Type column)
         private Gtk.ColumnViewColumn name_col;
-        private Gtk.ColumnViewColumn type_col;
         private Gtk.ColumnViewColumn size_col;
         private Gtk.ColumnViewColumn time_col;
         private Gtk.ColumnViewColumn dummy_col;
+
+        // Super Detailed view columns (Name, Owner, Group, Permission, Size, Dummy)
+        private Gtk.ColumnViewColumn super_name_col;
+        private Gtk.ColumnViewColumn super_owner_col;
+        private Gtk.ColumnViewColumn super_group_col;
+        private Gtk.ColumnViewColumn super_perm_col;
+        private Gtk.ColumnViewColumn super_size_col;
+        private Gtk.ColumnViewColumn super_dummy_col;
+
         private bool updating_columns = false;
+
+        public string sort_column_id { get; private set; default = "name"; }
+        public string sort_order_str { get; private set; default = "asc"; }
+        private bool initializing_sort = true;
 
         public signal void page_activated();
         public signal void error_occurred(string title, string message);
         public signal void directory_changed(File new_dir);
         public signal void command_char_typed(string ch);
         public signal void columns_layout_changed();
+        public signal void sort_changed();
+        public signal void view_mode_changed();
 
-        public FilePanelPage(File initial_dir, bool brief = false, bool hidden = false) {
+        public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc") {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
 
-            this.is_brief_view = brief;
+            this.view_mode = PanelViewMode.parse(view_mode_str);
             this.show_hidden = hidden;
+            this.sort_column_id = (sort_col == "size" || sort_col == "mtime" || sort_col == "owner" || sort_col == "group" || sort_col == "perm") ? sort_col : "name";
+            this.sort_order_str = (sort_order == "desc") ? "desc" : "asc";
             store = new ListStore(typeof(FileItem));
 
             build_header();
@@ -58,6 +101,7 @@ namespace VCommander {
             setup_focus_and_click_handlers();
 
             load_directory(initial_dir);
+            initializing_sort = false;
         }
 
         private void build_header() {
@@ -106,10 +150,10 @@ namespace VCommander {
 
             header_box.append(path_entry);
 
-            // Toggle Brief / Full view button (Alt+T)
-            view_toggle_button = new Gtk.Button.from_icon_name(is_brief_view ? "view-list-bullet-symbolic" : "view-list-compact-symbolic");
+            // Toggle view button (Alt+T)
+            view_toggle_button = new Gtk.Button();
+            update_view_toggle_button();
             view_toggle_button.focusable = false;
-            view_toggle_button.tooltip_text = "Toggle view: Full / Brief (Alt+T)";
             view_toggle_button.clicked.connect(() => {
                 toggle_view_mode();
             });
@@ -233,57 +277,6 @@ namespace VCommander {
                 return FileItem.compare_by_name((FileItem) a, (FileItem) b);
             });
             name_col.notify["fixed-width"].connect(() => {
-                on_column_width_changed();
-            });
-
-            // Type Column
-            var type_factory = new Gtk.SignalListItemFactory();
-            type_factory.setup.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var label = new Gtk.Label("");
-                label.xalign = 0.0f;
-                label.hexpand = true;
-                list_item.child = label;
-
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
-            });
-
-            type_factory.bind.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var file_item = (FileItem) list_item.item;
-                var label = (Gtk.Label) list_item.child;
-                label.label = file_item.file_type;
-
-                apply_tag_class(label, file_item.is_tagged);
-                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
-                    apply_tag_class(label, file_item.is_tagged);
-                });
-                list_item.set_data<ulong>("type_tag_id", tag_handler_id);
-            });
-
-            type_factory.unbind.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var file_item = (FileItem) list_item.item;
-                ulong tag_handler_id = list_item.get_data<ulong>("type_tag_id");
-                if (tag_handler_id != 0 && file_item != null) {
-                    file_item.disconnect(tag_handler_id);
-                    list_item.set_data<ulong>("type_tag_id", 0);
-                }
-            });
-
-            type_col = new Gtk.ColumnViewColumn("Type", type_factory);
-            type_col.id = "type";
-            type_col.fixed_width = config.col_width_type > 30 ? config.col_width_type : 80;
-            type_col.resizable = true;
-            type_col.sorter = new Gtk.CustomSorter((a, b) => {
-                return FileItem.compare_by_type((FileItem) a, (FileItem) b);
-            });
-            type_col.notify["fixed-width"].connect(() => {
                 on_column_width_changed();
             });
 
@@ -417,9 +410,316 @@ namespace VCommander {
             var cols_model = column_view.get_columns();
             cols_model.items_changed.connect(on_column_items_changed);
 
+            // ==========================================================
+            // Super Detailed View (Name, Owner, Group, Permission, Size)
+            // ==========================================================
+            var super_name_factory = new Gtk.SignalListItemFactory();
+            super_name_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+                var image = new Gtk.Image();
+                image.pixel_size = 20;
+
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.ellipsize = Pango.EllipsizeMode.END;
+                label.hexpand = true;
+
+                box.append(image);
+                box.append(label);
+                list_item.child = box;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                box.add_controller(right_click);
+            });
+
+            super_name_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var box = (Gtk.Box) list_item.child;
+                var image = (Gtk.Image) box.get_first_child();
+                var label = (Gtk.Label) image.get_next_sibling();
+
+                image.gicon = file_item.icon;
+                label.label = file_item.display_name;
+
+                label.remove_css_class("file-item-parent");
+                label.remove_css_class("file-item-dir");
+                label.remove_css_class("file-item-symlink");
+
+                if (file_item.is_parent_dir) {
+                    label.add_css_class("file-item-parent");
+                } else if (file_item.is_symlink) {
+                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_dir) {
+                        label.add_css_class("file-item-dir");
+                    }
+                } else if (file_item.is_dir) {
+                    label.add_css_class("file-item-dir");
+                }
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("s_name_tag_id", tag_handler_id);
+            });
+
+            super_name_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("s_name_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("s_name_tag_id", 0);
+                }
+            });
+
+            super_name_col = new Gtk.ColumnViewColumn("Name", super_name_factory);
+            super_name_col.id = "name";
+            super_name_col.expand = true;
+            super_name_col.resizable = true;
+            super_name_col.sorter = new Gtk.CustomSorter((a, b) => {
+                return FileItem.compare_by_name((FileItem) a, (FileItem) b);
+            });
+
+            var super_owner_factory = new Gtk.SignalListItemFactory();
+            super_owner_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+            super_owner_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.owner;
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("s_owner_tag_id", tag_handler_id);
+            });
+            super_owner_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("s_owner_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("s_owner_tag_id", 0);
+                }
+            });
+            super_owner_col = new Gtk.ColumnViewColumn("Owner", super_owner_factory);
+            super_owner_col.id = "owner";
+            super_owner_col.fixed_width = 80;
+            super_owner_col.resizable = true;
+            super_owner_col.sorter = new Gtk.CustomSorter((a, b) => {
+                return FileItem.compare_by_owner((FileItem) a, (FileItem) b);
+            });
+
+            var super_group_factory = new Gtk.SignalListItemFactory();
+            super_group_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+            super_group_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.group;
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("s_group_tag_id", tag_handler_id);
+            });
+            super_group_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("s_group_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("s_group_tag_id", 0);
+                }
+            });
+            super_group_col = new Gtk.ColumnViewColumn("Group", super_group_factory);
+            super_group_col.id = "group";
+            super_group_col.fixed_width = 80;
+            super_group_col.resizable = true;
+            super_group_col.sorter = new Gtk.CustomSorter((a, b) => {
+                return FileItem.compare_by_group((FileItem) a, (FileItem) b);
+            });
+
+            var super_perm_factory = new Gtk.SignalListItemFactory();
+            super_perm_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+            super_perm_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.formatted_permissions;
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("s_perm_tag_id", tag_handler_id);
+            });
+            super_perm_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("s_perm_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("s_perm_tag_id", 0);
+                }
+            });
+            super_perm_col = new Gtk.ColumnViewColumn("Permission", super_perm_factory);
+            super_perm_col.id = "perm";
+            super_perm_col.fixed_width = 110;
+            super_perm_col.resizable = true;
+            super_perm_col.sorter = new Gtk.CustomSorter((a, b) => {
+                return FileItem.compare_by_permissions((FileItem) a, (FileItem) b);
+            });
+
+            var super_size_factory = new Gtk.SignalListItemFactory();
+            super_size_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 1.0f;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+            super_size_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.formatted_size;
+
+                ulong handler_id = file_item.notify["formatted-size"].connect(() => {
+                    label.label = file_item.formatted_size;
+                });
+                list_item.set_data<ulong>("s_size_notify_id", handler_id);
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("s_size_tag_id", tag_handler_id);
+            });
+            super_size_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong handler_id = list_item.get_data<ulong>("s_size_notify_id");
+                if (handler_id != 0 && file_item != null) {
+                    file_item.disconnect(handler_id);
+                    list_item.set_data<ulong>("s_size_notify_id", 0);
+                }
+                ulong tag_handler_id = list_item.get_data<ulong>("s_size_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("s_size_tag_id", 0);
+                }
+            });
+            super_size_col = new Gtk.ColumnViewColumn("Size", super_size_factory);
+            super_size_col.id = "size";
+            super_size_col.fixed_width = 100;
+            super_size_col.resizable = true;
+            super_size_col.sorter = new Gtk.CustomSorter((a, b) => {
+                return FileItem.compare_by_size((FileItem) a, (FileItem) b);
+            });
+
+            var super_dummy_factory = new Gtk.SignalListItemFactory();
+            super_dummy_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                list_item.child = new Gtk.Label("");
+            });
+            super_dummy_col = new Gtk.ColumnViewColumn("", super_dummy_factory);
+            super_dummy_col.id = "dummy";
+            super_dummy_col.resizable = false;
+            super_dummy_col.fixed_width = 1;
+
+            super_column_view = new Gtk.ColumnView(null);
+            super_column_view.add_css_class("file-list-view");
+            super_column_view.reorderable = true;
+            super_column_view.append_column(super_name_col);
+            super_column_view.append_column(super_owner_col);
+            super_column_view.append_column(super_group_col);
+            super_column_view.append_column(super_perm_col);
+            super_column_view.append_column(super_size_col);
+            super_column_view.append_column(super_dummy_col);
+
+            // Apply initial sort column and direction
+            Gtk.ColumnViewColumn target_col = name_col;
+            if (sort_column_id == "size") {
+                target_col = size_col;
+            } else if (sort_column_id == "mtime") {
+                target_col = time_col;
+            }
+            Gtk.SortType target_dir = (sort_order_str == "desc") ? Gtk.SortType.DESCENDING : Gtk.SortType.ASCENDING;
+            column_view.sort_by_column(target_col, target_dir);
+
+            Gtk.ColumnViewColumn super_target_col = super_name_col;
+            if (sort_column_id == "size") {
+                super_target_col = super_size_col;
+            } else if (sort_column_id == "owner") {
+                super_target_col = super_owner_col;
+            } else if (sort_column_id == "group") {
+                super_target_col = super_group_col;
+            } else if (sort_column_id == "perm") {
+                super_target_col = super_perm_col;
+            }
+            super_column_view.sort_by_column(super_target_col, target_dir);
+
             // Master sorter ensuring parent directory '..' is ALWAYS first,
             // and directories are ALWAYS before files, regardless of column sorting or direction.
             var cv_sorter = column_view.sorter;
+            var super_cv_sorter = super_column_view.sorter;
+
             custom_master_sorter = new Gtk.CustomSorter((a, b) => {
                 var fa = (FileItem) a;
                 var fb = (FileItem) b;
@@ -431,13 +731,41 @@ namespace VCommander {
                 if (fa.is_dir && !fb.is_dir) return -1;
                 if (!fa.is_dir && fb.is_dir) return 1;
 
-                var res = cv_sorter.compare((GLib.Object) a, (GLib.Object) b);
+                Gtk.Sorter current_sorter = (view_mode == PanelViewMode.SUPER) ? (Gtk.Sorter) super_column_view.sorter : (Gtk.Sorter) column_view.sorter;
+                var res = current_sorter.compare((GLib.Object) a, (GLib.Object) b);
                 if (res == Gtk.Ordering.SMALLER) return -1;
                 if (res == Gtk.Ordering.LARGER) return 1;
                 return 0;
             });
+
             cv_sorter.changed.connect(() => {
+                var cv_s = column_view.sorter as Gtk.ColumnViewSorter;
+                if (cv_s != null) {
+                    var pcol = cv_s.get_primary_sort_column();
+                    if (pcol != null && pcol.id != null && pcol.id.length > 0) {
+                        sort_column_id = pcol.id;
+                        sort_order_str = (cv_s.get_primary_sort_order() == Gtk.SortType.DESCENDING) ? "desc" : "asc";
+                    }
+                }
                 custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
+                if (!initializing_sort) {
+                    sort_changed();
+                }
+            });
+
+            super_cv_sorter.changed.connect(() => {
+                var cv_s = super_column_view.sorter as Gtk.ColumnViewSorter;
+                if (cv_s != null) {
+                    var pcol = cv_s.get_primary_sort_column();
+                    if (pcol != null && pcol.id != null && pcol.id.length > 0) {
+                        sort_column_id = pcol.id;
+                        sort_order_str = (cv_s.get_primary_sort_order() == Gtk.SortType.DESCENDING) ? "desc" : "asc";
+                    }
+                }
+                custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
+                if (!initializing_sort) {
+                    sort_changed();
+                }
             });
 
             // Custom filter for quick substring matching (case-insensitive)
@@ -469,6 +797,10 @@ namespace VCommander {
             column_view.activate.connect(on_item_activated);
             attach_view_controllers(column_view);
 
+            super_column_view.model = selection_model;
+            super_column_view.activate.connect(on_item_activated);
+            attach_view_controllers(super_column_view);
+
             // 2. GridView (Brief View)
             grid_view = new Gtk.GridView(selection_model, create_brief_factory());
             grid_view.orientation = Gtk.Orientation.HORIZONTAL;
@@ -481,7 +813,7 @@ namespace VCommander {
             // 3. Quick Filter Bar (Ctrl+S)
             build_filter_bar();
 
-            // 4. Stack to switch between Full and Brief view
+            // 4. Stack to switch between Detailed, Brief and Super Detailed view
             view_stack = new Gtk.Stack();
             view_stack.hexpand = true;
             view_stack.vexpand = true;
@@ -502,7 +834,13 @@ namespace VCommander {
             brief_scrolled.child = grid_view;
             view_stack.add_named(brief_scrolled, "brief");
 
-            view_stack.visible_child_name = is_brief_view ? "brief" : "full";
+            super_scrolled = new Gtk.ScrolledWindow();
+            super_scrolled.hexpand = true;
+            super_scrolled.vexpand = true;
+            super_scrolled.child = super_column_view;
+            view_stack.add_named(super_scrolled, "super");
+
+            view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
             append(view_stack);
         }
 
@@ -705,13 +1043,17 @@ namespace VCommander {
         }
 
         private void build_status_bar() {
+            status_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            status_box.add_css_class("panel-status-bar");
+
             status_label = new Gtk.Label("Loading...");
             status_label.xalign = 0.0f;
-            status_label.add_css_class("panel-status-bar");
-            status_label.margin_top = 5;
-            status_label.margin_start = 4;
-            status_label.margin_end = 4;
-            append(status_label);
+            status_label.yalign = 0.5f;
+            status_label.ellipsize = Pango.EllipsizeMode.END;
+            status_label.hexpand = true;
+            status_box.append(status_label);
+
+            append(status_box);
         }
 
         private void setup_focus_and_click_handlers() {
@@ -726,17 +1068,42 @@ namespace VCommander {
         }
 
         public void toggle_view_mode() {
-            is_brief_view = !is_brief_view;
-            view_stack.visible_child_name = is_brief_view ? "brief" : "full";
-            view_toggle_button.icon_name = is_brief_view ? "view-list-bullet-symbolic" : "view-list-compact-symbolic";
-            grab_focus_to_list();
+            if (view_mode == PanelViewMode.BRIEF) {
+                switch_view_mode(PanelViewMode.DETAILED);
+            } else if (view_mode == PanelViewMode.DETAILED) {
+                switch_view_mode(PanelViewMode.SUPER);
+            } else {
+                switch_view_mode(PanelViewMode.BRIEF);
+            }
         }
 
-        public void set_view_mode(bool brief) {
-            if (is_brief_view != brief) {
-                is_brief_view = brief;
-                view_stack.visible_child_name = is_brief_view ? "brief" : "full";
-                view_toggle_button.icon_name = is_brief_view ? "view-list-bullet-symbolic" : "view-list-compact-symbolic";
+        public void switch_view_mode(PanelViewMode mode) {
+            view_mode = mode;
+            view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
+            update_view_toggle_button();
+            if (custom_master_sorter != null) {
+                custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
+            }
+            grab_focus_to_list();
+            scroll_to_selected();
+            view_mode_changed();
+        }
+
+        private void update_view_toggle_button() {
+            if (view_toggle_button == null) return;
+            switch (view_mode) {
+                case PanelViewMode.BRIEF:
+                    view_toggle_button.icon_name = "view-list-bullet-symbolic";
+                    view_toggle_button.tooltip_text = "Switch to Detailed View (Alt+T)";
+                    break;
+                case PanelViewMode.DETAILED:
+                    view_toggle_button.icon_name = "view-list-details-symbolic";
+                    view_toggle_button.tooltip_text = "Switch to Super Detailed View (Alt+T)";
+                    break;
+                case PanelViewMode.SUPER:
+                    view_toggle_button.icon_name = "view-list-compact-symbolic";
+                    view_toggle_button.tooltip_text = "Switch to Brief View (Alt+T)";
+                    break;
             }
         }
 
@@ -977,8 +1344,10 @@ namespace VCommander {
         }
 
         public void grab_focus_to_list() {
-            if (is_brief_view) {
+            if (view_mode == PanelViewMode.BRIEF) {
                 grid_view.grab_focus();
+            } else if (view_mode == PanelViewMode.SUPER) {
+                super_column_view.grab_focus();
             } else {
                 column_view.grab_focus();
             }
@@ -990,10 +1359,13 @@ namespace VCommander {
                 selection_model.selected = 0;
                 scroll_to_selected();
                 // Ensure scrolled window adjustment resets to 0 (top/start) like Home key
-                if (is_brief_view && brief_scrolled != null) {
+                if (view_mode == PanelViewMode.BRIEF && brief_scrolled != null) {
                     var hadj = brief_scrolled.get_hadjustment();
                     if (hadj != null) hadj.set_value(hadj.get_lower());
-                } else if (!is_brief_view && full_scrolled != null) {
+                } else if (view_mode == PanelViewMode.SUPER && super_scrolled != null) {
+                    var vadj = super_scrolled.get_vadjustment();
+                    if (vadj != null) vadj.set_value(vadj.get_lower());
+                } else if (full_scrolled != null) {
                     var vadj = full_scrolled.get_vadjustment();
                     if (vadj != null) vadj.set_value(vadj.get_lower());
                 }
@@ -1006,10 +1378,13 @@ namespace VCommander {
                 selection_model.selected = n - 1;
                 scroll_to_selected();
                 // Ensure scrolled window adjustment scrolls to bottom/end like End key
-                if (is_brief_view && brief_scrolled != null) {
+                if (view_mode == PanelViewMode.BRIEF && brief_scrolled != null) {
                     var hadj = brief_scrolled.get_hadjustment();
                     if (hadj != null) hadj.set_value(hadj.get_upper() - hadj.get_page_size());
-                } else if (!is_brief_view && full_scrolled != null) {
+                } else if (view_mode == PanelViewMode.SUPER && super_scrolled != null) {
+                    var vadj = super_scrolled.get_vadjustment();
+                    if (vadj != null) vadj.set_value(vadj.get_upper() - vadj.get_page_size());
+                } else if (full_scrolled != null) {
                     var vadj = full_scrolled.get_vadjustment();
                     if (vadj != null) vadj.set_value(vadj.get_upper() - vadj.get_page_size());
                 }
@@ -1020,8 +1395,10 @@ namespace VCommander {
             uint pos = selection_model.selected;
             if (pos == Gtk.INVALID_LIST_POSITION) return;
 
-            if (is_brief_view) {
+            if (view_mode == PanelViewMode.BRIEF) {
                 grid_view.scroll_to(pos, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null);
+            } else if (view_mode == PanelViewMode.SUPER) {
+                super_column_view.scroll_to(pos, null, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null);
             } else {
                 column_view.scroll_to(pos, null, Gtk.ListScrollFlags.FOCUS | Gtk.ListScrollFlags.SELECT, null);
             }
@@ -1105,6 +1482,41 @@ namespace VCommander {
             }
             return (FileItem) sort_model.get_item(pos);
         }
+
+        public string? get_item_above_selection_or_first_tag() {
+            uint total = sort_model.get_n_items();
+            if (total == 0) return null;
+
+            // 1. Check if there are tagged items; find the first (minimum index) tagged item
+            uint first_del_pos = Gtk.INVALID_LIST_POSITION;
+            for (uint i = 0; i < total; i++) {
+                var it = (FileItem) sort_model.get_item(i);
+                if (it != null && it.is_tagged && !it.is_parent_dir) {
+                    first_del_pos = i;
+                    break;
+                }
+            }
+
+            // 2. If no tagged items, use the currently selected item position
+            if (first_del_pos == Gtk.INVALID_LIST_POSITION) {
+                uint sel = selection_model.selected;
+                if (sel == Gtk.INVALID_LIST_POSITION) {
+                    sel = saved_selected_pos;
+                }
+                if (sel != Gtk.INVALID_LIST_POSITION && sel < total) {
+                    first_del_pos = sel;
+                }
+            }
+
+            if (first_del_pos != Gtk.INVALID_LIST_POSITION && first_del_pos > 0) {
+                var above_item = (FileItem) sort_model.get_item(first_del_pos - 1);
+                if (above_item != null) {
+                    return above_item.name;
+                }
+            }
+
+            return null;
+        }
         public void apply_columns_order(string[] order) {
             updating_columns = true;
             var cols_model = column_view.get_columns();
@@ -1115,8 +1527,6 @@ namespace VCommander {
             foreach (var col_id in order) {
                 if (col_id == "name" && name_col != null) {
                     column_view.append_column(name_col);
-                } else if (col_id == "type" && type_col != null) {
-                    column_view.append_column(type_col);
                 } else if (col_id == "size" && size_col != null) {
                     column_view.append_column(size_col);
                 } else if (col_id == "mtime" && time_col != null) {
@@ -1126,7 +1536,6 @@ namespace VCommander {
 
             // Ensure any omitted column is added
             if (!column_has_been_added("name") && name_col != null) column_view.append_column(name_col);
-            if (!column_has_been_added("type") && type_col != null) column_view.append_column(type_col);
             if (!column_has_been_added("size") && size_col != null) column_view.append_column(size_col);
             if (!column_has_been_added("mtime") && time_col != null) column_view.append_column(time_col);
 
@@ -1193,7 +1602,6 @@ namespace VCommander {
             config.col_order = order_arr;
 
             if (name_col.fixed_width > 30) config.col_width_name = name_col.fixed_width;
-            if (type_col.fixed_width > 30) config.col_width_type = type_col.fixed_width;
             if (size_col.fixed_width > 30) config.col_width_size = size_col.fixed_width;
             if (time_col.fixed_width > 30) config.col_width_mtime = time_col.fixed_width;
         }
@@ -1205,7 +1613,6 @@ namespace VCommander {
             apply_columns_order(config.col_order);
 
             if (config.col_width_name > 30) name_col.fixed_width = config.col_width_name;
-            if (config.col_width_type > 30) type_col.fixed_width = config.col_width_type;
             if (config.col_width_size > 30) size_col.fixed_width = config.col_width_size;
             if (config.col_width_mtime > 30) time_col.fixed_width = config.col_width_mtime;
 
@@ -1416,7 +1823,7 @@ namespace VCommander {
 
             try {
                 var enumerator = yield dir.enumerate_children_async(
-                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::icon,time::modified",
+                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode",
                     FileQueryInfoFlags.NONE,
                     Priority.DEFAULT,
                     cancellable

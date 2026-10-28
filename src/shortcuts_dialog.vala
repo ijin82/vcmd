@@ -23,7 +23,7 @@ namespace VCommander {
             add_shortcut_row(nav_group, "Enter Folder / Open File", "Enter / Double Click");
             add_shortcut_row(nav_group, "Go to Parent Directory", "Backspace / Alt + Up");
             add_shortcut_row(nav_group, "Focus Path Entry", "Ctrl + L");
-            add_shortcut_row(nav_group, "Toggle Brief / Full View", "Alt + T");
+            add_shortcut_row(nav_group, "Cycle View (Brief / Detailed / Super)", "Alt + T");
             add_shortcut_row(nav_group, "Toggle Hidden Files", "Ctrl + H");
             add_shortcut_row(nav_group, "Jump to Top / Beginning", "Left Arrow");
             add_shortcut_row(nav_group, "Jump to End / Last Item", "Right Arrow");
@@ -61,8 +61,8 @@ namespace VCommander {
             add_shortcut_row(gen_group, "Keyboard Shortcuts", "F1");
             add_shortcut_row(gen_group, "Preferences", "Ctrl + ,");
             add_shortcut_row(gen_group, "Toggle Window Header Bar", "Ctrl + Shift + H");
-            add_shortcut_row(gen_group, "View File (Stage 4)", "F3");
-            add_shortcut_row(gen_group, "Edit File (Stage 4)", "F4");
+            add_shortcut_row(gen_group, "View File", "F3");
+            add_shortcut_row(gen_group, "Edit File", "F4");
             add_shortcut_row(gen_group, "Copy Files", "F5");
             add_shortcut_row(gen_group, "Move Files", "F6");
             add_shortcut_row(gen_group, "Rename File / Folder", "Shift + F6");

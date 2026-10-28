@@ -7,6 +7,7 @@ namespace VCommander {
         public FilePanel active_panel { get; private set; }
 
         private Adw.HeaderBar header_bar;
+        private Gtk.Label title_label;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
         private GenericArray<string> command_history;
@@ -15,6 +16,8 @@ namespace VCommander {
         private Gtk.CssProvider font_css_provider;
         private bool escape_sequence_pending = false;
         private uint escape_sequence_timeout_id = 0;
+        private int saved_dual_paned_position = -1;
+        private bool paned_resetting_half = false;
 
         public MainWindow(Gtk.Application app) {
             Object(application: app, title: "Vala Commander");
@@ -57,6 +60,16 @@ namespace VCommander {
     background-color: @view_bg_color;
 }
 
+paned > separator {
+    min-width: 6px;
+    background-color: alpha(@borders, 0.25);
+    transition: background-color 150ms ease;
+}
+
+paned > separator:hover {
+    background-color: alpha(@accent_color, 0.5);
+}
+
 .file-panel.active-panel {
     /* Subtle border styling: cursor in file list indicates active panel */
 }
@@ -92,8 +105,8 @@ namespace VCommander {
 }
 
 .panel-status-bar {
-    padding: 4px 8px;
-    font-size: 0.85em;
+    padding: 6px 10px;
+    min-height: 24px;
     color: @secondary_color;
     border-top: 1px solid alpha(@borders, 0.2);
     background-color: alpha(@headerbar_bg_color, 0.4);
@@ -246,7 +259,43 @@ row:selected .file-item-tagged {
 
         public void apply_font_styles() {
             var config = ConfigManager.get_instance();
-            string css = @".file-list-view { font-family: '$(config.panel_font_name)', monospace; font-size: $(config.panel_font_size)pt; }";
+            int panel_font_size = config.panel_font_size > 0 ? config.panel_font_size : 11;
+
+            // Status bar font size is 30% smaller than chosen panel font size (rounded)
+            int status_font_size = (panel_font_size * 7 + 5) / 10;
+            if (status_font_size < 7) {
+                status_font_size = 7;
+            }
+
+            // Proportional vertical padding and minimum height calculation
+            int pad_top = (status_font_size * 45 + 99) / 100;
+            if (pad_top < 5) pad_top = 5;
+            int pad_bottom = pad_top;
+
+            int text_height = (status_font_size * 18 + 9) / 10;
+            int min_bar_height = text_height + pad_top + pad_bottom + 2;
+
+            string css = """
+.file-list-view {
+    font-family: '%s', monospace;
+    font-size: %dpt;
+}
+.panel-status-bar {
+    font-family: '%s', monospace;
+    font-size: %dpt;
+    padding: %dpx 10px %dpx 10px;
+    min-height: %dpx;
+}
+""".printf(
+                config.panel_font_name,
+                panel_font_size,
+                config.panel_font_name,
+                status_font_size,
+                pad_top,
+                pad_bottom,
+                min_bar_height
+            );
+
             font_css_provider.load_from_string(css);
         }
 
@@ -256,8 +305,9 @@ row:selected .file-item-tagged {
 
             // Header Bar
             header_bar = new Adw.HeaderBar();
-            var title_label = new Gtk.Label("Vala Commander");
+            title_label = new Gtk.Label("Vala Commander");
             title_label.add_css_class("title");
+            title_label.ellipsize = Pango.EllipsizeMode.START;
             header_bar.title_widget = title_label;
 
             var preferences_button = new Gtk.Button.from_icon_name("emblem-system-symbolic");
@@ -282,8 +332,8 @@ row:selected .file-item-tagged {
             paned.vexpand = true;
             paned.wide_handle = true;
 
-            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.left_show_hidden);
-            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.right_show_hidden);
+            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.left_show_hidden, config.left_sort_cols, config.left_sort_orders, config.left_view_modes);
+            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.right_show_hidden, config.right_sort_cols, config.right_sort_orders, config.right_view_modes);
 
             left_panel.panel_activated.connect(on_panel_activated);
             right_panel.panel_activated.connect(on_panel_activated);
@@ -296,6 +346,27 @@ row:selected .file-item-tagged {
 
             left_panel.error_occurred.connect(show_error_dialog);
             right_panel.error_occurred.connect(show_error_dialog);
+
+            left_panel.tab_sort_changed.connect(() => {
+                save_state();
+            });
+            right_panel.tab_sort_changed.connect(() => {
+                save_state();
+            });
+
+            left_panel.tabs_state_changed.connect(() => {
+                save_state();
+            });
+            right_panel.tabs_state_changed.connect(() => {
+                save_state();
+            });
+
+            left_panel.view_mode_changed.connect((p) => {
+                update_super_view_layout();
+            });
+            right_panel.view_mode_changed.connect((p) => {
+                update_super_view_layout();
+            });
 
             left_panel.columns_layout_changed.connect((origin) => {
                 var cur_page = origin.get_current_page();
@@ -311,6 +382,63 @@ row:selected .file-item-tagged {
             paned.start_child = left_panel;
             paned.end_child = right_panel;
             paned.position = config.paned_position > 0 ? config.paned_position : 512;
+
+            // Reset paned position to 50/50 on double click on separator handle
+            var handle_gesture = new Gtk.GestureClick();
+            handle_gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+            handle_gesture.set_button(0);
+            handle_gesture.pressed.connect((n_press, x, y) => {
+                if (n_press == 2) {
+                    handle_gesture.set_state(Gtk.EventSequenceState.CLAIMED);
+                    trigger_paned_reset_to_half();
+                }
+            });
+
+            // Find the separator child widget of paned
+            var child = paned.get_first_child();
+            while (child != null) {
+                if (child.get_css_name() == "separator") {
+                    child.add_controller(handle_gesture);
+                    break;
+                }
+                child = child.get_next_sibling();
+            }
+
+            // Also attach CAPTURE controller on paned itself as fallback
+            var paned_fallback_gesture = new Gtk.GestureClick();
+            paned_fallback_gesture.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+            paned_fallback_gesture.set_button(0);
+            paned_fallback_gesture.pressed.connect((n_press, x, y) => {
+                if (n_press == 2) {
+                    int pos = paned.position;
+                    // Check if click occurred within handle width (around current paned position, handle is 8-16px wide)
+                    if (Math.fabs(x - pos) <= 24) {
+                        paned_fallback_gesture.set_state(Gtk.EventSequenceState.CLAIMED);
+                        trigger_paned_reset_to_half();
+                    }
+                }
+            });
+            paned.add_controller(paned_fallback_gesture);
+
+            // Connect to paned's internal drag controllers to cancel them when resetting
+            var controllers = paned.observe_controllers();
+            for (uint i = 0; i < controllers.get_n_items(); i++) {
+                var c = controllers.get_item(i);
+                if (c is Gtk.GestureDrag) {
+                    var dg = (Gtk.GestureDrag) c;
+                    dg.drag_update.connect(() => {
+                        if (paned_resetting_half) {
+                            dg.set_state(Gtk.EventSequenceState.DENIED);
+                        }
+                    });
+                    dg.drag_end.connect(() => {
+                        if (paned_resetting_half) {
+                            dg.set_state(Gtk.EventSequenceState.DENIED);
+                            reset_paned_to_half();
+                        }
+                    });
+                }
+            }
 
             root_box.append(paned);
 
@@ -355,12 +483,8 @@ row:selected .file-item-tagged {
             fn_bar.visible = config.show_function_bar;
 
             fn_bar.append(create_fn_button("1", "Help", () => { ShortcutsDialog.show(this); }));
-            fn_bar.append(create_fn_button("3", "View", () => {
-                show_error_dialog("File Viewer", "File Viewer (F3) will be available in Stage 4.");
-            }));
-            fn_bar.append(create_fn_button("4", "Edit", () => {
-                show_error_dialog("File Editor", "File Editor (F4) will be available in Stage 4.");
-            }));
+            fn_bar.append(create_fn_button("3", "View", () => { on_f3_view(); }));
+            fn_bar.append(create_fn_button("4", "Edit", () => { on_f4_edit(); }));
             fn_bar.append(create_fn_button("5", "Copy", () => { on_f5_copy(); }));
             fn_bar.append(create_fn_button("6", "Move", () => { on_f6_move(); }));
             fn_bar.append(create_fn_button("7", "Mkdir", () => { on_f7_mkdir(); }));
@@ -534,7 +658,7 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Alt+T: toggle Brief / Full view mode for active panel
+                // Alt+T: cycle view mode (Brief -> Detailed -> Super Detailed) for active panel
                 if (latin_key == Gdk.Key.t && (state & Gdk.ModifierType.ALT_MASK) != 0) {
                     if (active_panel != null) {
                         active_panel.toggle_view_mode();
@@ -610,6 +734,18 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // F3: View
+                if (keyval == Gdk.Key.F3) {
+                    on_f3_view();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // F4: Edit
+                if (keyval == Gdk.Key.F4) {
+                    on_f4_edit();
+                    return Gdk.EVENT_STOP;
+                }
+
                 // F5: Copy
                 if (keyval == Gdk.Key.F5) {
                     on_f5_copy();
@@ -678,7 +814,21 @@ row:selected .file-item-tagged {
         }
 
         private void on_panel_directory_changed(File new_dir) {
-            // Panel directory changed
+            update_window_title();
+        }
+
+        private void update_window_title() {
+            if (title_label == null) return;
+            string? cur_path = (active_panel != null && active_panel.current_directory != null)
+                ? active_panel.current_directory.get_parse_name()
+                : null;
+            if (cur_path != null && cur_path.length > 0) {
+                title_label.label = @"[ $cur_path ] — Vala Commander";
+                title = @"[ $cur_path ] — Vala Commander";
+            } else {
+                title_label.label = "Vala Commander";
+                title = "Vala Commander";
+            }
         }
 
         private void on_command_char_typed(string ch) {
@@ -728,8 +878,67 @@ row:selected .file-item-tagged {
             active_panel = panel;
             left_panel.set_active(panel == left_panel);
             right_panel.set_active(panel == right_panel);
+            update_super_view_layout();
+            update_window_title();
             if (focus_list) {
                 active_panel.grab_focus_to_list();
+            }
+        }
+
+        public void update_super_view_layout() {
+            if (active_panel == null) return;
+
+            if (active_panel.is_super_view) {
+                // If we haven't saved dual paned position yet, remember it
+                if (saved_dual_paned_position < 0) {
+                    if (paned.position > 0) {
+                        saved_dual_paned_position = paned.position;
+                    } else {
+                        var cfg = ConfigManager.get_instance();
+                        saved_dual_paned_position = cfg.paned_position > 0 ? cfg.paned_position : 512;
+                    }
+                }
+                // Maximize active panel, minimize opposite panel
+                if (active_panel == left_panel) {
+                    left_panel.visible = true;
+                    right_panel.visible = false;
+                } else {
+                    left_panel.visible = false;
+                    right_panel.visible = true;
+                }
+            } else {
+                // Active panel is not in super detailed view
+                left_panel.visible = true;
+                right_panel.visible = true;
+                if (saved_dual_paned_position > 0) {
+                    paned.position = saved_dual_paned_position;
+                    saved_dual_paned_position = -1;
+                }
+            }
+        }
+
+        public void trigger_paned_reset_to_half() {
+            paned_resetting_half = true;
+            reset_paned_to_half();
+
+            // Enforce reset after events settle
+            GLib.Timeout.add(50, () => {
+                reset_paned_to_half();
+                return GLib.Source.REMOVE;
+            });
+            GLib.Timeout.add(150, () => {
+                reset_paned_to_half();
+                paned_resetting_half = false;
+                return GLib.Source.REMOVE;
+            });
+        }
+
+        public void reset_paned_to_half() {
+            int width = paned.get_width();
+            if (width > 0) {
+                paned.position = width / 2;
+                saved_dual_paned_position = paned.position;
+                save_state();
             }
         }
 
@@ -1075,7 +1284,10 @@ row:selected .file-item-tagged {
         private void on_delete(bool permanent_default = false) {
             if (active_panel == null) return;
 
-            var tagged_items = active_panel.get_tagged_items();
+            var target_panel = active_panel;
+            string? select_above_name = target_panel.get_item_above_selection_or_first_tag();
+
+            var tagged_items = target_panel.get_tagged_items();
             if (tagged_items.length > 0) {
                 var dialog = new Adw.AlertDialog(
                     "Delete Items",
@@ -1099,15 +1311,15 @@ row:selected .file-item-tagged {
                 dialog.choose.begin(this, null, (obj, res) => {
                     string resp = dialog.choose.end(res);
                     if (resp == "delete") {
-                        do_delete_multiple_items.begin(tagged_items, perm_check.active);
+                        do_delete_multiple_items.begin(target_panel, tagged_items, perm_check.active, select_above_name);
                     } else {
-                        if (active_panel != null) active_panel.grab_focus_to_list();
+                        target_panel.grab_focus_to_list();
                     }
                 });
                 return;
             }
 
-            var item = active_panel.get_selected_item();
+            var item = target_panel.get_selected_item();
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Delete", "Cannot delete parent directory '..'.");
                 return;
@@ -1137,29 +1349,38 @@ row:selected .file-item-tagged {
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
                 if (resp == "delete") {
-                    do_delete_item.begin(item.file, perm_check.active);
+                    do_delete_item.begin(target_panel, item.file, perm_check.active, select_above_name);
                 } else {
-                    if (active_panel != null) active_panel.grab_focus_to_list();
+                    target_panel.grab_focus_to_list();
                 }
             });
         }
 
-        private async void do_delete_item(File target, bool permanent) {
+        private async void do_delete_item(FilePanel panel, File target, bool permanent, string? select_above_name) {
             try {
                 if (permanent) {
                     yield FileOperationService.delete_recursive(target);
                 } else {
                     yield FileOperationService.trash_file(target);
                 }
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
+                if (panel.current_directory != null) {
+                    panel.load_directory(panel.current_directory, select_above_name);
+                } else {
+                    panel.refresh();
+                }
+                activate_panel(panel, true);
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                if (opp.current_directory != null && panel.current_directory != null && opp.current_directory.equal(panel.current_directory)) {
+                    opp.refresh();
+                }
+                panel.grab_focus_to_list();
             } catch (Error e) {
                 show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
+                panel.grab_focus_to_list();
             }
         }
 
-        private async void do_delete_multiple_items(GenericArray<FileItem> items, bool permanent) {
+        private async void do_delete_multiple_items(FilePanel panel, GenericArray<FileItem> items, bool permanent, string? select_above_name) {
             var cancellable = new Cancellable();
             string op_title = permanent ? @"Permanently deleting $(items.length) items" : @"Moving $(items.length) items to Trash";
             var dlg = new OperationProgressDialog(op_title, cancellable);
@@ -1177,21 +1398,282 @@ row:selected .file-item-tagged {
                     }
                 }
                 dlg.finish();
-                if (!cancellable.is_cancelled() && active_panel != null) {
-                    active_panel.clear_tags();
+                if (!cancellable.is_cancelled()) {
+                    panel.clear_tags();
                 }
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
+                if (panel.current_directory != null) {
+                    panel.load_directory(panel.current_directory, select_above_name);
+                } else {
+                    panel.refresh();
+                }
+                activate_panel(panel, true);
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                if (opp.current_directory != null && panel.current_directory != null && opp.current_directory.equal(panel.current_directory)) {
+                    opp.refresh();
+                }
+                panel.grab_focus_to_list();
             } catch (Error e) {
                 dlg.finish();
                 if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
                     show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
                 }
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
+                if (panel.current_directory != null) {
+                    panel.load_directory(panel.current_directory, select_above_name);
+                } else {
+                    panel.refresh();
+                }
+                activate_panel(panel, true);
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                if (opp.current_directory != null && panel.current_directory != null && opp.current_directory.equal(panel.current_directory)) {
+                    opp.refresh();
+                }
+                panel.grab_focus_to_list();
             }
+        }
+
+        private const int64 LARGE_FILE_THRESHOLD_BYTES = 30 * 1024 * 1024; // 30 MB
+
+        private void on_f3_view() {
+            if (active_panel == null) return;
+            var target_panel = active_panel;
+            var item = target_panel.get_selected_item();
+            if (item == null) return;
+
+            if (item.is_parent_dir) {
+                show_error_dialog("File Viewer", "Cannot view the parent directory.");
+                return;
+            }
+            if (item.is_dir) {
+                show_error_dialog("File Viewer", "Cannot view a directory. Please select a file.");
+                return;
+            }
+
+            string? path = item.file.get_path();
+            if (path == null) {
+                show_error_dialog("File Viewer", "Selected file does not have a local path.");
+                return;
+            }
+
+            var config = ConfigManager.get_instance();
+            string cmd = (config.viewer_command != null && config.viewer_command.length > 0)
+                ? config.viewer_command
+                : ConfigManager.detect_default_editor();
+
+            if (item.size > LARGE_FILE_THRESHOLD_BYTES) {
+                var dialog = new Adw.AlertDialog(
+                    "Warning: large file",
+                    @"The file '$(item.display_name)' is very large ($(GLib.format_size(item.size))).\nOpening it may take significant time or freeze the editor.\n\nDo you want to open it anyway?"
+                );
+                dialog.set_prefer_wide_layout(true);
+                dialog.set_content_width(520);
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("open", "Open Anyway");
+                dialog.set_default_response("cancel");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("open", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "open") {
+                        launch_external_file_tool(cmd, path, "File Viewer", target_panel, item.name);
+                    } else {
+                        target_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
+            launch_external_file_tool(cmd, path, "File Viewer", target_panel, item.name);
+        }
+
+        private void on_f4_edit() {
+            if (active_panel == null) return;
+            var target_panel = active_panel;
+            var item = target_panel.get_selected_item();
+            if (item == null) return;
+
+            if (item.is_parent_dir) {
+                show_error_dialog("File Editor", "Cannot edit the parent directory.");
+                return;
+            }
+            if (item.is_dir) {
+                show_error_dialog("File Editor", "Cannot edit a directory. Please select a file.");
+                return;
+            }
+
+            string? path = item.file.get_path();
+            if (path == null) {
+                show_error_dialog("File Editor", "Selected file does not have a local path.");
+                return;
+            }
+
+            var config = ConfigManager.get_instance();
+            string cmd = (config.editor_command != null && config.editor_command.length > 0)
+                ? config.editor_command
+                : ConfigManager.detect_default_editor();
+
+            if (item.size > LARGE_FILE_THRESHOLD_BYTES) {
+                var dialog = new Adw.AlertDialog(
+                    "Warning: large file",
+                    @"The file '$(item.display_name)' is very large ($(GLib.format_size(item.size))).\nOpening it may take significant time or freeze the editor.\n\nDo you want to open it anyway?"
+                );
+                dialog.set_prefer_wide_layout(true);
+                dialog.set_content_width(520);
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("open", "Open Anyway");
+                dialog.set_default_response("cancel");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("open", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "open") {
+                        launch_external_file_tool(cmd, path, "File Editor", target_panel, item.name);
+                    } else {
+                        target_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
+            launch_external_file_tool(cmd, path, "File Editor", target_panel, item.name);
+        }
+
+        private void launch_external_file_tool(string command_template, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
+            string cmd_str = command_template.strip();
+            if (cmd_str.length == 0) {
+                cmd_str = ConfigManager.detect_default_editor();
+            }
+
+            try {
+                string[] parsed_argv;
+                Shell.parse_argv(cmd_str, out parsed_argv);
+
+                if (parsed_argv.length == 0) {
+                    show_error_dialog(tool_title, @"Invalid command: '$command_template'");
+                    return;
+                }
+
+                var final_argv = new GenericArray<string>();
+                bool placeholder_found = false;
+
+                foreach (var arg in parsed_argv) {
+                    if (arg.contains("%f")) {
+                        final_argv.add(arg.replace("%f", file_path));
+                        placeholder_found = true;
+                    } else {
+                        final_argv.add(arg);
+                    }
+                }
+
+                if (!placeholder_found) {
+                    final_argv.add(file_path);
+                }
+
+                string base_bin = Path.get_basename(parsed_argv[0]);
+
+                if (is_terminal_command(base_bin)) {
+                    string? term = find_terminal_emulator();
+                    if (term == null) {
+                        show_error_dialog(tool_title,
+                            @"No terminal emulator found to run '$base_bin'. Please install gnome-terminal or ptyxis, or configure a graphical editor like gnome-text-editor or gvim.");
+                        return;
+                    }
+
+                    var term_argv = new GenericArray<string>();
+                    term_argv.add(term);
+
+                    string term_base = Path.get_basename(term);
+                    if (term_base == "gnome-terminal" || term_base == "ptyxis" || term_base == "kitty" || term_base == "alacritty" || term_base == "konsole") {
+                        term_argv.add("--");
+                    } else {
+                        term_argv.add("-e");
+                    }
+
+                    for (int i = 0; i < final_argv.length; i++) {
+                        term_argv.add(final_argv[i]);
+                    }
+
+                    var term_args = new string[term_argv.length];
+                    for (int i = 0; i < term_argv.length; i++) {
+                        term_args[i] = term_argv[i];
+                    }
+
+                    spawn_tool_and_watch.begin(term_args, file_path, tool_title, target_panel, selected_name);
+                } else {
+                    var spawn_args = new string[final_argv.length];
+                    for (int i = 0; i < final_argv.length; i++) {
+                        spawn_args[i] = final_argv[i];
+                    }
+
+                    spawn_tool_and_watch.begin(spawn_args, file_path, tool_title, target_panel, selected_name);
+                }
+            } catch (Error e) {
+                show_error_dialog(tool_title, @"Failed to launch '$command_template': $(e.message)");
+            }
+        }
+
+        private async void spawn_tool_and_watch(string[] argv, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
+            try {
+                var launcher = new SubprocessLauncher(SubprocessFlags.NONE);
+                string? cwd = Path.get_dirname(file_path);
+                if (cwd != null) {
+                    launcher.set_cwd(cwd);
+                }
+                var proc = launcher.spawnv(argv);
+
+                // Ensure the originating panel retains focus immediately upon launching
+                activate_panel(target_panel, true);
+
+                yield proc.wait_async(null);
+
+                // When tool finishes, refresh target panel preserving the selected item
+                if (target_panel.current_directory != null) {
+                    target_panel.load_directory(target_panel.current_directory, selected_name);
+                } else {
+                    target_panel.refresh();
+                }
+
+                // If opposite panel has the same directory, refresh it as well
+                var opp = (target_panel == left_panel) ? right_panel : left_panel;
+                if (opp.current_directory != null && cwd != null) {
+                    if (opp.current_directory.get_path() == cwd) {
+                        opp.refresh();
+                    }
+                }
+
+                // Re-assert focus and active state on target_panel
+                activate_panel(target_panel, true);
+            } catch (Error e) {
+                show_error_dialog(tool_title, @"Error executing tool: $(e.message)");
+                activate_panel(target_panel, true);
+            }
+        }
+
+        private static bool is_terminal_command(string binary_name) {
+            string[] term_apps = {
+                "vim", "vi", "nvim", "nano", "less", "more", "view",
+                "mcview", "mcedit", "joe", "micro", "emacs-nw"
+            };
+            foreach (var app in term_apps) {
+                if (binary_name == app) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string? find_terminal_emulator() {
+            string[] terminals = {
+                "ptyxis", "gnome-terminal", "x-terminal-emulator",
+                "kitty", "alacritty", "konsole", "xfce4-terminal", "xterm"
+            };
+            foreach (var term in terminals) {
+                if (Environment.find_program_in_path(term) != null) {
+                    return term;
+                }
+            }
+            return null;
         }
 
         private void on_f5_copy() {
@@ -1717,12 +2199,19 @@ row:selected .file-item-tagged {
             config.window_width = cur_w > 0 ? cur_w : 1024;
             config.window_height = cur_h > 0 ? cur_h : 680;
             config.is_maximized = maximized;
-            config.paned_position = paned.position;
+            if (saved_dual_paned_position > 0) {
+                config.paned_position = saved_dual_paned_position;
+            } else {
+                config.paned_position = paned.position;
+            }
             config.active_pane = (active_panel == right_panel) ? "right" : "left";
 
             // Left panel state
             config.left_tabs = left_panel.get_tab_paths();
             config.left_tab_titles = left_panel.get_tab_titles();
+            config.left_sort_cols = left_panel.get_tab_sort_cols();
+            config.left_sort_orders = left_panel.get_tab_sort_orders();
+            config.left_view_modes = left_panel.get_tab_view_modes();
             config.left_active_tab = left_panel.get_active_tab_index();
             config.left_brief_view = left_panel.is_brief_view;
             config.left_show_hidden = left_panel.show_hidden;
@@ -1730,6 +2219,9 @@ row:selected .file-item-tagged {
             // Right panel state
             config.right_tabs = right_panel.get_tab_paths();
             config.right_tab_titles = right_panel.get_tab_titles();
+            config.right_sort_cols = right_panel.get_tab_sort_cols();
+            config.right_sort_orders = right_panel.get_tab_sort_orders();
+            config.right_view_modes = right_panel.get_tab_view_modes();
             config.right_active_tab = right_panel.get_active_tab_index();
             config.right_brief_view = right_panel.is_brief_view;
             config.right_show_hidden = right_panel.show_hidden;

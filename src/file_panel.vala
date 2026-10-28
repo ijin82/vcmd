@@ -11,8 +11,11 @@ namespace VCommander {
         public signal void directory_changed(File new_dir);
         public signal void command_char_typed(string ch);
         public signal void columns_layout_changed(FilePanel origin_panel);
+        public signal void tab_sort_changed(FilePanel panel);
+        public signal void tabs_state_changed(FilePanel panel);
+        public signal void view_mode_changed(FilePanel panel);
 
-        public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false) {
+        public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
             add_css_class("file-panel");
 
@@ -35,6 +38,11 @@ namespace VCommander {
 
             tab_view.page_attached.connect(on_tab_page_attached);
             tab_view.close_page.connect(on_tab_close_page);
+            tab_view.page_reordered.connect((p, pos) => {
+                if (!initializing) {
+                    tabs_state_changed(this);
+                }
+            });
             tab_view.notify["selected-page"].connect(on_tab_selection_changed);
 
             // Open initial tabs:
@@ -47,13 +55,29 @@ namespace VCommander {
                     if (initial_titles != null && i < initial_titles.length && initial_titles[i].length > 0) {
                         title = initial_titles[i];
                     }
-                    open_new_tab(f, brief, hidden, title);
+                    string scol = "name";
+                    if (sort_cols != null && i < sort_cols.length && sort_cols[i] != null && sort_cols[i].length > 0) {
+                        scol = sort_cols[i];
+                    }
+                    string sord = "asc";
+                    if (sort_orders != null && i < sort_orders.length && sort_orders[i] != null && sort_orders[i].length > 0) {
+                        sord = sort_orders[i];
+                    }
+                    string vmode = brief ? "brief" : "detailed";
+                    if (view_modes != null && i < view_modes.length && view_modes[i] != null && view_modes[i].length > 0) {
+                        vmode = view_modes[i];
+                    }
+                    open_new_tab(f, vmode, hidden, title, scol, sord);
                 }
             }
 
             if (tab_view.n_pages == 0) {
                 var home = File.new_for_path(Environment.get_home_dir());
-                open_new_tab(home, brief, hidden);
+                string fallback_vmode = brief ? "brief" : "detailed";
+                if (view_modes != null && view_modes.length > 0 && view_modes[0] != null && view_modes[0].length > 0) {
+                    fallback_vmode = view_modes[0];
+                }
+                open_new_tab(home, fallback_vmode, hidden, null, "name", "asc");
             }
 
             if (active_index >= 0 && active_index < tab_view.n_pages) {
@@ -83,6 +107,20 @@ namespace VCommander {
             get {
                 var page = get_current_page();
                 return page != null ? page.is_brief_view : false;
+            }
+        }
+
+        public bool is_super_view {
+            get {
+                var page = get_current_page();
+                return page != null ? (page.view_mode == PanelViewMode.SUPER) : false;
+            }
+        }
+
+        public PanelViewMode view_mode {
+            get {
+                var page = get_current_page();
+                return page != null ? page.view_mode : PanelViewMode.DETAILED;
             }
         }
 
@@ -119,6 +157,11 @@ namespace VCommander {
             return page != null ? page.get_selected_item() : null;
         }
 
+        public string? get_item_above_selection_or_first_tag() {
+            var page = get_current_page();
+            return page != null ? page.get_item_above_selection_or_first_tag() : null;
+        }
+
         public GenericArray<FileItem> get_tagged_items() {
             var page = get_current_page();
             return page != null ? page.get_tagged_items() : new GenericArray<FileItem>();
@@ -145,20 +188,21 @@ namespace VCommander {
             }
         }
 
-        public void open_new_tab(File? dir = null, bool brief = false, bool hidden = false, string? custom_title = null) {
+        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc") {
             File target_dir = dir;
+            string vmode = view_mode_str;
             if (target_dir == null) {
                 var current = get_current_page();
                 if (current != null && current.current_directory != null) {
                     target_dir = current.current_directory;
-                    brief = current.is_brief_view;
+                    vmode = current.view_mode.to_string_id();
                     hidden = current.show_hidden;
                 } else {
                     target_dir = File.new_for_path(Environment.get_home_dir());
                 }
             }
 
-            var page_widget = new FilePanelPage(target_dir, brief, hidden);
+            var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order);
             page_widget.hexpand = true;
             page_widget.vexpand = true;
             if (custom_title != null && custom_title.length > 0) {
@@ -184,6 +228,13 @@ namespace VCommander {
             page_widget.columns_layout_changed.connect(() => {
                 columns_layout_changed(this);
             });
+            page_widget.sort_changed.connect(() => {
+                tab_sort_changed(this);
+            });
+            page_widget.view_mode_changed.connect(() => {
+                tabs_state_changed(this);
+                view_mode_changed(this);
+            });
 
             var page = tab_view.append(page_widget);
             update_tab_title(page_widget);
@@ -192,6 +243,10 @@ namespace VCommander {
             if (is_active) {
                 page_widget.set_active(true);
                 page_widget.grab_focus_to_list();
+            }
+
+            if (!initializing) {
+                tabs_state_changed(this);
             }
         }
 
@@ -294,6 +349,9 @@ namespace VCommander {
             }
             tab_view.close_page_finish(page, true);
             grab_focus_to_list();
+            if (!initializing) {
+                tabs_state_changed(this);
+            }
             return true;
         }
 
@@ -315,6 +373,9 @@ namespace VCommander {
                 if (is_active) {
                     current.grab_focus_to_list();
                 }
+            }
+            if (!initializing) {
+                view_mode_changed(this);
             }
         }
 
@@ -477,6 +538,48 @@ namespace VCommander {
             var result = new string[titles.length];
             for (int i = 0; i < titles.length; i++) {
                 result[i] = titles[i];
+            }
+            return result;
+        }
+
+        public string[] get_tab_sort_cols() {
+            var cols = new GenericArray<string>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                cols.add(pw.sort_column_id);
+            }
+            var result = new string[cols.length];
+            for (int i = 0; i < cols.length; i++) {
+                result[i] = cols[i];
+            }
+            return result;
+        }
+
+        public string[] get_tab_sort_orders() {
+            var orders = new GenericArray<string>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                orders.add(pw.sort_order_str);
+            }
+            var result = new string[orders.length];
+            for (int i = 0; i < orders.length; i++) {
+                result[i] = orders[i];
+            }
+            return result;
+        }
+
+        public string[] get_tab_view_modes() {
+            var modes = new GenericArray<string>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                modes.add(pw.view_mode.to_string_id());
+            }
+            var result = new string[modes.length];
+            for (int i = 0; i < modes.length; i++) {
+                result[i] = modes[i];
             }
             return result;
         }

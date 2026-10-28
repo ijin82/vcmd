@@ -149,6 +149,35 @@ namespace VCommander {
             cmd_group.add(shell_row);
             page.add(cmd_group);
 
+            // File Viewer & Editor Group (F3 / F4)
+            var tools_group = new Adw.PreferencesGroup();
+            tools_group.title = "Viewer &amp; Editor (F3 / F4)";
+            tools_group.description = "External applications used to view (F3) and edit (F4) selected files";
+
+            var viewer_row = new Adw.EntryRow();
+            viewer_row.title = "File viewer command (F3)";
+            viewer_row.text = config.viewer_command;
+
+            viewer_row.notify["text"].connect(() => {
+                string entered = viewer_row.text.strip();
+                config.viewer_command = entered.length > 0 ? entered : ConfigManager.detect_default_editor();
+                config.save();
+            });
+            tools_group.add(viewer_row);
+
+            var editor_row = new Adw.EntryRow();
+            editor_row.title = "File editor command (F4)";
+            editor_row.text = config.editor_command;
+
+            editor_row.notify["text"].connect(() => {
+                string entered = editor_row.text.strip();
+                config.editor_command = entered.length > 0 ? entered : ConfigManager.detect_default_editor();
+                config.save();
+            });
+            tools_group.add(editor_row);
+
+            page.add(tools_group);
+
             dialog.add(page);
             dialog.present(parent);
         }

@@ -8,6 +8,16 @@
     background-color: @view_bg_color;
 }
 
+paned > separator {
+    min-width: 6px;
+    background-color: alpha(@borders, 0.25);
+    transition: background-color 150ms ease;
+}
+
+paned > separator:hover {
+    background-color: alpha(@accent_color, 0.5);
+}
+
 .file-panel.active-panel {
     /* Subtle border styling: cursor in file list indicates active panel */
 }
@@ -43,8 +53,8 @@
 }
 
 .panel-status-bar {
-    padding: 4px 8px;
-    font-size: 0.85em;
+    padding: 6px 10px;
+    min-height: 24px;
     color: @secondary_color;
     border-top: 1px solid alpha(@borders, 0.2);
     background-color: alpha(@headerbar_bg_color, 0.4);

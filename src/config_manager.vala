@@ -21,12 +21,18 @@ namespace VCommander {
 
         public string[] left_tabs { get; set; }
         public string[] left_tab_titles { get; set; }
+        public string[] left_sort_cols { get; set; }
+        public string[] left_sort_orders { get; set; }
+        public string[]? left_view_modes { get; set; default = null; }
         public int left_active_tab { get; set; default = 0; }
         public bool left_brief_view { get; set; default = false; }
         public bool left_show_hidden { get; set; default = false; }
 
         public string[] right_tabs { get; set; }
         public string[] right_tab_titles { get; set; }
+        public string[] right_sort_cols { get; set; }
+        public string[] right_sort_orders { get; set; }
+        public string[]? right_view_modes { get; set; default = null; }
         public int right_active_tab { get; set; default = 0; }
         public bool right_brief_view { get; set; default = false; }
         public bool right_show_hidden { get; set; default = false; }
@@ -37,11 +43,37 @@ namespace VCommander {
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
         public string command_shell { get; set; default = "/bin/bash"; }
+        public string viewer_command { get; set; }
+        public string editor_command { get; set; }
         public string[] col_order { get; set; }
         public int col_width_name { get; set; default = 0; }
         public int col_width_type { get; set; default = 80; }
         public int col_width_size { get; set; default = 110; }
         public int col_width_mtime { get; set; default = 175; }
+
+        public static string detect_default_editor() {
+            string[] candidates = {
+                "gnome-text-editor",
+                "gvim",
+                "code",
+                "gedit",
+                "kate",
+                "xed",
+                "mousepad",
+                "nano",
+                "vim",
+                "vi",
+                "xdg-open"
+            };
+
+            foreach (var prog in candidates) {
+                if (Environment.find_program_in_path(prog) != null) {
+                    return prog;
+                }
+            }
+
+            return "gnome-text-editor";
+        }
 
         private ConfigManager() {
             string config_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd");
@@ -52,9 +84,16 @@ namespace VCommander {
             string home = Environment.get_home_dir();
             left_tabs = new string[] { home };
             left_tab_titles = new string[] { "" };
+            left_sort_cols = new string[] { "name" };
+            left_sort_orders = new string[] { "asc" };
             right_tabs = new string[] { home };
             right_tab_titles = new string[] { "" };
-            col_order = new string[] { "name", "type", "size", "mtime" };
+            right_sort_cols = new string[] { "name" };
+            right_sort_orders = new string[] { "asc" };
+            col_order = new string[] { "name", "size", "mtime" };
+
+            viewer_command = detect_default_editor();
+            editor_command = detect_default_editor();
 
             load();
         }
@@ -111,6 +150,18 @@ namespace VCommander {
                         command_shell = shell;
                     }
                 }
+                if (key_file.has_key("General", "ViewerCommand")) {
+                    string vcmd = key_file.get_string("General", "ViewerCommand").strip();
+                    if (vcmd.length > 0) {
+                        viewer_command = vcmd;
+                    }
+                }
+                if (key_file.has_key("General", "EditorCommand")) {
+                    string ecmd = key_file.get_string("General", "EditorCommand").strip();
+                    if (ecmd.length > 0) {
+                        editor_command = ecmd;
+                    }
+                }
                 if (key_file.has_key("Columns", "Order")) {
                     var order = key_file.get_string_list("Columns", "Order");
                     if (order.length > 0) {
@@ -141,8 +192,26 @@ namespace VCommander {
                     var titles = key_file.get_string_list("LeftPanel", "TabTitles");
                     left_tab_titles = titles;
                 }
+                if (key_file.has_key("LeftPanel", "SortCols")) {
+                    var scols = key_file.get_string_list("LeftPanel", "SortCols");
+                    if (scols.length > 0) {
+                        left_sort_cols = scols;
+                    }
+                }
+                if (key_file.has_key("LeftPanel", "SortOrders")) {
+                    var sorders = key_file.get_string_list("LeftPanel", "SortOrders");
+                    if (sorders.length > 0) {
+                        left_sort_orders = sorders;
+                    }
+                }
                 if (key_file.has_key("LeftPanel", "ActiveTab")) {
                     left_active_tab = key_file.get_integer("LeftPanel", "ActiveTab");
+                }
+                if (key_file.has_key("LeftPanel", "ViewModes")) {
+                    var vmodes = key_file.get_string_list("LeftPanel", "ViewModes");
+                    if (vmodes.length > 0) {
+                        left_view_modes = vmodes;
+                    }
                 }
                 if (key_file.has_key("LeftPanel", "BriefView")) {
                     left_brief_view = key_file.get_boolean("LeftPanel", "BriefView");
@@ -162,8 +231,26 @@ namespace VCommander {
                     var titles = key_file.get_string_list("RightPanel", "TabTitles");
                     right_tab_titles = titles;
                 }
+                if (key_file.has_key("RightPanel", "SortCols")) {
+                    var scols = key_file.get_string_list("RightPanel", "SortCols");
+                    if (scols.length > 0) {
+                        right_sort_cols = scols;
+                    }
+                }
+                if (key_file.has_key("RightPanel", "SortOrders")) {
+                    var sorders = key_file.get_string_list("RightPanel", "SortOrders");
+                    if (sorders.length > 0) {
+                        right_sort_orders = sorders;
+                    }
+                }
                 if (key_file.has_key("RightPanel", "ActiveTab")) {
                     right_active_tab = key_file.get_integer("RightPanel", "ActiveTab");
+                }
+                if (key_file.has_key("RightPanel", "ViewModes")) {
+                    var vmodes = key_file.get_string_list("RightPanel", "ViewModes");
+                    if (vmodes.length > 0) {
+                        right_view_modes = vmodes;
+                    }
                 }
                 if (key_file.has_key("RightPanel", "BriefView")) {
                     right_brief_view = key_file.get_boolean("RightPanel", "BriefView");
@@ -192,6 +279,8 @@ namespace VCommander {
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);
                 key_file.set_string("General", "CommandShell", command_shell);
+                key_file.set_string("General", "ViewerCommand", viewer_command.length > 0 ? viewer_command : detect_default_editor());
+                key_file.set_string("General", "EditorCommand", editor_command.length > 0 ? editor_command : detect_default_editor());
 
                 // Columns
                 if (col_order != null && col_order.length > 0) {
@@ -207,6 +296,15 @@ namespace VCommander {
                 if (left_tab_titles != null) {
                     key_file.set_string_list("LeftPanel", "TabTitles", left_tab_titles);
                 }
+                if (left_sort_cols != null && left_sort_cols.length > 0) {
+                    key_file.set_string_list("LeftPanel", "SortCols", left_sort_cols);
+                }
+                if (left_sort_orders != null && left_sort_orders.length > 0) {
+                    key_file.set_string_list("LeftPanel", "SortOrders", left_sort_orders);
+                }
+                if (left_view_modes != null && left_view_modes.length > 0) {
+                    key_file.set_string_list("LeftPanel", "ViewModes", left_view_modes);
+                }
                 key_file.set_integer("LeftPanel", "ActiveTab", left_active_tab);
                 key_file.set_boolean("LeftPanel", "BriefView", left_brief_view);
                 key_file.set_boolean("LeftPanel", "ShowHidden", left_show_hidden);
@@ -215,6 +313,15 @@ namespace VCommander {
                 key_file.set_string_list("RightPanel", "Tabs", right_tabs);
                 if (right_tab_titles != null) {
                     key_file.set_string_list("RightPanel", "TabTitles", right_tab_titles);
+                }
+                if (right_sort_cols != null && right_sort_cols.length > 0) {
+                    key_file.set_string_list("RightPanel", "SortCols", right_sort_cols);
+                }
+                if (right_sort_orders != null && right_sort_orders.length > 0) {
+                    key_file.set_string_list("RightPanel", "SortOrders", right_sort_orders);
+                }
+                if (right_view_modes != null && right_view_modes.length > 0) {
+                    key_file.set_string_list("RightPanel", "ViewModes", right_view_modes);
                 }
                 key_file.set_integer("RightPanel", "ActiveTab", right_active_tab);
                 key_file.set_boolean("RightPanel", "BriefView", right_brief_view);
