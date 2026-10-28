@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="vcmd"
-APP_TITLE="Vala Commander"
+APP_TITLE="vCommander"
 APP_ID="org.vcmd.ValaCommander"
 BIN_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/.local/share/applications"
@@ -19,6 +19,12 @@ copy_files() {
     mkdir -p "${BIN_DIR}"
     cp -f "${APP_NAME}" "${BIN_DIR}/${APP_NAME}"
     chmod 755 "${BIN_DIR}/${APP_NAME}"
+
+    mkdir -p "${HOME}/.local/share/vcmd"
+    if [ -f "data/style.css" ]; then
+        echo "==> Installing application styles to ${HOME}/.local/share/vcmd..."
+        cp -f "data/style.css" "${HOME}/.local/share/vcmd/style.css"
+    fi
 
     if [ -f "${APP_NAME}.svg" ]; then
         echo "==> Installing application icon to ${ICON_DIR}..."

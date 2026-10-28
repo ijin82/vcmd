@@ -8,6 +8,11 @@ namespace VCommander {
         private Gtk.Button cancel_button;
         private Cancellable cancellable;
         private bool is_finished = false;
+        private int64 last_update_time = 0;
+        private uint pending_timeout_id = 0;
+        private string pending_filename = "";
+        private int64 pending_current_bytes = 0;
+        private int64 pending_total_bytes = 0;
 
         public signal void cancelled();
 
@@ -71,6 +76,34 @@ namespace VCommander {
         }
 
         public void update_progress(string current_filename, int64 current_bytes, int64 total_bytes) {
+            pending_filename = current_filename;
+            pending_current_bytes = current_bytes;
+            pending_total_bytes = total_bytes;
+
+            int64 now = GLib.get_monotonic_time();
+            int64 elapsed = now - last_update_time;
+
+            // Update at most 2 times per second (>= 500ms / 500,000 µs), or on initial/completion update
+            if (last_update_time == 0 || elapsed >= 500000 || (total_bytes > 0 && current_bytes >= total_bytes)) {
+                if (pending_timeout_id != 0) {
+                    Source.remove(pending_timeout_id);
+                    pending_timeout_id = 0;
+                }
+                apply_progress(pending_filename, pending_current_bytes, pending_total_bytes);
+                last_update_time = now;
+            } else if (pending_timeout_id == 0) {
+                uint remaining_ms = (uint) ((500000 - elapsed) / 1000);
+                if (remaining_ms < 10) remaining_ms = 10;
+                pending_timeout_id = Timeout.add(remaining_ms, () => {
+                    pending_timeout_id = 0;
+                    apply_progress(pending_filename, pending_current_bytes, pending_total_bytes);
+                    last_update_time = GLib.get_monotonic_time();
+                    return Source.REMOVE;
+                });
+            }
+        }
+
+        private void apply_progress(string current_filename, int64 current_bytes, int64 total_bytes) {
             item_label.label = current_filename;
             if (total_bytes > 0) {
                 double frac = (double) current_bytes / (double) total_bytes;
@@ -86,6 +119,10 @@ namespace VCommander {
         }
 
         public void finish() {
+            if (pending_timeout_id != 0) {
+                Source.remove(pending_timeout_id);
+                pending_timeout_id = 0;
+            }
             is_finished = true;
             close();
         }

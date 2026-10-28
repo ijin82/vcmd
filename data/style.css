@@ -9,8 +9,7 @@
 }
 
 .file-panel.active-panel {
-    border-color: alpha(@accent_color, 0.45);
-    box-shadow: 0 0 0 1px alpha(@accent_color, 0.15);
+    /* Subtle border styling: cursor in file list indicates active panel */
 }
 
 .file-panel.panel-inactive {
@@ -96,8 +95,8 @@ listview,
 listview *,
 row,
 row * {
-    transition: none !important;
-    animation: none !important;
+    transition: none;
+    animation: none;
 }
 
 /* Bottom MC-style Function Key Bar */
@@ -132,5 +131,36 @@ row * {
 
 .fn-key-label {
     font-size: 0.82em;
+}
+
+/* Tagged / Marked files & directories (MC-style) */
+.file-item-tagged {
+    color: #c67c00;
+    font-weight: bold;
+}
+
+@media (prefers-color-scheme: dark) {
+    .file-item-tagged {
+        color: #f6d32d;
+        font-weight: bold;
+    }
+}
+
+.file-item-symlink.file-item-tagged {
+    color: #c67c00;
+    font-weight: bold;
+}
+
+@media (prefers-color-scheme: dark) {
+    .file-item-symlink.file-item-tagged {
+        color: #f6d32d;
+        font-weight: bold;
+    }
+}
+
+:selected .file-item-tagged,
+row:selected .file-item-tagged {
+    color: #f8e45c;
+    font-weight: bold;
 }
 

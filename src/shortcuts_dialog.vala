@@ -17,6 +17,9 @@ namespace VCommander {
             var nav_group = new Adw.PreferencesGroup();
             nav_group.title = "Navigation & Panes";
             add_shortcut_row(nav_group, "Switch Active Pane", "Tab");
+            add_shortcut_row(nav_group, "Tag / Untag File or Folder", "Insert / Right Click");
+            add_shortcut_row(nav_group, "Clear All Tags / Selection", "Double Escape");
+            add_shortcut_row(nav_group, "Select by Mask", "+ (Keypad) / Shift + +");
             add_shortcut_row(nav_group, "Enter Folder / Open File", "Enter / Double Click");
             add_shortcut_row(nav_group, "Go to Parent Directory", "Backspace / Alt + Up");
             add_shortcut_row(nav_group, "Focus Path Entry", "Ctrl + L");
@@ -64,7 +67,8 @@ namespace VCommander {
             add_shortcut_row(gen_group, "Move Files", "F6");
             add_shortcut_row(gen_group, "Rename File / Folder", "Shift + F6");
             add_shortcut_row(gen_group, "Create Folder", "F7");
-            add_shortcut_row(gen_group, "Delete Files", "F8");
+            add_shortcut_row(gen_group, "Delete (Trash)", "Delete / F8");
+            add_shortcut_row(gen_group, "Permanent Delete", "Shift + Delete / Shift + F8");
             add_shortcut_row(gen_group, "Quit Application", "F10 / Ctrl + Q");
             add_shortcut_row(gen_group, "Directory Bookmarks (Stage 5)", "Ctrl + \\");
             add_shortcut_row(gen_group, "Search Files (Stage 6)", "Alt + F7");

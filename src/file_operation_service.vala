@@ -40,6 +40,10 @@ namespace VCommander {
             yield dir.make_directory_async(Priority.DEFAULT, cancellable);
         }
 
+        public static async void trash_file(File file, Cancellable? cancellable = null) throws Error {
+            yield file.trash_async(Priority.DEFAULT, cancellable);
+        }
+
         public static async void delete_recursive(File file, Cancellable? cancellable = null) throws Error {
             var info = yield file.query_info_async(
                 FileAttribute.STANDARD_TYPE,

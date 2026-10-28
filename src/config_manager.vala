@@ -37,6 +37,11 @@ namespace VCommander {
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
         public string command_shell { get; set; default = "/bin/bash"; }
+        public string[] col_order { get; set; }
+        public int col_width_name { get; set; default = 0; }
+        public int col_width_type { get; set; default = 80; }
+        public int col_width_size { get; set; default = 110; }
+        public int col_width_mtime { get; set; default = 175; }
 
         private ConfigManager() {
             string config_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd");
@@ -49,6 +54,7 @@ namespace VCommander {
             left_tab_titles = new string[] { "" };
             right_tabs = new string[] { home };
             right_tab_titles = new string[] { "" };
+            col_order = new string[] { "name", "type", "size", "mtime" };
 
             load();
         }
@@ -104,6 +110,24 @@ namespace VCommander {
                     if (shell.length > 0) {
                         command_shell = shell;
                     }
+                }
+                if (key_file.has_key("Columns", "Order")) {
+                    var order = key_file.get_string_list("Columns", "Order");
+                    if (order.length > 0) {
+                        col_order = order;
+                    }
+                }
+                if (key_file.has_key("Columns", "WidthName")) {
+                    col_width_name = key_file.get_integer("Columns", "WidthName");
+                }
+                if (key_file.has_key("Columns", "WidthType")) {
+                    col_width_type = key_file.get_integer("Columns", "WidthType");
+                }
+                if (key_file.has_key("Columns", "WidthSize")) {
+                    col_width_size = key_file.get_integer("Columns", "WidthSize");
+                }
+                if (key_file.has_key("Columns", "WidthMTime")) {
+                    col_width_mtime = key_file.get_integer("Columns", "WidthMTime");
                 }
 
                 // Left Panel
@@ -168,6 +192,15 @@ namespace VCommander {
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);
                 key_file.set_string("General", "CommandShell", command_shell);
+
+                // Columns
+                if (col_order != null && col_order.length > 0) {
+                    key_file.set_string_list("Columns", "Order", col_order);
+                }
+                key_file.set_integer("Columns", "WidthName", col_width_name);
+                key_file.set_integer("Columns", "WidthType", col_width_type);
+                key_file.set_integer("Columns", "WidthSize", col_width_size);
+                key_file.set_integer("Columns", "WidthMTime", col_width_mtime);
 
                 // Left Panel
                 key_file.set_string_list("LeftPanel", "Tabs", left_tabs);

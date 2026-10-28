@@ -10,6 +10,7 @@ namespace VCommander {
         public signal void error_occurred(string title, string message);
         public signal void directory_changed(File new_dir);
         public signal void command_char_typed(string ch);
+        public signal void columns_layout_changed(FilePanel origin_panel);
 
         public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -118,6 +119,32 @@ namespace VCommander {
             return page != null ? page.get_selected_item() : null;
         }
 
+        public GenericArray<FileItem> get_tagged_items() {
+            var page = get_current_page();
+            return page != null ? page.get_tagged_items() : new GenericArray<FileItem>();
+        }
+
+        public void clear_tags() {
+            var page = get_current_page();
+            if (page != null) {
+                page.clear_tags();
+            }
+        }
+
+        public void toggle_tag_current_item() {
+            var page = get_current_page();
+            if (page != null) {
+                page.toggle_tag_current_item();
+            }
+        }
+
+        public void select_by_mask(string pattern, bool include_dirs) {
+            var page = get_current_page();
+            if (page != null) {
+                page.select_by_mask(pattern, include_dirs);
+            }
+        }
+
         public void open_new_tab(File? dir = null, bool brief = false, bool hidden = false, string? custom_title = null) {
             File target_dir = dir;
             if (target_dir == null) {
@@ -153,6 +180,9 @@ namespace VCommander {
             });
             page_widget.command_char_typed.connect((ch) => {
                 command_char_typed(ch);
+            });
+            page_widget.columns_layout_changed.connect(() => {
+                columns_layout_changed(this);
             });
 
             var page = tab_view.append(page_widget);
@@ -406,6 +436,16 @@ namespace VCommander {
                 var p = tab_view.get_nth_page(i);
                 var pw = (FilePanelPage) p.child;
                 pw.update_brief_column_width();
+            }
+        }
+
+        public void update_columns_layout(FilePanelPage? exclude_page = null) {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                if (pw != exclude_page) {
+                    pw.update_columns_layout();
+                }
             }
         }
 

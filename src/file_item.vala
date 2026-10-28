@@ -15,6 +15,7 @@ namespace VCommander {
 
         public bool is_calculating_size { get; set; default = false; }
         public int64 custom_size { get; set; default = -1; }
+        public bool is_tagged { get; set; default = false; }
 
         public string formatted_size {
             owned get {

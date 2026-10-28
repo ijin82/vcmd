@@ -46,17 +46,194 @@ namespace VCommander {
             });
         }
 
+        private const string DEFAULT_STYLE_CSS = """
+/* Vala Commander (vcmd) Styles */
+
+.file-panel {
+    border: 1px solid alpha(@borders, 0.4);
+    border-radius: 8px;
+    margin: 4px;
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+    background-color: @view_bg_color;
+}
+
+.file-panel.active-panel {
+    /* Subtle border styling: cursor in file list indicates active panel */
+}
+
+.file-panel.panel-inactive {
+    border-color: alpha(@borders, 0.25);
+}
+
+.file-panel tabbar {
+    border-bottom: 1px solid alpha(@borders, 0.3);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+}
+
+.panel-header {
+    padding: 6px 8px;
+    background-color: alpha(@headerbar_bg_color, 0.6);
+    border-bottom: 1px solid alpha(@borders, 0.3);
+}
+
+.active-panel .panel-header {
+    background-color: alpha(@headerbar_bg_color, 0.85);
+}
+
+.filter-box {
+    padding: 4px 8px;
+    background-color: alpha(@headerbar_bg_color, 0.75);
+    border-bottom: 1px solid alpha(@borders, 0.3);
+}
+
+.active-panel .filter-box {
+    background-color: alpha(@headerbar_bg_color, 0.95);
+    border-bottom: 1px solid alpha(@accent_color, 0.4);
+}
+
+.panel-status-bar {
+    padding: 4px 8px;
+    font-size: 0.85em;
+    color: @secondary_color;
+    border-top: 1px solid alpha(@borders, 0.2);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+}
+
+.file-list-view {
+    font-family: monospace;
+}
+
+.file-item-parent {
+    font-weight: bold;
+    color: @accent_color;
+}
+
+.file-item-dir {
+    font-weight: bold;
+}
+
+.file-item-symlink {
+    color: #26a269;
+    font-style: italic;
+}
+
+:selected .file-item-symlink {
+    color: inherit;
+}
+
+.command-bar {
+    padding: 0;
+}
+
+.command-entry {
+    font-family: monospace;
+}
+
+.brief-item-box {
+    padding: 3px 8px;
+    border-radius: 4px;
+    min-width: 170px;
+}
+
+columnview,
+columnview *,
+gridview,
+gridview *,
+listview,
+listview *,
+row,
+row * {
+    transition: none;
+    animation: none;
+}
+
+.function-bar {
+    padding: 3px 4px 4px 4px;
+    background-color: alpha(@headerbar_bg_color, 0.5);
+    border-top: 1px solid alpha(@borders, 0.25);
+}
+
+.fn-button {
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid alpha(@borders, 0.3);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.fn-button:hover {
+    background-color: alpha(@accent_color, 0.15);
+    border-color: alpha(@accent_color, 0.4);
+}
+
+.fn-button:active {
+    background-color: alpha(@accent_color, 0.3);
+}
+
+.fn-key-badge {
+    font-weight: bold;
+    color: @accent_color;
+    font-size: 0.82em;
+}
+
+.fn-key-label {
+    font-size: 0.82em;
+}
+
+.file-item-tagged {
+    color: #c67c00;
+    font-weight: bold;
+}
+
+@media (prefers-color-scheme: dark) {
+    .file-item-tagged {
+        color: #f6d32d;
+        font-weight: bold;
+    }
+}
+
+.file-item-symlink.file-item-tagged {
+    color: #c67c00;
+    font-weight: bold;
+}
+
+@media (prefers-color-scheme: dark) {
+    .file-item-symlink.file-item-tagged {
+        color: #f6d32d;
+        font-weight: bold;
+    }
+}
+
+:selected .file-item-tagged,
+row:selected .file-item-tagged {
+    color: #f8e45c;
+    font-weight: bold;
+}
+""";
+
         private void load_css_styles() {
             var provider = new Gtk.CssProvider();
-            var css_file = File.new_for_path("data/style.css");
-            if (css_file.query_exists()) {
-                provider.load_from_file(css_file);
-                Gtk.StyleContext.add_provider_for_display(
-                    Gdk.Display.get_default(),
-                    provider,
-                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-                );
+            provider.load_from_string(DEFAULT_STYLE_CSS);
+
+            // Optional external style overrides
+            string[] search_paths = {
+                Path.build_filename(Environment.get_user_data_dir(), "vcmd", "style.css"),
+                "data/style.css"
+            };
+
+            foreach (var path in search_paths) {
+                var file = File.new_for_path(path);
+                if (file.query_exists()) {
+                    provider.load_from_file(file);
+                    break;
+                }
             }
+
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            );
 
             font_css_provider = new Gtk.CssProvider();
             Gtk.StyleContext.add_provider_for_display(
@@ -120,6 +297,17 @@ namespace VCommander {
             left_panel.error_occurred.connect(show_error_dialog);
             right_panel.error_occurred.connect(show_error_dialog);
 
+            left_panel.columns_layout_changed.connect((origin) => {
+                var cur_page = origin.get_current_page();
+                origin.update_columns_layout(cur_page);
+                right_panel.update_columns_layout();
+            });
+            right_panel.columns_layout_changed.connect((origin) => {
+                var cur_page = origin.get_current_page();
+                origin.update_columns_layout(cur_page);
+                left_panel.update_columns_layout();
+            });
+
             paned.start_child = left_panel;
             paned.end_child = right_panel;
             paned.position = config.paned_position > 0 ? config.paned_position : 512;
@@ -176,7 +364,7 @@ namespace VCommander {
             fn_bar.append(create_fn_button("5", "Copy", () => { on_f5_copy(); }));
             fn_bar.append(create_fn_button("6", "Move", () => { on_f6_move(); }));
             fn_bar.append(create_fn_button("7", "Mkdir", () => { on_f7_mkdir(); }));
-            fn_bar.append(create_fn_button("8", "Delete", () => { on_f8_delete(); }));
+            fn_bar.append(create_fn_button("8", "Delete", () => { on_delete(false); }));
             fn_bar.append(create_fn_button("10", "Quit", () => { close(); }));
 
             parent_box.append(fn_bar);
@@ -228,7 +416,13 @@ namespace VCommander {
                         return Gdk.EVENT_STOP;
                     }
 
+                    // Double Escape: clear all tags / marks in the active panel
                     if (keyval == Gdk.Key.Escape) {
+                        if (active_panel != null && !cmd_entry.has_focus) {
+                            active_panel.clear_tags();
+                            active_panel.grab_focus_to_list();
+                            return Gdk.EVENT_STOP;
+                        }
                         return Gdk.EVENT_PROPAGATE;
                     }
                 }
@@ -258,6 +452,24 @@ namespace VCommander {
                         return Source.REMOVE;
                     });
                     return Gdk.EVENT_PROPAGATE;
+                }
+
+                // Insert / KP_Insert: toggle tag on item in active panel and advance cursor
+                if ((keyval == Gdk.Key.Insert || keyval == Gdk.Key.KP_Insert) &&
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    if (active_panel != null && !cmd_entry.has_focus) {
+                        active_panel.toggle_tag_current_item();
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
+                // Plus on keypad (KP_Add) or Shift++ in number row (plus): Select by mask
+                if ((keyval == Gdk.Key.KP_Add || keyval == Gdk.Key.plus) &&
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    if (active_panel != null && !active_panel.is_filter_active && !cmd_entry.has_focus) {
+                        prompt_select_by_mask();
+                        return Gdk.EVENT_STOP;
+                    }
                 }
 
                 // Ctrl+Shift+H: toggle window header bar visibility
@@ -420,9 +632,21 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
 
-                // F8: Delete
+                // Delete or Shift+Delete / KP_Delete
+                if ((keyval == Gdk.Key.Delete || keyval == Gdk.Key.KP_Delete) &&
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    if (cmd_entry.has_focus && cmd_entry.text.length > 0) {
+                        return Gdk.EVENT_PROPAGATE;
+                    }
+                    bool permanent = (state & Gdk.ModifierType.SHIFT_MASK) != 0;
+                    on_delete(permanent);
+                    return Gdk.EVENT_STOP;
+                }
+
+                // F8 / Shift+F8: Delete
                 if (keyval == Gdk.Key.F8) {
-                    on_f8_delete();
+                    bool permanent = (state & Gdk.ModifierType.SHIFT_MASK) != 0;
+                    on_delete(permanent);
                     return Gdk.EVENT_STOP;
                 }
 
@@ -715,6 +939,61 @@ namespace VCommander {
             opp.load_directory(active_panel.current_directory, target_name);
         }
 
+        private void prompt_select_by_mask() {
+            if (active_panel == null) return;
+
+            var dialog = new Adw.AlertDialog("Select by Mask", "Enter filename mask (e.g. *.lst, *abc*):");
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("select", "Select");
+            dialog.set_default_response("select");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("select", Adw.ResponseAppearance.SUGGESTED);
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+            box.margin_start = 12;
+            box.margin_end = 12;
+            box.margin_top = 8;
+            box.margin_bottom = 8;
+
+            var entry = new Gtk.Entry();
+            entry.text = "*";
+            entry.placeholder_text = "*.lst, *abc*";
+
+            var check_dirs = new Gtk.CheckButton.with_label("Apply to folders");
+            check_dirs.active = false;
+
+            box.append(entry);
+            box.append(check_dirs);
+            dialog.set_extra_child(box);
+
+            entry.activate.connect(() => {
+                string pattern = entry.text.strip();
+                bool inc_dirs = check_dirs.active;
+                dialog.force_close();
+                if (pattern.length > 0 && active_panel != null) {
+                    active_panel.select_by_mask(pattern, inc_dirs);
+                    active_panel.grab_focus_to_list();
+                }
+            });
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "select") {
+                    string pattern = entry.text.strip();
+                    if (pattern.length > 0 && active_panel != null) {
+                        active_panel.select_by_mask(pattern, check_dirs.active);
+                    }
+                }
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            });
+
+            GLib.Idle.add(() => {
+                entry.grab_focus();
+                entry.select_region(0, -1);
+                return GLib.Source.REMOVE;
+            });
+        }
+
         private void on_f7_mkdir() {
             if (active_panel == null || active_panel.current_directory == null) return;
             var current_dir = active_panel.current_directory;
@@ -734,23 +1013,34 @@ namespace VCommander {
             entry.margin_bottom = 8;
             dialog.set_extra_child(entry);
 
+            var target_panel = active_panel;
+            bool action_executed = false;
+
             entry.activate.connect(() => {
+                if (action_executed) return;
+                action_executed = true;
                 string name = entry.text.strip();
                 dialog.force_close();
                 if (name.length > 0) {
-                    do_make_directory.begin(current_dir, name);
+                    do_make_directory.begin(target_panel, current_dir, name);
+                } else {
+                    target_panel.grab_focus_to_list();
                 }
             });
 
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
+                if (action_executed) return;
                 if (resp == "create") {
+                    action_executed = true;
                     string name = entry.text.strip();
                     if (name.length > 0) {
-                        do_make_directory.begin(current_dir, name);
+                        do_make_directory.begin(target_panel, current_dir, name);
+                    } else {
+                        target_panel.grab_focus_to_list();
                     }
                 } else {
-                    if (active_panel != null) active_panel.grab_focus_to_list();
+                    target_panel.grab_focus_to_list();
                 }
             });
 
@@ -760,26 +1050,63 @@ namespace VCommander {
             });
         }
 
-        private async void do_make_directory(File parent_dir, string name) {
+        private async void do_make_directory(FilePanel panel, File parent_dir, string name) {
             if (name.contains("/")) {
                 show_error_dialog("Invalid Folder Name", "Folder name cannot contain '/' path separators.");
+                panel.grab_focus_to_list();
                 return;
             }
             var target = parent_dir.get_child(name);
             try {
                 yield FileOperationService.make_directory(target);
-                active_panel.load_directory(parent_dir, name);
-                var opp = get_opposite_panel();
+                panel.load_directory(parent_dir, name);
+                activate_panel(panel, true);
+                var opp = (panel == left_panel) ? right_panel : left_panel;
                 if (opp.current_directory != null && opp.current_directory.equal(parent_dir)) {
                     opp.refresh();
                 }
+                panel.grab_focus_to_list();
             } catch (Error e) {
                 show_error_dialog("Create Folder Error", FileOperationService.format_error(e, "create folder"));
+                panel.grab_focus_to_list();
             }
         }
 
-        private void on_f8_delete() {
+        private void on_delete(bool permanent_default = false) {
             if (active_panel == null) return;
+
+            var tagged_items = active_panel.get_tagged_items();
+            if (tagged_items.length > 0) {
+                var dialog = new Adw.AlertDialog(
+                    "Delete Items",
+                    @"Delete $(tagged_items.length) selected items?"
+                );
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("delete", "Delete");
+                dialog.set_default_response("cancel");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+                box.halign = Gtk.Align.CENTER;
+                box.margin_top = 8;
+                box.margin_bottom = 4;
+                var perm_check = new Gtk.CheckButton.with_label("Delete permanently (bypass Trash)");
+                perm_check.active = permanent_default;
+                box.append(perm_check);
+                dialog.set_extra_child(box);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "delete") {
+                        do_delete_multiple_items.begin(tagged_items, perm_check.active);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
             var item = active_panel.get_selected_item();
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Delete", "Cannot delete parent directory '..'.");
@@ -788,47 +1115,130 @@ namespace VCommander {
 
             string item_name = item.display_name;
             string desc = item.is_dir ?
-                @"Are you sure you want to permanently delete the folder '$item_name' and all its contents?" :
-                @"Are you sure you want to permanently delete the file '$item_name'?";
+                @"Delete folder '$item_name' and all its contents?" :
+                @"Delete file '$item_name'?";
 
-            var dialog = new Adw.AlertDialog("Confirm Deletion", desc);
+            var dialog = new Adw.AlertDialog("Delete Item", desc);
             dialog.add_response("cancel", "Cancel");
             dialog.add_response("delete", "Delete");
             dialog.set_default_response("cancel");
             dialog.set_close_response("cancel");
             dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE);
 
+            var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            box.halign = Gtk.Align.CENTER;
+            box.margin_top = 8;
+            box.margin_bottom = 4;
+            var perm_check = new Gtk.CheckButton.with_label("Delete permanently (bypass Trash)");
+            perm_check.active = permanent_default;
+            box.append(perm_check);
+            dialog.set_extra_child(box);
+
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
                 if (resp == "delete") {
-                    do_delete_item.begin(item.file);
+                    do_delete_item.begin(item.file, perm_check.active);
                 } else {
                     if (active_panel != null) active_panel.grab_focus_to_list();
                 }
             });
         }
 
-        private async void do_delete_item(File target) {
+        private async void do_delete_item(File target, bool permanent) {
             try {
-                yield FileOperationService.delete_recursive(target);
+                if (permanent) {
+                    yield FileOperationService.delete_recursive(target);
+                } else {
+                    yield FileOperationService.trash_file(target);
+                }
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
             } catch (Error e) {
-                show_error_dialog("Delete Error", FileOperationService.format_error(e, "delete"));
+                show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
+            }
+        }
+
+        private async void do_delete_multiple_items(GenericArray<FileItem> items, bool permanent) {
+            var cancellable = new Cancellable();
+            string op_title = permanent ? @"Permanently deleting $(items.length) items" : @"Moving $(items.length) items to Trash";
+            var dlg = new OperationProgressDialog(op_title, cancellable);
+            dlg.present();
+
+            try {
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    var it = items[i];
+                    dlg.update_progress(it.display_name, i, items.length);
+                    if (permanent) {
+                        yield FileOperationService.delete_recursive(it.file, cancellable);
+                    } else {
+                        yield FileOperationService.trash_file(it.file, cancellable);
+                    }
+                }
+                dlg.finish();
+                if (!cancellable.is_cancelled() && active_panel != null) {
+                    active_panel.clear_tags();
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
             }
         }
 
         private void on_f5_copy() {
             if (active_panel == null) return;
+
+            var tagged_items = active_panel.get_tagged_items();
+            var opp = get_opposite_panel();
+            File? dest_dir = opp.current_directory;
+
+            if (tagged_items.length > 0) {
+                if (dest_dir == null) {
+                    show_error_dialog("Copy Error", "Opposite panel has no directory open.");
+                    return;
+                }
+                if (active_panel.current_directory != null && dest_dir.equal(active_panel.current_directory)) {
+                    show_error_dialog("Copy Error", "Cannot copy selected files: destination is the same directory.");
+                    return;
+                }
+
+                string dest_path = dest_dir.get_path();
+                if (dest_path == null) dest_path = dest_dir.get_parse_name();
+
+                var dialog = new Adw.AlertDialog("Copy Selected Items", @"Copy $(tagged_items.length) items to:\n$dest_path");
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("copy", "Copy");
+                dialog.set_default_response("copy");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("copy", Adw.ResponseAppearance.SUGGESTED);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "copy") {
+                        do_copy_multiple_items.begin(tagged_items, dest_dir);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
             var item = active_panel.get_selected_item();
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Copy", "Please select a file or folder to copy.");
                 return;
             }
 
-            var opp = get_opposite_panel();
-            File default_dest_dir = (opp.current_directory != null) ? opp.current_directory : active_panel.current_directory;
+            File default_dest_dir = (dest_dir != null) ? dest_dir : active_panel.current_directory;
             File default_target_file = default_dest_dir.get_child(item.name);
 
             string default_dest_path = default_target_file.get_path();
@@ -949,16 +1359,102 @@ namespace VCommander {
             }
         }
 
+        private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
+            dlg.present();
+
+            var tracker = new CopyProgressTracker();
+            try {
+                dlg.update_progress(@"Calculating size of $(items.length) items...", 0, 0);
+                int64 total_size = 0;
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    total_size += yield FileOperationService.calculate_total_size(items[i].file, cancellable);
+                }
+                tracker.total_bytes = total_size;
+                dlg.update_progress(@"Starting copy...", 0, total_size);
+
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    var it = items[i];
+                    var dest_child = dest_dir.get_child(it.name);
+
+                    yield FileOperationService.copy_file_or_dir(
+                        it.file,
+                        dest_child,
+                        true,
+                        cancellable,
+                        (cur_filename, current_b, total_b) => {
+                            dlg.update_progress(cur_filename, current_b, total_b);
+                        },
+                        tracker
+                    );
+                }
+
+                dlg.finish();
+                if (!cancellable.is_cancelled() && active_panel != null) {
+                    active_panel.clear_tags();
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Copy Error", FileOperationService.format_error(e, "copy"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            }
+        }
+
         private void on_f6_move() {
             if (active_panel == null) return;
+
+            var tagged_items = active_panel.get_tagged_items();
+            var opp = get_opposite_panel();
+            File? dest_dir = opp.current_directory;
+
+            if (tagged_items.length > 0) {
+                if (dest_dir == null) {
+                    show_error_dialog("Move Error", "Opposite panel has no directory open.");
+                    return;
+                }
+                if (active_panel.current_directory != null && dest_dir.equal(active_panel.current_directory)) {
+                    show_error_dialog("Move Error", "Cannot move selected files: destination is the same directory.");
+                    return;
+                }
+
+                string dest_path = dest_dir.get_path();
+                if (dest_path == null) dest_path = dest_dir.get_parse_name();
+
+                var dialog = new Adw.AlertDialog("Move Selected Items", @"Move $(tagged_items.length) items to:\n$dest_path");
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("move", "Move");
+                dialog.set_default_response("move");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("move", Adw.ResponseAppearance.SUGGESTED);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "move") {
+                        do_move_multiple_items.begin(tagged_items, dest_dir);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
             var item = active_panel.get_selected_item();
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Move", "Please select a file or folder to move.");
                 return;
             }
 
-            var opp = get_opposite_panel();
-            File default_dest_dir = (opp.current_directory != null) ? opp.current_directory : active_panel.current_directory;
+            File default_dest_dir = (dest_dir != null) ? dest_dir : active_panel.current_directory;
             File default_target_file = default_dest_dir.get_child(item.name);
 
             string default_dest_path = default_target_file.get_path();
@@ -1139,6 +1635,39 @@ namespace VCommander {
                 if (active_panel != null) active_panel.grab_focus_to_list();
             } catch (Error e) {
                 show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
+            }
+        }
+
+        private async void do_move_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
+            dlg.present();
+
+            try {
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    var it = items[i];
+                    var dest_child = dest_dir.get_child(it.name);
+
+                    dlg.update_progress(it.display_name, i, items.length);
+                    yield FileOperationService.move_file_or_dir(it.file, dest_child, true, cancellable);
+                }
+
+                dlg.finish();
+                if (!cancellable.is_cancelled() && active_panel != null) {
+                    active_panel.clear_tags();
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
             }
         }
 
