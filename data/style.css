@@ -1,0 +1,72 @@
+/* Vala Commander (vcmd) Styles */
+
+.file-panel {
+    border: 1px solid alpha(@borders, 0.4);
+    border-radius: 8px;
+    margin: 4px;
+    transition: border-color 200ms ease, box-shadow 200ms ease;
+    background-color: @view_bg_color;
+}
+
+.file-panel.active-panel {
+    /* Subtle border styling: cursor in file list indicates active panel */
+}
+
+.file-panel tabbar {
+    border-bottom: 1px solid alpha(@borders, 0.3);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+}
+
+.panel-header {
+    padding: 6px 8px;
+    background-color: alpha(@headerbar_bg_color, 0.6);
+    border-bottom: 1px solid alpha(@borders, 0.3);
+}
+
+.active-panel .panel-header {
+    background-color: alpha(@headerbar_bg_color, 0.85);
+}
+
+.panel-status-bar {
+    padding: 4px 8px;
+    font-size: 0.85em;
+    color: @secondary_color;
+    border-top: 1px solid alpha(@borders, 0.2);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+}
+
+.file-list-view {
+    font-family: monospace;
+}
+
+.file-item-parent {
+    font-weight: bold;
+    color: @accent_color;
+}
+
+.file-item-dir {
+    font-weight: bold;
+}
+
+.command-bar {
+    padding: 6px 10px;
+    background-color: alpha(@headerbar_bg_color, 0.7);
+    border-top: 1px solid alpha(@borders, 0.3);
+}
+
+.command-prompt {
+    font-family: monospace;
+    font-weight: bold;
+    color: @accent_color;
+    margin-right: 4px;
+}
+
+.command-entry {
+    font-family: monospace;
+}
+
+.brief-item-box {
+    padding: 3px 8px;
+    border-radius: 4px;
+    min-width: 170px;
+}

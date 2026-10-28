@@ -1,0 +1,144 @@
+namespace VCommander {
+
+    public class ConfigManager : Object {
+        private static ConfigManager? _instance = null;
+        public static ConfigManager get_instance() {
+            if (_instance == null) {
+                _instance = new ConfigManager();
+            }
+            return _instance;
+        }
+
+        private string config_path;
+        private KeyFile key_file;
+
+        // Configuration fields
+        public int window_width { get; set; default = 1024; }
+        public int window_height { get; set; default = 680; }
+        public bool is_maximized { get; set; default = false; }
+        public int paned_position { get; set; default = 512; }
+        public string active_pane { get; set; default = "left"; }
+
+        public string[] left_tabs { get; set; }
+        public int left_active_tab { get; set; default = 0; }
+        public bool left_brief_view { get; set; default = false; }
+        public bool left_show_hidden { get; set; default = false; }
+
+        public string[] right_tabs { get; set; }
+        public int right_active_tab { get; set; default = 0; }
+        public bool right_brief_view { get; set; default = false; }
+        public bool right_show_hidden { get; set; default = false; }
+
+        private ConfigManager() {
+            string config_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd");
+            config_path = Path.build_filename(config_dir, "config");
+            key_file = new KeyFile();
+
+            // Default tabs
+            string home = Environment.get_home_dir();
+            left_tabs = new string[] { home };
+            right_tabs = new string[] { home };
+
+            load();
+        }
+
+        public void load() {
+            var file = File.new_for_path(config_path);
+            if (!file.query_exists()) {
+                return;
+            }
+
+            try {
+                key_file.load_from_file(config_path, KeyFileFlags.NONE);
+
+                // Window settings
+                if (key_file.has_key("Window", "Width")) {
+                    window_width = key_file.get_integer("Window", "Width");
+                }
+                if (key_file.has_key("Window", "Height")) {
+                    window_height = key_file.get_integer("Window", "Height");
+                }
+                if (key_file.has_key("Window", "IsMaximized")) {
+                    is_maximized = key_file.get_boolean("Window", "IsMaximized");
+                }
+                if (key_file.has_key("Window", "PanedPosition")) {
+                    paned_position = key_file.get_integer("Window", "PanedPosition");
+                }
+                if (key_file.has_key("Window", "ActivePane")) {
+                    active_pane = key_file.get_string("Window", "ActivePane");
+                }
+
+                // Left Panel
+                if (key_file.has_key("LeftPanel", "Tabs")) {
+                    var tabs = key_file.get_string_list("LeftPanel", "Tabs");
+                    if (tabs.length > 0) {
+                        left_tabs = tabs;
+                    }
+                }
+                if (key_file.has_key("LeftPanel", "ActiveTab")) {
+                    left_active_tab = key_file.get_integer("LeftPanel", "ActiveTab");
+                }
+                if (key_file.has_key("LeftPanel", "BriefView")) {
+                    left_brief_view = key_file.get_boolean("LeftPanel", "BriefView");
+                }
+                if (key_file.has_key("LeftPanel", "ShowHidden")) {
+                    left_show_hidden = key_file.get_boolean("LeftPanel", "ShowHidden");
+                }
+
+                // Right Panel
+                if (key_file.has_key("RightPanel", "Tabs")) {
+                    var tabs = key_file.get_string_list("RightPanel", "Tabs");
+                    if (tabs.length > 0) {
+                        right_tabs = tabs;
+                    }
+                }
+                if (key_file.has_key("RightPanel", "ActiveTab")) {
+                    right_active_tab = key_file.get_integer("RightPanel", "ActiveTab");
+                }
+                if (key_file.has_key("RightPanel", "BriefView")) {
+                    right_brief_view = key_file.get_boolean("RightPanel", "BriefView");
+                }
+                if (key_file.has_key("RightPanel", "ShowHidden")) {
+                    right_show_hidden = key_file.get_boolean("RightPanel", "ShowHidden");
+                }
+            } catch (Error e) {
+                warning("Failed to load configuration: %s", e.message);
+            }
+        }
+
+        public void save() {
+            try {
+                // Window
+                key_file.set_integer("Window", "Width", window_width);
+                key_file.set_integer("Window", "Height", window_height);
+                key_file.set_boolean("Window", "IsMaximized", is_maximized);
+                key_file.set_integer("Window", "PanedPosition", paned_position);
+                key_file.set_string("Window", "ActivePane", active_pane);
+
+                // Left Panel
+                key_file.set_string_list("LeftPanel", "Tabs", left_tabs);
+                key_file.set_integer("LeftPanel", "ActiveTab", left_active_tab);
+                key_file.set_boolean("LeftPanel", "BriefView", left_brief_view);
+                key_file.set_boolean("LeftPanel", "ShowHidden", left_show_hidden);
+
+                // Right Panel
+                key_file.set_string_list("RightPanel", "Tabs", right_tabs);
+                key_file.set_integer("RightPanel", "ActiveTab", right_active_tab);
+                key_file.set_boolean("RightPanel", "BriefView", right_brief_view);
+                key_file.set_boolean("RightPanel", "ShowHidden", right_show_hidden);
+
+                // Ensure directory exists
+                string config_dir = Path.get_dirname(config_path);
+                var dir = File.new_for_path(config_dir);
+                if (!dir.query_exists()) {
+                    dir.make_directory_with_parents(null);
+                }
+
+                string data = key_file.to_data();
+                FileUtils.set_contents(config_path, data);
+            } catch (Error e) {
+                warning("Failed to save configuration: %s", e.message);
+            }
+        }
+    }
+}
