@@ -65,6 +65,13 @@ namespace VCommander {
             title_label.add_css_class("title");
             header_bar.title_widget = title_label;
 
+            var preferences_button = new Gtk.Button.from_icon_name("emblem-system-symbolic");
+            preferences_button.tooltip_text = "Preferences (Ctrl+,)";
+            preferences_button.clicked.connect(() => {
+                prompt_preferences_dialog();
+            });
+            header_bar.pack_end(preferences_button);
+
             var help_button = new Gtk.Button.from_icon_name("help-about-symbolic");
             help_button.tooltip_text = "Keyboard Shortcuts & Controls (F1)";
             help_button.clicked.connect(() => {
@@ -80,8 +87,8 @@ namespace VCommander {
             paned.vexpand = true;
             paned.wide_handle = true;
 
-            left_panel = new FilePanel(config.left_tabs, config.left_active_tab, config.left_brief_view, config.left_show_hidden);
-            right_panel = new FilePanel(config.right_tabs, config.right_active_tab, config.right_brief_view, config.right_show_hidden);
+            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.left_show_hidden);
+            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.right_show_hidden);
 
             left_panel.panel_activated.connect(on_panel_activated);
             right_panel.panel_activated.connect(on_panel_activated);
@@ -175,22 +182,6 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Ctrl+Page_Up: previous tab in active panel
-                if (keyval == Gdk.Key.Page_Up && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    if (active_panel != null) {
-                        active_panel.select_previous_tab();
-                    }
-                    return Gdk.EVENT_STOP;
-                }
-
-                // Ctrl+Page_Down: next tab in active panel
-                if (keyval == Gdk.Key.Page_Down && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    if (active_panel != null) {
-                        active_panel.select_next_tab();
-                    }
-                    return Gdk.EVENT_STOP;
-                }
-
                 // Alt+T: toggle Brief / Full view mode for active panel
                 if (latin_key == Gdk.Key.t && (state & Gdk.ModifierType.ALT_MASK) != 0) {
                     if (active_panel != null) {
@@ -240,6 +231,12 @@ namespace VCommander {
                 // F1: show Shortcuts Dialog
                 if (keyval == Gdk.Key.F1) {
                     ShortcutsDialog.show(this);
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+,: show Preferences Dialog
+                if (latin_key == Gdk.Key.comma && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                    prompt_preferences_dialog();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -470,12 +467,14 @@ namespace VCommander {
 
             // Left panel state
             config.left_tabs = left_panel.get_tab_paths();
+            config.left_tab_titles = left_panel.get_tab_titles();
             config.left_active_tab = left_panel.get_active_tab_index();
             config.left_brief_view = left_panel.is_brief_view;
             config.left_show_hidden = left_panel.show_hidden;
 
             // Right panel state
             config.right_tabs = right_panel.get_tab_paths();
+            config.right_tab_titles = right_panel.get_tab_titles();
             config.right_active_tab = right_panel.get_active_tab_index();
             config.right_brief_view = right_panel.is_brief_view;
             config.right_show_hidden = right_panel.show_hidden;
@@ -486,6 +485,16 @@ namespace VCommander {
         private bool on_close_requested() {
             save_state();
             return false;
+        }
+
+        public void prompt_preferences_dialog() {
+            PreferencesDialog.show(this, this);
+        }
+
+        public void apply_preferences() {
+            var config = ConfigManager.get_instance();
+            left_panel.set_path_toolbar_visible(config.show_path_toolbar);
+            right_panel.set_path_toolbar_visible(config.show_path_toolbar);
         }
 
         public override void unmap() {

@@ -20,14 +20,18 @@ namespace VCommander {
         public string active_pane { get; set; default = "left"; }
 
         public string[] left_tabs { get; set; }
+        public string[] left_tab_titles { get; set; }
         public int left_active_tab { get; set; default = 0; }
         public bool left_brief_view { get; set; default = false; }
         public bool left_show_hidden { get; set; default = false; }
 
         public string[] right_tabs { get; set; }
+        public string[] right_tab_titles { get; set; }
         public int right_active_tab { get; set; default = 0; }
         public bool right_brief_view { get; set; default = false; }
         public bool right_show_hidden { get; set; default = false; }
+
+        public bool show_path_toolbar { get; set; default = true; }
 
         private ConfigManager() {
             string config_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd");
@@ -37,7 +41,9 @@ namespace VCommander {
             // Default tabs
             string home = Environment.get_home_dir();
             left_tabs = new string[] { home };
+            left_tab_titles = new string[] { "" };
             right_tabs = new string[] { home };
+            right_tab_titles = new string[] { "" };
 
             load();
         }
@@ -68,12 +74,21 @@ namespace VCommander {
                     active_pane = key_file.get_string("Window", "ActivePane");
                 }
 
+                // General settings
+                if (key_file.has_key("General", "ShowPathToolbar")) {
+                    show_path_toolbar = key_file.get_boolean("General", "ShowPathToolbar");
+                }
+
                 // Left Panel
                 if (key_file.has_key("LeftPanel", "Tabs")) {
                     var tabs = key_file.get_string_list("LeftPanel", "Tabs");
                     if (tabs.length > 0) {
                         left_tabs = tabs;
                     }
+                }
+                if (key_file.has_key("LeftPanel", "TabTitles")) {
+                    var titles = key_file.get_string_list("LeftPanel", "TabTitles");
+                    left_tab_titles = titles;
                 }
                 if (key_file.has_key("LeftPanel", "ActiveTab")) {
                     left_active_tab = key_file.get_integer("LeftPanel", "ActiveTab");
@@ -91,6 +106,10 @@ namespace VCommander {
                     if (tabs.length > 0) {
                         right_tabs = tabs;
                     }
+                }
+                if (key_file.has_key("RightPanel", "TabTitles")) {
+                    var titles = key_file.get_string_list("RightPanel", "TabTitles");
+                    right_tab_titles = titles;
                 }
                 if (key_file.has_key("RightPanel", "ActiveTab")) {
                     right_active_tab = key_file.get_integer("RightPanel", "ActiveTab");
@@ -115,14 +134,23 @@ namespace VCommander {
                 key_file.set_integer("Window", "PanedPosition", paned_position);
                 key_file.set_string("Window", "ActivePane", active_pane);
 
+                // General
+                key_file.set_boolean("General", "ShowPathToolbar", show_path_toolbar);
+
                 // Left Panel
                 key_file.set_string_list("LeftPanel", "Tabs", left_tabs);
+                if (left_tab_titles != null) {
+                    key_file.set_string_list("LeftPanel", "TabTitles", left_tab_titles);
+                }
                 key_file.set_integer("LeftPanel", "ActiveTab", left_active_tab);
                 key_file.set_boolean("LeftPanel", "BriefView", left_brief_view);
                 key_file.set_boolean("LeftPanel", "ShowHidden", left_show_hidden);
 
                 // Right Panel
                 key_file.set_string_list("RightPanel", "Tabs", right_tabs);
+                if (right_tab_titles != null) {
+                    key_file.set_string_list("RightPanel", "TabTitles", right_tab_titles);
+                }
                 key_file.set_integer("RightPanel", "ActiveTab", right_active_tab);
                 key_file.set_boolean("RightPanel", "BriefView", right_brief_view);
                 key_file.set_boolean("RightPanel", "ShowHidden", right_show_hidden);

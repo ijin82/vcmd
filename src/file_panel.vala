@@ -4,20 +4,30 @@ namespace VCommander {
         public bool is_active { get; private set; default = false; }
         public Adw.TabView tab_view { get; private set; }
         public Adw.TabBar tab_bar { get; private set; }
+        private bool initializing = true;
 
         public signal void panel_activated(FilePanel panel);
         public signal void error_occurred(string title, string message);
         public signal void directory_changed(File new_dir);
         public signal void command_char_typed(string ch);
 
-        public FilePanel(string[] initial_dirs, int active_index = 0, bool brief = false, bool hidden = false) {
+        public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
             add_css_class("file-panel");
 
             tab_view = new Adw.TabView();
+            tab_view.shortcuts = Adw.TabViewShortcuts.NONE;
             tab_bar = new Adw.TabBar();
             tab_bar.view = tab_view;
             tab_bar.autohide = false;
+
+            var bar_click = new Gtk.GestureClick();
+            bar_click.pressed.connect(() => {
+                if (!is_active) {
+                    panel_activated(this);
+                }
+            });
+            tab_bar.add_controller(bar_click);
 
             append(tab_bar);
             append(tab_view);
@@ -26,23 +36,31 @@ namespace VCommander {
             tab_view.close_page.connect(on_tab_close_page);
             tab_view.notify["selected-page"].connect(on_tab_selection_changed);
 
-            // Open initial tabs
-            if (initial_dirs.length == 0) {
+            // Open initial tabs:
+            // 1. If path does not exist, do not open tab.
+            // 2. If all paths do not exist (or no paths), open home directory.
+            for (int i = 0; i < initial_dirs.length; i++) {
+                var f = File.new_for_commandline_arg(initial_dirs[i]);
+                if (f.query_exists()) {
+                    string? title = null;
+                    if (initial_titles != null && i < initial_titles.length && initial_titles[i].length > 0) {
+                        title = initial_titles[i];
+                    }
+                    open_new_tab(f, brief, hidden, title);
+                }
+            }
+
+            if (tab_view.n_pages == 0) {
                 var home = File.new_for_path(Environment.get_home_dir());
                 open_new_tab(home, brief, hidden);
-            } else {
-                for (int i = 0; i < initial_dirs.length; i++) {
-                    var f = File.new_for_commandline_arg(initial_dirs[i]);
-                    if (!f.query_exists()) {
-                        f = File.new_for_path(Environment.get_home_dir());
-                    }
-                    open_new_tab(f, brief, hidden);
-                }
             }
 
             if (active_index >= 0 && active_index < tab_view.n_pages) {
                 tab_view.selected_page = tab_view.get_nth_page(active_index);
+            } else if (tab_view.n_pages > 0) {
+                tab_view.selected_page = tab_view.get_nth_page(0);
             }
+            initializing = false;
         }
 
         public FilePanelPage? get_current_page() {
@@ -74,7 +92,7 @@ namespace VCommander {
             }
         }
 
-        public void open_new_tab(File? dir = null, bool brief = false, bool hidden = false) {
+        public void open_new_tab(File? dir = null, bool brief = false, bool hidden = false, string? custom_title = null) {
             File target_dir = dir;
             if (target_dir == null) {
                 var current = get_current_page();
@@ -90,6 +108,9 @@ namespace VCommander {
             var page_widget = new FilePanelPage(target_dir, brief, hidden);
             page_widget.hexpand = true;
             page_widget.vexpand = true;
+            if (custom_title != null && custom_title.length > 0) {
+                page_widget.custom_title = custom_title;
+            }
 
             // Wire signals
             page_widget.page_activated.connect(() => {
@@ -130,12 +151,20 @@ namespace VCommander {
         }
 
         public void select_next_tab() {
-            tab_view.select_next_page();
+            if (tab_view.n_pages <= 1) return;
+            var cur = tab_view.selected_page;
+            int cur_idx = cur != null ? tab_view.get_page_position(cur) : 0;
+            int next_idx = (cur_idx + 1) % tab_view.n_pages;
+            tab_view.selected_page = tab_view.get_nth_page(next_idx);
             grab_focus_to_list();
         }
 
         public void select_previous_tab() {
-            tab_view.select_previous_page();
+            if (tab_view.n_pages <= 1) return;
+            var cur = tab_view.selected_page;
+            int cur_idx = cur != null ? tab_view.get_page_position(cur) : 0;
+            int prev_idx = (cur_idx - 1 + tab_view.n_pages) % tab_view.n_pages;
+            tab_view.selected_page = tab_view.get_nth_page(prev_idx);
             grab_focus_to_list();
         }
 
@@ -218,6 +247,9 @@ namespace VCommander {
         }
 
         private void on_tab_selection_changed() {
+            if (!initializing && !is_active) {
+                panel_activated(this);
+            }
             var current = get_current_page();
             if (current != null) {
                 current.set_active(is_active);
@@ -262,6 +294,7 @@ namespace VCommander {
 
         public void set_active(bool active) {
             is_active = active;
+            tab_view.shortcuts = active ? Adw.TabViewShortcuts.ALL_SHORTCUTS : Adw.TabViewShortcuts.NONE;
             if (active) {
                 add_css_class("active-panel");
             } else {
@@ -331,6 +364,14 @@ namespace VCommander {
             }
         }
 
+        public void set_path_toolbar_visible(bool visible) {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pw.set_path_toolbar_visible(visible);
+            }
+        }
+
         public string[] get_tab_paths() {
             var paths = new GenericArray<string>();
             for (int i = 0; i < tab_view.n_pages; i++) {
@@ -345,6 +386,20 @@ namespace VCommander {
             var result = new string[paths.length];
             for (int i = 0; i < paths.length; i++) {
                 result[i] = paths[i];
+            }
+            return result;
+        }
+
+        public string[] get_tab_titles() {
+            var titles = new GenericArray<string>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                titles.add(pw.custom_title != null ? pw.custom_title : "");
+            }
+            var result = new string[titles.length];
+            for (int i = 0; i < titles.length; i++) {
+                result[i] = titles[i];
             }
             return result;
         }

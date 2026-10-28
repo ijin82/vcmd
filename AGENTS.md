@@ -37,4 +37,5 @@
 
 ## Workflow & Testing
 - **Local Build & Test:** Run `make` to compile and `make run` to test changes.
+- **Local Installation:** Always run `./install.sh lite` (or `make install-lite`) upon completing changes / after each build so the user can immediately test the live application without redundant rebuilds.
 - **Git Restrictions:** Do not run `git commit` or `git push` autonomously; all git commits and repository pushes are managed directly by the user.

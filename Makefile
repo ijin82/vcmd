@@ -18,19 +18,31 @@ SOURCES = \
 	src/file_panel_page.vala \
 	src/file_panel.vala \
 	src/shortcuts_dialog.vala \
+	src/preferences_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala
 
-all: $(TARGET)
+all: build
+
+build: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	$(VALAC) $(VALAFLAGS) -o $(TARGET) $(SOURCES)
 
-run: all
+run: build
 	./$(TARGET)
+
+install:
+	./install.sh install
+
+install-lite:
+	./install.sh lite
+
+uninstall:
+	./install.sh uninstall
 
 clean:
 	rm -f $(TARGET) src/*.c src/*.vala.c
 
-.PHONY: all run clean
+.PHONY: all build run install install-lite uninstall clean

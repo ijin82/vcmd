@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Squircle Gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#24283b"/>
+      <stop offset="100%" stop-color="#16161e"/>
+    </linearGradient>
+
+    <!-- Outer Rim Stroke Gradient -->
+    <linearGradient id="border-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+    </linearGradient>
+
+    <!-- Left Pane Background -->
+    <linearGradient id="pane-left" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1b26"/>
+      <stop offset="100%" stop-color="#13141c"/>
+    </linearGradient>
+
+    <!-- Right Pane Background -->
+    <linearGradient id="pane-right" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e202f"/>
+      <stop offset="100%" stop-color="#161722"/>
+    </linearGradient>
+
+    <!-- Active Selection Gradient -->
+    <linearGradient id="active-sel" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+
+    <!-- Tab Active Gradient -->
+    <linearGradient id="tab-active" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="drop-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.5"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#38bdf8" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Base Icon Squircle with Shadow -->
+  <rect x="36" y="36" width="440" height="440" rx="96" fill="url(#bg-grad)" filter="url(#drop-shadow)"/>
+  <rect x="36.5" y="36.5" width="439" height="439" rx="95.5" fill="none" stroke="url(#border-grad)" stroke-width="2"/>
+
+  <!-- Dual Panes Container -->
+  <!-- Header Bar -->
+  <rect x="68" y="76" width="376" height="36" rx="8" fill="#1a1b26" fill-opacity="0.6"/>
+  <!-- Left Header Tabs -->
+  <rect x="74" y="82" width="70" height="24" rx="5" fill="url(#tab-active)"/>
+  <rect x="150" y="82" width="50" height="24" rx="5" fill="#2d3149" fill-opacity="0.6"/>
+  <!-- Right Header Tabs -->
+  <rect x="264" y="82" width="70" height="24" rx="5" fill="#2d3149" fill-opacity="0.6"/>
+  <rect x="340" y="82" width="50" height="24" rx="5" fill="#2d3149" fill-opacity="0.4"/>
+
+  <!-- Left Pane -->
+  <rect x="68" y="122" width="182" height="270" rx="10" fill="url(#pane-left)" stroke="#2f334d" stroke-width="1.5"/>
+  <!-- Right Pane -->
+  <rect x="262" y="122" width="182" height="270" rx="10" fill="url(#pane-right)" stroke="#2f334d" stroke-width="1.5"/>
+
+  <!-- Left Pane Items -->
+  <!-- Row 1: Parent Directory (..) -->
+  <rect x="80" y="136" width="16" height="12" rx="2" fill="#6366f1"/>
+  <rect x="104" y="139" width="32" height="6" rx="3" fill="#94a3b8"/>
+
+  <!-- Row 2: Folder -->
+  <path d="M 80 162 h 8 l 4 3 h 12 a 2 2 0 0 1 2 2 v 9 a 2 2 0 0 1 -2 2 h -24 a 2 2 0 0 1 -2 -2 v -12 a 2 2 0 0 1 2 -2 z" fill="#f59e0b"/>
+  <rect x="110" y="165" width="56" height="6" rx="3" fill="#cbd5e1"/>
+
+  <!-- Row 3: Folder -->
+  <path d="M 80 188 h 8 l 4 3 h 12 a 2 2 0 0 1 2 2 v 9 a 2 2 0 0 1 -2 2 h -24 a 2 2 0 0 1 -2 -2 v -12 a 2 2 0 0 1 2 -2 z" fill="#f59e0b"/>
+  <rect x="110" y="191" width="72" height="6" rx="3" fill="#cbd5e1"/>
+
+  <!-- Row 4: File -->
+  <rect x="82" y="214" width="16" height="18" rx="2" fill="#38bdf8"/>
+  <rect x="106" y="220" width="80" height="6" rx="3" fill="#94a3b8"/>
+
+  <!-- Row 5: File -->
+  <rect x="82" y="244" width="16" height="18" rx="2" fill="#a78bfa"/>
+  <rect x="106" y="250" width="60" height="6" rx="3" fill="#94a3b8"/>
+
+  <!-- Row 6: File -->
+  <rect x="82" y="274" width="16" height="18" rx="2" fill="#34d399"/>
+  <rect x="106" y="280" width="70" height="6" rx="3" fill="#94a3b8"/>
+
+  <!-- Right Pane Items -->
+  <!-- Row 1: Selected Item (Active Cursor Bar) -->
+  <rect x="74" y="134" width="0" height="0"/>
+  <rect x="268" y="134" width="170" height="28" rx="6" fill="url(#active-sel)" filter="url(#glow)"/>
+  <path d="M 276 140 h 8 l 4 3 h 12 a 2 2 0 0 1 2 2 v 9 a 2 2 0 0 1 -2 2 h -24 a 2 2 0 0 1 -2 -2 v -12 a 2 2 0 0 1 2 -2 z" fill="#ffffff"/>
+  <rect x="306" y="145" width="64" height="6" rx="3" fill="#ffffff"/>
+  <rect x="398" y="145" width="28" height="6" rx="3" fill="#e0f2fe" fill-opacity="0.8"/>
+
+  <!-- Row 2: File -->
+  <rect x="276" y="174" width="16" height="18" rx="2" fill="#38bdf8"/>
+  <rect x="302" y="180" width="78" height="6" rx="3" fill="#cbd5e1"/>
+  <rect x="398" y="180" width="24" height="6" rx="3" fill="#64748b"/>
+
+  <!-- Row 3: File -->
+  <rect x="276" y="204" width="16" height="18" rx="2" fill="#38bdf8"/>
+  <rect x="302" y="210" width="60" height="6" rx="3" fill="#cbd5e1"/>
+  <rect x="398" y="210" width="20" height="6" rx="3" fill="#64748b"/>
+
+  <!-- Row 4: Folder -->
+  <path d="M 274 234 h 8 l 4 3 h 12 a 2 2 0 0 1 2 2 v 9 a 2 2 0 0 1 -2 2 h -24 a 2 2 0 0 1 -2 -2 v -12 a 2 2 0 0 1 2 -2 z" fill="#f59e0b"/>
+  <rect x="304" y="239" width="68" height="6" rx="3" fill="#cbd5e1"/>
+
+  <!-- Row 5: File -->
+  <rect x="276" y="264" width="16" height="18" rx="2" fill="#fb7185"/>
+  <rect x="302" y="270" width="84" height="6" rx="3" fill="#cbd5e1"/>
+  <rect x="398" y="270" width="24" height="6" rx="3" fill="#64748b"/>
+
+  <!-- Row 6: File -->
+  <rect x="276" y="294" width="16" height="18" rx="2" fill="#94a3b8"/>
+  <rect x="302" y="300" width="50" height="6" rx="3" fill="#94a3b8"/>
+
+  <!-- Split Divider Accent -->
+  <circle cx="256" cy="257" r="4" fill="#38bdf8" filter="url(#glow)"/>
+  <line x1="256" y1="130" x2="256" y2="245" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-opacity="0.4"/>
+  <line x1="256" y1="269" x2="256" y2="384" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-opacity="0.4"/>
+
+  <!-- Bottom Command Bar / Status Bar -->
+  <rect x="68" y="404" width="376" height="34" rx="8" fill="#13141c" stroke="#2f334d" stroke-width="1.5"/>
+  <!-- Prompt Symbol >_ -->
+  <text x="82" y="426" font-family="monospace" font-size="16" font-weight="bold" fill="#38bdf8">&gt;_</text>
+  <rect x="110" y="418" width="60" height="6" rx="3" fill="#64748b"/>
+  <rect x="176" y="416" width="6" height="10" rx="1" fill="#38bdf8">
+    <animate attributeName="opacity" values="1;0;1" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+  <!-- Active panel indicator right -->
+  <circle cx="426" cy="421" r="4" fill="#10b981"/>
+</svg>

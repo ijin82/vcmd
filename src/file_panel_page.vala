@@ -17,6 +17,7 @@ namespace VCommander {
         private Gtk.Stack view_stack;
         private Gtk.CustomSorter custom_master_sorter;
 
+        private Gtk.Box header_box;
         private Gtk.Entry path_entry;
         private Gtk.Label status_label;
         private Gtk.Button view_toggle_button;
@@ -45,8 +46,10 @@ namespace VCommander {
         }
 
         private void build_header() {
-            var header_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
+            var config = ConfigManager.get_instance();
+            header_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
             header_box.add_css_class("panel-header");
+            header_box.visible = config.show_path_toolbar;
 
             var up_button = new Gtk.Button.from_icon_name("go-up-symbolic");
             up_button.focusable = false;
@@ -586,6 +589,10 @@ namespace VCommander {
             } catch (Error e) {
                 // Ignore permission or unreadable folders
             }
+        }
+
+        public void set_path_toolbar_visible(bool visible) {
+            header_box.visible = visible;
         }
 
         public void set_active(bool active) {

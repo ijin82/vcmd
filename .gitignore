@@ -1,0 +1,52 @@
+# --- Project Binaries ---
+vcmd
+*.exe
+
+# --- Generated C files (Vala transcompiles to C) ---
+*.vala.c
+*.c.stamp
+src/*.c
+src/*.vala.c
+
+# --- Object and Compiled Files ---
+*.o
+*.obj
+*.so
+*.so.*
+*.dylib
+*.dll
+*.a
+*.la
+*.lai
+
+# --- GObject Introspection and Generated Vala Files ---
+*.gir
+*.typelib
+*.vapi
+!src/vapi/*.vapi
+*.stamp
+
+# --- Generated GNOME Resources (GResource) ---
+*.gresource
+resources.c
+resources.h
+
+# --- Build Directories (Meson / Ninja / CMake / Autotools) ---
+_build/
+build/
+builddir/
+.ninja_log
+.ninja_deps
+compile_commands.json
+
+# --- OS and Editor Temporary Files ---
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- IDE & Editor Settings ---
+.vscode/
+.idea/
+*.kate-swp

@@ -43,14 +43,15 @@ namespace VCommander {
             add_shortcut_row(tab_group, "New Tab", "Ctrl + T");
             add_shortcut_row(tab_group, "Rename Current Tab (max 15 chars)", "Ctrl + Shift + T");
             add_shortcut_row(tab_group, "Close Current Tab", "Ctrl + W");
-            add_shortcut_row(tab_group, "Previous Tab", "Ctrl + Page Up");
-            add_shortcut_row(tab_group, "Next Tab", "Ctrl + Page Down");
+            add_shortcut_row(tab_group, "Previous Tab", "Ctrl + Page Up / Ctrl + Shift + Tab");
+            add_shortcut_row(tab_group, "Next Tab", "Ctrl + Page Down / Ctrl + Tab");
             box.append(tab_group);
 
             // 4. General & Function Keys (with stage indicators)
             var gen_group = new Adw.PreferencesGroup();
             gen_group.title = "General & Function Keys";
             add_shortcut_row(gen_group, "Keyboard Shortcuts", "F1");
+            add_shortcut_row(gen_group, "Preferences", "Ctrl + ,");
             add_shortcut_row(gen_group, "View File (Stage 4)", "F3");
             add_shortcut_row(gen_group, "Edit File (Stage 4)", "F4");
             add_shortcut_row(gen_group, "Copy Files (Stage 3)", "F5");
