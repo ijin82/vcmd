@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="vcmd.svg" width="160" height="160" alt="vView Logo" />
+</p>
+
 # Vala Commander (`vcmd`)
 
 A lightweight, responsive, and modern dual-pane file manager for Linux, blending the keyboard-driven speed of Midnight Commander with modern GTK4/Libadwaita GUI aesthetics and Nautilus-grade desktop integration.
@@ -33,19 +37,24 @@ Written in **Vala** and compiled directly to a compact native binary via `valac`
   * <kbd>Left Arrow</kbd>: In Full view, jumps to the top of the folder (<kbd>Home</kbd> behavior). In Brief view, moves left across columns; at the leftmost column, jumps to the top of the folder.
   * <kbd>Right Arrow</kbd>: In Full view, jumps to the last item in the folder (<kbd>End</kbd> behavior). In Brief view, moves right across columns; at the rightmost column, jumps to the last item.
   * <kbd>Ctrl</kbd> + <kbd>Space</kbd>: Asynchronously calculate folder or file size under the cursor without blocking the UI.
+  * <kbd>Ctrl</kbd> + <kbd>S</kbd>: Quick directory filter by substring (case-insensitive, max 20 chars, navigate with <kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Enter</kbd> to open, <kbd>Escape</kbd> to reset).
   * <kbd>Ctrl</kbd> + <kbd>H</kbd>: Toggle hidden files.
   * <kbd>Ctrl</kbd> + <kbd>L</kbd>: Focus the path entry field for manual path input.
 
 ### 💻 Integrated Command Line Bar
 * **Midnight Commander-Style Quick CLI:** Simply start typing letters or digits while browsing files to begin entering shell commands in the bottom command bar.
-* **Context-Aware Execution:** Commands run directly inside the active panel's current working directory via `/bin/bash -c`.
+* **Configurable Shell Interpreter:** Select any shell executable in Preferences (<kbd>Ctrl</kbd> + <kbd>,</kbd>) — defaults to `/bin/bash`, with support for `/bin/zsh`, `/usr/bin/fish`, or custom paths. Missing or invalid interpreters trigger a descriptive error dialog.
+* **Environment & Config Sourcing:** Commands run as a login/interactive shell (`-l -i -c` for bash/zsh), ensuring user configuration files (`.bashrc`, `.zshrc`, custom aliases, and path variables) are loaded for the user who launched the application.
+* **Context-Aware Execution:** Commands run directly inside the active panel's current working directory.
 * **Fast `cd` Interception:** Typing `cd <path>` (e.g., `cd /var/log` or `cd ~`) instantly navigates the active panel without launching a subprocess.
 * **Command History:** Browse previous commands with <kbd>↑</kbd> and <kbd>↓</kbd> arrow keys.
 * Press <kbd>Escape</kbd> to clear command input and return focus to the file list.
 
 ### ⚙️ Preferences Window (`Ctrl + ,`)
-* Built with native **Libadwaita Preferences** (`Adw.PreferencesWindow`, `Adw.PreferencesPage`, `Adw.SwitchRow`).
+* Built with native **Libadwaita Preferences** (`Adw.PreferencesWindow`, `Adw.PreferencesPage`, `Adw.SwitchRow`, `Adw.SpinRow`, `Gtk.FontDialogButton`).
 * **Path Toolbar Visibility:** Toggle the header path entry and navigation buttons under tabs on/off. When disabled, maximizes vertical screen space for file listings.
+* **Brief View Column Width:** Customize the width in pixels for brief view columns (100–800 px) with live preview and keyboard shortcuts (<kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd>).
+* **Custom Typography & Fonts:** Choose custom font families (e.g. Fira Code, JetBrains Mono, Ubuntu Mono) and font sizes (6–36 pt) for file panels with instant live styling.
 * Preferences apply immediately and are persisted in `~/.config/vcmd/config`.
 
 ---
@@ -60,15 +69,18 @@ Written in **Vala** and compiled directly to a compact native binary via `valac`
 | <kbd>Left Arrow</kbd> | Jump to start / top item (<kbd>Home</kbd>) |
 | <kbd>Right Arrow</kbd> | Jump to end / last item (<kbd>End</kbd>) |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Calculate directory or file size |
+| <kbd>Ctrl</kbd> + <kbd>S</kbd> | Quick directory filter (case-insensitive substring) |
 | <kbd>Ctrl</kbd> + <kbd>T</kbd> | Open new tab in active panel |
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> | Rename active tab (max 15 characters) |
 | <kbd>Ctrl</kbd> + <kbd>W</kbd> | Close active tab (protected last tab) |
 | <kbd>Ctrl</kbd> + <kbd>Page Up</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> | Switch to previous tab in active panel |
 | <kbd>Ctrl</kbd> + <kbd>Page Down</kbd> / <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Switch to next tab in active panel |
 | <kbd>Alt</kbd> + <kbd>T</kbd> | Toggle Brief / Full view mode |
+| <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> | Increase / decrease brief view column width |
 | <kbd>Ctrl</kbd> + <kbd>H</kbd> | Toggle hidden files visibility |
 | <kbd>Ctrl</kbd> + <kbd>L</kbd> | Focus path entry bar |
 | <kbd>Ctrl</kbd> + <kbd>,</kbd> | Open Preferences window |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> | Toggle window header bar visibility |
 | <kbd>F1</kbd> | Open Keyboard Shortcuts & Help dialog |
 | <kbd>Ctrl</kbd> + <kbd>Q</kbd> | Quit application |
 | *Type characters* | Start typing shell command in bottom CLI |

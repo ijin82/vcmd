@@ -17,6 +17,8 @@ SOURCES = \
 	src/file_item.vala \
 	src/file_panel_page.vala \
 	src/file_panel.vala \
+	src/file_operation_service.vala \
+	src/operation_progress_dialog.vala \
 	src/shortcuts_dialog.vala \
 	src/preferences_dialog.vala \
 	src/window.vala \

@@ -92,6 +92,32 @@ namespace VCommander {
             }
         }
 
+        public bool is_filter_active {
+            get {
+                var page = get_current_page();
+                return page != null ? page.is_filter_active : false;
+            }
+        }
+
+        public void show_filter() {
+            var page = get_current_page();
+            if (page != null) {
+                page.show_filter();
+            }
+        }
+
+        public void hide_filter() {
+            var page = get_current_page();
+            if (page != null) {
+                page.hide_filter();
+            }
+        }
+
+        public FileItem? get_selected_item() {
+            var page = get_current_page();
+            return page != null ? page.get_selected_item() : null;
+        }
+
         public void open_new_tab(File? dir = null, bool brief = false, bool hidden = false, string? custom_title = null) {
             File target_dir = dir;
             if (target_dir == null) {
@@ -297,12 +323,15 @@ namespace VCommander {
             tab_view.shortcuts = active ? Adw.TabViewShortcuts.ALL_SHORTCUTS : Adw.TabViewShortcuts.NONE;
             if (active) {
                 add_css_class("active-panel");
+                remove_css_class("panel-inactive");
             } else {
                 remove_css_class("active-panel");
+                add_css_class("panel-inactive");
             }
-            var page = get_current_page();
-            if (page != null) {
-                page.set_active(active);
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pw.set_active(active);
             }
         }
 
@@ -357,10 +386,10 @@ namespace VCommander {
             }
         }
 
-        public void load_directory(File dir) {
+        public void load_directory(File dir, string? target_select_name = null) {
             var page = get_current_page();
             if (page != null) {
-                page.load_directory(dir);
+                page.load_directory(dir, target_select_name);
             }
         }
 
@@ -369,6 +398,14 @@ namespace VCommander {
                 var p = tab_view.get_nth_page(i);
                 var pw = (FilePanelPage) p.child;
                 pw.set_path_toolbar_visible(visible);
+            }
+        }
+
+        public void update_brief_column_width() {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pw.update_brief_column_width();
             }
         }
 

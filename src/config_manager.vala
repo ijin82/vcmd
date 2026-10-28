@@ -32,6 +32,11 @@ namespace VCommander {
         public bool right_show_hidden { get; set; default = false; }
 
         public bool show_path_toolbar { get; set; default = true; }
+        public bool show_function_bar { get; set; default = true; }
+        public int brief_column_width { get; set; default = 180; }
+        public string panel_font_name { get; set; default = "Monospace"; }
+        public int panel_font_size { get; set; default = 11; }
+        public string command_shell { get; set; default = "/bin/bash"; }
 
         private ConfigManager() {
             string config_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd");
@@ -77,6 +82,28 @@ namespace VCommander {
                 // General settings
                 if (key_file.has_key("General", "ShowPathToolbar")) {
                     show_path_toolbar = key_file.get_boolean("General", "ShowPathToolbar");
+                }
+                if (key_file.has_key("General", "ShowFunctionBar")) {
+                    show_function_bar = key_file.get_boolean("General", "ShowFunctionBar");
+                }
+                if (key_file.has_key("General", "BriefColumnWidth")) {
+                    brief_column_width = key_file.get_integer("General", "BriefColumnWidth");
+                    if (brief_column_width < 100) brief_column_width = 100;
+                    if (brief_column_width > 800) brief_column_width = 800;
+                }
+                if (key_file.has_key("General", "PanelFontName")) {
+                    panel_font_name = key_file.get_string("General", "PanelFontName");
+                }
+                if (key_file.has_key("General", "PanelFontSize")) {
+                    panel_font_size = key_file.get_integer("General", "PanelFontSize");
+                    if (panel_font_size < 6) panel_font_size = 6;
+                    if (panel_font_size > 72) panel_font_size = 72;
+                }
+                if (key_file.has_key("General", "CommandShell")) {
+                    string shell = key_file.get_string("General", "CommandShell").strip();
+                    if (shell.length > 0) {
+                        command_shell = shell;
+                    }
                 }
 
                 // Left Panel
@@ -136,6 +163,11 @@ namespace VCommander {
 
                 // General
                 key_file.set_boolean("General", "ShowPathToolbar", show_path_toolbar);
+                key_file.set_boolean("General", "ShowFunctionBar", show_function_bar);
+                key_file.set_integer("General", "BriefColumnWidth", brief_column_width);
+                key_file.set_string("General", "PanelFontName", panel_font_name);
+                key_file.set_integer("General", "PanelFontSize", panel_font_size);
+                key_file.set_string("General", "CommandShell", command_shell);
 
                 // Left Panel
                 key_file.set_string_list("LeftPanel", "Tabs", left_tabs);

@@ -8,6 +8,7 @@ namespace VCommander {
         public DateTime? mtime { get; construct set; default = null; }
         public bool is_dir { get; construct set; default = false; }
         public bool is_parent_dir { get; construct set; default = false; }
+        public bool is_symlink { get; construct set; default = false; }
         public bool is_hidden { get; construct set; default = false; }
         public Icon? icon { get; construct set; default = null; }
         public string file_type { get; construct set; default = ""; }
@@ -86,6 +87,8 @@ namespace VCommander {
                 }
             }
 
+            bool symlink = info.get_is_symlink();
+
             Object(
                 file: file,
                 name: item_name,
@@ -94,6 +97,7 @@ namespace VCommander {
                 mtime: mod_time,
                 is_dir: dir,
                 is_parent_dir: false,
+                is_symlink: symlink,
                 is_hidden: hidden,
                 icon: item_icon,
                 file_type: ftype

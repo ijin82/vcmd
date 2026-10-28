@@ -8,8 +8,11 @@ namespace VCommander {
         public string? custom_title { get; set; default = null; }
 
         private ListStore store;
+        private Gtk.CustomFilter custom_filter;
+        private Gtk.FilterListModel filter_model;
         private Gtk.SortListModel sort_model;
         private Gtk.SingleSelection selection_model;
+        private uint saved_selected_pos = Gtk.INVALID_LIST_POSITION;
         private Gtk.ColumnView column_view;
         private Gtk.GridView grid_view;
         private Gtk.ScrolledWindow full_scrolled;
@@ -19,6 +22,10 @@ namespace VCommander {
 
         private Gtk.Box header_box;
         private Gtk.Entry path_entry;
+        private Gtk.Box filter_box;
+        private Gtk.Entry filter_entry;
+        private string filter_text = "";
+        private string current_dir_stats = "";
         private Gtk.Label status_label;
         private Gtk.Button view_toggle_button;
         private Cancellable? load_cancellable = null;
@@ -167,9 +174,15 @@ namespace VCommander {
 
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
+                label.remove_css_class("file-item-symlink");
 
                 if (file_item.is_parent_dir) {
                     label.add_css_class("file-item-parent");
+                } else if (file_item.is_symlink) {
+                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_dir) {
+                        label.add_css_class("file-item-dir");
+                    }
                 } else if (file_item.is_dir) {
                     label.add_css_class("file-item-dir");
                 }
@@ -271,7 +284,7 @@ namespace VCommander {
             column_view.append_column(time_col);
 
             // Master sorter ensuring parent directory '..' is ALWAYS first,
-            // regardless of column sorting or ascending/descending order.
+            // and directories are ALWAYS before files, regardless of column sorting or direction.
             var cv_sorter = column_view.sorter;
             custom_master_sorter = new Gtk.CustomSorter((a, b) => {
                 var fa = (FileItem) a;
@@ -279,6 +292,10 @@ namespace VCommander {
                 if (fa.is_parent_dir && !fb.is_parent_dir) return -1;
                 if (!fa.is_parent_dir && fb.is_parent_dir) return 1;
                 if (fa.is_parent_dir && fb.is_parent_dir) return 0;
+
+                // Directories always first
+                if (fa.is_dir && !fb.is_dir) return -1;
+                if (!fa.is_dir && fb.is_dir) return 1;
 
                 var res = cv_sorter.compare((GLib.Object) a, (GLib.Object) b);
                 if (res == Gtk.Ordering.SMALLER) return -1;
@@ -289,74 +306,37 @@ namespace VCommander {
                 custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
             });
 
+            // Custom filter for quick substring matching (case-insensitive)
+            custom_filter = new Gtk.CustomFilter((item) => {
+                var file_item = (FileItem) item;
+                if (file_item.is_parent_dir) {
+                    return true;
+                }
+                if (filter_text.length == 0) {
+                    return true;
+                }
+                return file_item.name.down().contains(filter_text);
+            });
+            filter_model = new Gtk.FilterListModel(store, custom_filter);
+
             // Shared sort model and selection
-            sort_model = new Gtk.SortListModel(store, custom_master_sorter);
+            sort_model = new Gtk.SortListModel(filter_model, custom_master_sorter);
             selection_model = new Gtk.SingleSelection(sort_model);
-            selection_model.autoselect = true;
-            selection_model.can_unselect = false;
+            selection_model.autoselect = false;
+            selection_model.can_unselect = true;
+
+            selection_model.notify["selected"].connect(() => {
+                if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                    saved_selected_pos = selection_model.selected;
+                }
+            });
 
             column_view.model = selection_model;
             column_view.activate.connect(on_item_activated);
             attach_view_controllers(column_view);
 
             // 2. GridView (Brief View)
-            var brief_factory = new Gtk.SignalListItemFactory();
-            brief_factory.setup.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
-                box.add_css_class("brief-item-box");
-                box.width_request = 180;
-
-                var image = new Gtk.Image();
-                image.pixel_size = 18;
-
-                var label = new Gtk.Label("");
-                label.xalign = 0.0f;
-                label.ellipsize = Pango.EllipsizeMode.END;
-                label.hexpand = true;
-
-                box.append(image);
-                box.append(label);
-                list_item.child = box;
-            });
-
-            brief_factory.bind.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var file_item = (FileItem) list_item.item;
-                var box = (Gtk.Box) list_item.child;
-                var image = (Gtk.Image) box.get_first_child();
-                var label = (Gtk.Label) image.get_next_sibling();
-
-                image.gicon = file_item.icon;
-
-                update_brief_item_label(file_item, label);
-
-                ulong handler_id = file_item.notify["formatted-size"].connect(() => {
-                    update_brief_item_label(file_item, label);
-                });
-                list_item.set_data<ulong>("brief_notify_id", handler_id);
-
-                label.remove_css_class("file-item-parent");
-                label.remove_css_class("file-item-dir");
-
-                if (file_item.is_parent_dir) {
-                    label.add_css_class("file-item-parent");
-                } else if (file_item.is_dir) {
-                    label.add_css_class("file-item-dir");
-                }
-            });
-
-            brief_factory.unbind.connect((item) => {
-                var list_item = (Gtk.ListItem) item;
-                var file_item = (FileItem) list_item.item;
-                ulong handler_id = list_item.get_data<ulong>("brief_notify_id");
-                if (handler_id != 0 && file_item != null) {
-                    file_item.disconnect(handler_id);
-                    list_item.set_data<ulong>("brief_notify_id", 0);
-                }
-            });
-
-            grid_view = new Gtk.GridView(selection_model, brief_factory);
+            grid_view = new Gtk.GridView(selection_model, create_brief_factory());
             grid_view.orientation = Gtk.Orientation.HORIZONTAL;
             grid_view.max_columns = 100;
             grid_view.min_columns = 1;
@@ -364,7 +344,10 @@ namespace VCommander {
             grid_view.activate.connect(on_item_activated);
             attach_view_controllers(grid_view);
 
-            // 3. Stack to switch between Full and Brief view
+            // 3. Quick Filter Bar (Ctrl+S)
+            build_filter_bar();
+
+            // 4. Stack to switch between Full and Brief view
             view_stack = new Gtk.Stack();
             view_stack.hexpand = true;
             view_stack.vexpand = true;
@@ -389,11 +372,117 @@ namespace VCommander {
             append(view_stack);
         }
 
+        private void build_filter_bar() {
+            filter_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            filter_box.add_css_class("filter-box");
+            filter_box.visible = false;
+
+            var filter_icon = new Gtk.Image.from_icon_name("system-search-symbolic");
+            filter_icon.pixel_size = 16;
+            filter_box.append(filter_icon);
+
+            filter_entry = new Gtk.Entry();
+            filter_entry.hexpand = true;
+            filter_entry.max_length = 20;
+            filter_entry.placeholder_text = "Quick filter (max 20 chars)...";
+            filter_entry.secondary_icon_name = "edit-clear-symbolic";
+            filter_entry.secondary_icon_tooltip_text = "Clear and close filter (Esc)";
+            filter_entry.icon_release.connect((pos) => {
+                if (pos == Gtk.EntryIconPosition.SECONDARY) {
+                    hide_filter();
+                }
+            });
+
+            filter_entry.changed.connect(() => {
+                filter_text = filter_entry.text.strip().down();
+                custom_filter.changed(Gtk.FilterChange.DIFFERENT);
+
+                uint matched = sort_model.get_n_items();
+                if (filter_text.length > 0) {
+                    // Update status bar with match count
+                    uint actual_matches = (matched > 0 && ((FileItem) sort_model.get_item(0)).is_parent_dir) ? matched - 1 : matched;
+                    status_label.label = @"Filter: '$filter_text' | Matched: $actual_matches items";
+                    if (matched > 1) {
+                        selection_model.selected = 1;
+                    } else if (matched > 0) {
+                        selection_model.selected = 0;
+                    }
+                    scroll_to_selected();
+                } else if (filter_box.visible) {
+                    status_label.label = current_dir_stats;
+                    if (matched > 0) {
+                        selection_model.selected = 0;
+                        scroll_to_selected();
+                    }
+                }
+            });
+
+            var key_ctrl = new Gtk.EventControllerKey();
+            key_ctrl.key_pressed.connect((keyval, keycode, state) => {
+                if (keyval == Gdk.Key.Escape) {
+                    hide_filter();
+                    return Gdk.EVENT_STOP;
+                }
+                if (keyval == Gdk.Key.Return || keyval == Gdk.Key.KP_Enter) {
+                    uint pos = selection_model.selected;
+                    if (pos != Gtk.INVALID_LIST_POSITION) {
+                        on_item_activated(pos);
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+                if (keyval == Gdk.Key.Down) {
+                    uint cur = selection_model.selected;
+                    uint total = sort_model.get_n_items();
+                    if (total > 0 && cur + 1 < total) {
+                        selection_model.selected = cur + 1;
+                        scroll_to_selected();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+                if (keyval == Gdk.Key.Up) {
+                    uint cur = selection_model.selected;
+                    if (cur > 0) {
+                        selection_model.selected = cur - 1;
+                        scroll_to_selected();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+                if (keyval == Gdk.Key.Page_Down) {
+                    uint cur = selection_model.selected;
+                    uint total = sort_model.get_n_items();
+                    if (total > 0) {
+                        uint next = uint.min(cur + 10, total - 1);
+                        selection_model.selected = next;
+                        scroll_to_selected();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+                if (keyval == Gdk.Key.Page_Up) {
+                    uint cur = selection_model.selected;
+                    if (cur > 0) {
+                        uint next = (cur > 10) ? cur - 10 : 0;
+                        selection_model.selected = next;
+                        scroll_to_selected();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+                return Gdk.EVENT_PROPAGATE;
+            });
+            filter_entry.add_controller(key_ctrl);
+
+            filter_box.append(filter_entry);
+            append(filter_box);
+        }
+
         private void attach_view_controllers(Gtk.Widget target_view) {
             var key_controller = new Gtk.EventControllerKey();
             key_controller.key_pressed.connect((keyval, keycode, state) => {
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
 
+                if (keyval == Gdk.Key.Escape && is_filter_active) {
+                    hide_filter();
+                    return Gdk.EVENT_STOP;
+                }
                 if (keyval == Gdk.Key.BackSpace) {
                     go_up();
                     return Gdk.EVENT_STOP;
@@ -470,6 +559,9 @@ namespace VCommander {
             status_label = new Gtk.Label("Loading...");
             status_label.xalign = 0.0f;
             status_label.add_css_class("panel-status-bar");
+            status_label.margin_top = 5;
+            status_label.margin_start = 4;
+            status_label.margin_end = 4;
             append(status_label);
         }
 
@@ -591,12 +683,130 @@ namespace VCommander {
             }
         }
 
+        private Gtk.SignalListItemFactory create_brief_factory() {
+            var config = ConfigManager.get_instance();
+            var brief_factory = new Gtk.SignalListItemFactory();
+            brief_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+                box.add_css_class("brief-item-box");
+                box.width_request = config.brief_column_width;
+
+                var image = new Gtk.Image();
+                image.pixel_size = 18;
+
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.ellipsize = Pango.EllipsizeMode.END;
+                label.hexpand = true;
+
+                box.append(image);
+                box.append(label);
+                list_item.child = box;
+            });
+
+            brief_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var box = (Gtk.Box) list_item.child;
+                box.width_request = config.brief_column_width;
+                var image = (Gtk.Image) box.get_first_child();
+                var label = (Gtk.Label) image.get_next_sibling();
+
+                image.gicon = file_item.icon;
+
+                update_brief_item_label(file_item, label);
+
+                ulong handler_id = file_item.notify["formatted-size"].connect(() => {
+                    update_brief_item_label(file_item, label);
+                });
+                list_item.set_data<ulong>("brief_notify_id", handler_id);
+
+                label.remove_css_class("file-item-parent");
+                label.remove_css_class("file-item-dir");
+                label.remove_css_class("file-item-symlink");
+
+                if (file_item.is_parent_dir) {
+                    label.add_css_class("file-item-parent");
+                } else if (file_item.is_symlink) {
+                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_dir) {
+                        label.add_css_class("file-item-dir");
+                    }
+                } else if (file_item.is_dir) {
+                    label.add_css_class("file-item-dir");
+                }
+            });
+
+            brief_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong handler_id = list_item.get_data<ulong>("brief_notify_id");
+                if (handler_id != 0 && file_item != null) {
+                    file_item.disconnect(handler_id);
+                    list_item.set_data<ulong>("brief_notify_id", 0);
+                }
+            });
+
+            return brief_factory;
+        }
+
+        public void update_brief_column_width() {
+            grid_view.factory = create_brief_factory();
+        }
+
         public void set_path_toolbar_visible(bool visible) {
             header_box.visible = visible;
         }
 
         public void set_active(bool active) {
             is_active = active;
+            if (active) {
+                add_css_class("active-page");
+                remove_css_class("inactive-page");
+                if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                    saved_selected_pos = selection_model.selected;
+                    scroll_to_selected();
+                } else if (saved_selected_pos != Gtk.INVALID_LIST_POSITION && saved_selected_pos < sort_model.get_n_items()) {
+                    selection_model.selected = saved_selected_pos;
+                    scroll_to_selected();
+                } else if (sort_model.get_n_items() > 0 && selection_model.selected == Gtk.INVALID_LIST_POSITION) {
+                    selection_model.selected = (sort_model.get_n_items() > 1 && ((FileItem) sort_model.get_item(0)).is_parent_dir) ? 1 : 0;
+                    scroll_to_selected();
+                }
+            } else {
+                remove_css_class("active-page");
+                add_css_class("inactive-page");
+                if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                    saved_selected_pos = selection_model.selected;
+                    selection_model.selected = Gtk.INVALID_LIST_POSITION;
+                }
+            }
+        }
+
+        public bool is_filter_active {
+            get {
+                return filter_box != null && (filter_box.visible || filter_text.length > 0);
+            }
+        }
+
+        public void show_filter() {
+            if (filter_box == null) return;
+            filter_box.visible = true;
+            filter_entry.grab_focus();
+            filter_entry.select_region(0, -1);
+        }
+
+        public void hide_filter() {
+            if (filter_box == null) return;
+            filter_box.visible = false;
+            filter_entry.text = "";
+            filter_text = "";
+            custom_filter.changed(Gtk.FilterChange.DIFFERENT);
+            if (current_dir_stats.length > 0) {
+                status_label.label = current_dir_stats;
+            }
+            grab_focus_to_list();
         }
 
         public void grab_focus_to_list() {
@@ -721,6 +931,9 @@ namespace VCommander {
         public FileItem? get_selected_item() {
             uint pos = selection_model.selected;
             if (pos == Gtk.INVALID_LIST_POSITION) {
+                pos = saved_selected_pos;
+            }
+            if (pos == Gtk.INVALID_LIST_POSITION || pos >= sort_model.get_n_items()) {
                 return null;
             }
             return (FileItem) sort_model.get_item(pos);
@@ -744,7 +957,8 @@ namespace VCommander {
         public void go_up() {
             var parent = current_directory.get_parent();
             if (parent != null) {
-                load_directory(parent);
+                string prev_folder_name = current_directory.get_basename();
+                load_directory(parent, prev_folder_name);
             }
         }
 
@@ -762,7 +976,9 @@ namespace VCommander {
             }
         }
 
-        public void load_directory(File dir) {
+        public void load_directory(File dir, string? target_select_name = null) {
+            hide_filter();
+
             if (load_cancellable != null) {
                 load_cancellable.cancel();
             }
@@ -777,10 +993,10 @@ namespace VCommander {
             path_entry.text = dir.get_parse_name();
             directory_changed(dir);
 
-            load_directory_async.begin(dir, load_cancellable);
+            load_directory_async.begin(dir, target_select_name, load_cancellable);
         }
 
-        private async void load_directory_async(File dir, Cancellable cancellable) {
+        private async void load_directory_async(File dir, string? target_select_name, Cancellable cancellable) {
             status_label.label = "Scanning directory...";
 
             var items = new GenericArray<FileItem>();
@@ -796,8 +1012,8 @@ namespace VCommander {
 
             try {
                 var enumerator = yield dir.enumerate_children_async(
-                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::icon,time::modified",
-                    FileQueryInfoFlags.NONE,
+                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::icon,time::modified",
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
                     Priority.DEFAULT,
                     cancellable
                 );
@@ -850,14 +1066,38 @@ namespace VCommander {
             } catch (Error e) {
             }
 
-            status_label.label = @"$(count_dirs) folders, $(count_files) files ($(format_size(total_bytes)))$(free_space_str)";
+            current_dir_stats = @"$(count_dirs) folders, $(count_files) files ($(format_size(total_bytes)))$(free_space_str)";
+            status_label.label = current_dir_stats;
 
-            if (store.get_n_items() > 0) {
-                selection_model.selected = 0;
-            }
+            uint total_items = sort_model.get_n_items();
+            if (total_items > 0) {
+                uint target_index = 0;
+                bool found_target = false;
 
-            if (is_active) {
-                grab_focus_to_list();
+                if (target_select_name != null && target_select_name.length > 0) {
+                    for (uint i = 0; i < total_items; i++) {
+                        var file_item = (FileItem) sort_model.get_item(i);
+                        if (file_item != null && !file_item.is_parent_dir && file_item.name == target_select_name) {
+                            target_index = i;
+                            found_target = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If not returning to a specific folder, select index 0 (the ".." parent directory or first item)
+                if (!found_target) {
+                    target_index = 0;
+                }
+
+                if (is_active) {
+                    selection_model.selected = target_index;
+                    scroll_to_selected();
+                    grab_focus_to_list();
+                } else {
+                    saved_selected_pos = target_index;
+                    selection_model.selected = Gtk.INVALID_LIST_POSITION;
+                }
             }
         }
     }

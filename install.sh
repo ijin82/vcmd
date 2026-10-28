@@ -54,7 +54,7 @@ except Exception as e:
 PYEOF
 
         if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+            gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
         fi
     fi
 
@@ -120,7 +120,7 @@ uninstall_app() {
             rm -f "${base_icon_dir}/${size}x${size}/apps/${APP_ID}.png"
         done
         if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-            gtk-update-icon-cache "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+            gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
         fi
     fi
 

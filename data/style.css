@@ -9,7 +9,12 @@
 }
 
 .file-panel.active-panel {
-    /* Subtle border styling: cursor in file list indicates active panel */
+    border-color: alpha(@accent_color, 0.45);
+    box-shadow: 0 0 0 1px alpha(@accent_color, 0.15);
+}
+
+.file-panel.panel-inactive {
+    border-color: alpha(@borders, 0.25);
 }
 
 .file-panel tabbar {
@@ -25,6 +30,17 @@
 
 .active-panel .panel-header {
     background-color: alpha(@headerbar_bg_color, 0.85);
+}
+
+.filter-box {
+    padding: 4px 8px;
+    background-color: alpha(@headerbar_bg_color, 0.75);
+    border-bottom: 1px solid alpha(@borders, 0.3);
+}
+
+.active-panel .filter-box {
+    background-color: alpha(@headerbar_bg_color, 0.95);
+    border-bottom: 1px solid alpha(@accent_color, 0.4);
 }
 
 .panel-status-bar {
@@ -48,17 +64,17 @@
     font-weight: bold;
 }
 
-.command-bar {
-    padding: 6px 10px;
-    background-color: alpha(@headerbar_bg_color, 0.7);
-    border-top: 1px solid alpha(@borders, 0.3);
+.file-item-symlink {
+    color: #26a269; /* Libadwaita green / cyan accent for symlinks */
+    font-style: italic;
 }
 
-.command-prompt {
-    font-family: monospace;
-    font-weight: bold;
-    color: @accent_color;
-    margin-right: 4px;
+:selected .file-item-symlink {
+    color: inherit;
+}
+
+.command-bar {
+    padding: 0;
 }
 
 .command-entry {
@@ -70,3 +86,51 @@
     border-radius: 4px;
     min-width: 170px;
 }
+
+/* Eliminate focus ring and selection transition lag in file lists */
+columnview,
+columnview *,
+gridview,
+gridview *,
+listview,
+listview *,
+row,
+row * {
+    transition: none !important;
+    animation: none !important;
+}
+
+/* Bottom MC-style Function Key Bar */
+.function-bar {
+    padding: 3px 4px 4px 4px;
+    background-color: alpha(@headerbar_bg_color, 0.5);
+    border-top: 1px solid alpha(@borders, 0.25);
+}
+
+.fn-button {
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid alpha(@borders, 0.3);
+    background-color: alpha(@headerbar_bg_color, 0.4);
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.fn-button:hover {
+    background-color: alpha(@accent_color, 0.15);
+    border-color: alpha(@accent_color, 0.4);
+}
+
+.fn-button:active {
+    background-color: alpha(@accent_color, 0.3);
+}
+
+.fn-key-badge {
+    font-weight: bold;
+    color: @accent_color;
+    font-size: 0.82em;
+}
+
+.fn-key-label {
+    font-size: 0.82em;
+}
+

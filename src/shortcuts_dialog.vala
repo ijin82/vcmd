@@ -25,12 +25,17 @@ namespace VCommander {
             add_shortcut_row(nav_group, "Jump to Top / Beginning", "Left Arrow");
             add_shortcut_row(nav_group, "Jump to End / Last Item", "Right Arrow");
             add_shortcut_row(nav_group, "Calculate Directory / File Size", "Ctrl + Space");
+            add_shortcut_row(nav_group, "Quick Filter (Substring)", "Ctrl + S");
+            add_shortcut_row(nav_group, "Increase Brief Column Width", "Ctrl + +");
+            add_shortcut_row(nav_group, "Decrease Brief Column Width", "Ctrl + -");
+            add_shortcut_row(nav_group, "Sync Other Panel Directory", "Esc > i / Alt + i");
             box.append(nav_group);
 
             // 2. Terminal Command Line
             var cmd_group = new Adw.PreferencesGroup();
             cmd_group.title = "Terminal Command Line";
             add_shortcut_row(cmd_group, "Start Typing Command", "Type letters / digits");
+            add_shortcut_row(cmd_group, "Insert Selected File Name", "Ctrl + Enter");
             add_shortcut_row(cmd_group, "Execute in Active Directory", "Enter (in command bar)");
             add_shortcut_row(cmd_group, "Fast Directory Navigation", "cd <dir> (e.g. cd /, cd ~)");
             add_shortcut_row(cmd_group, "Command History", "↑ / ↓");
@@ -52,15 +57,17 @@ namespace VCommander {
             gen_group.title = "General & Function Keys";
             add_shortcut_row(gen_group, "Keyboard Shortcuts", "F1");
             add_shortcut_row(gen_group, "Preferences", "Ctrl + ,");
+            add_shortcut_row(gen_group, "Toggle Window Header Bar", "Ctrl + Shift + H");
             add_shortcut_row(gen_group, "View File (Stage 4)", "F3");
             add_shortcut_row(gen_group, "Edit File (Stage 4)", "F4");
-            add_shortcut_row(gen_group, "Copy Files (Stage 3)", "F5");
-            add_shortcut_row(gen_group, "Move Files (Stage 3)", "F6");
-            add_shortcut_row(gen_group, "Create Folder (Stage 3)", "F7");
-            add_shortcut_row(gen_group, "Delete Files (Stage 3)", "F8");
+            add_shortcut_row(gen_group, "Copy Files", "F5");
+            add_shortcut_row(gen_group, "Move Files", "F6");
+            add_shortcut_row(gen_group, "Rename File / Folder", "Shift + F6");
+            add_shortcut_row(gen_group, "Create Folder", "F7");
+            add_shortcut_row(gen_group, "Delete Files", "F8");
+            add_shortcut_row(gen_group, "Quit Application", "F10 / Ctrl + Q");
             add_shortcut_row(gen_group, "Directory Bookmarks (Stage 5)", "Ctrl + \\");
             add_shortcut_row(gen_group, "Search Files (Stage 6)", "Alt + F7");
-            add_shortcut_row(gen_group, "Quit Application", "Ctrl + Q");
             box.append(gen_group);
 
             var scrolled = new Gtk.ScrolledWindow();
