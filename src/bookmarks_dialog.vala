@@ -217,25 +217,39 @@ namespace VCommander {
                     edit_dialog.add_response("save", "Save");
                     edit_dialog.set_default_response("save");
                     edit_dialog.set_close_response("cancel");
-                    edit_dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED);
-
-                    entry.activate.connect(() => {
-                        edit_dialog.response("save");
-                    });
-
-                    edit_dialog.choose.begin(dialog, null, (obj, res) => {
-                        string response = edit_dialog.choose.end(res);
-                        if (response == "save") {
-                            string new_name = (entry.text != null) ? entry.text.strip() : "";
-                            config.update_bookmark_name((uint) idx, new_name);
-                            populate_list();
-                        }
+                    bool edit_executed = false;
+                    SimpleAction do_edit_save = () => {
+                        if (edit_executed) return;
+                        edit_executed = true;
+                        string new_name = (entry.text != null) ? entry.text.strip() : "";
+                        config.update_bookmark_name((uint) idx, new_name);
+                        populate_list();
+                        edit_dialog.force_close();
                         var cur_row = list_box.get_row_at_index(idx);
                         if (cur_row != null) {
                             list_box.select_row(cur_row);
                             cur_row.grab_focus();
                         } else {
                             list_box.grab_focus();
+                        }
+                    };
+
+                    entry.activate.connect(() => {
+                        do_edit_save();
+                    });
+
+                    edit_dialog.choose.begin(dialog, null, (obj, res) => {
+                        string response = edit_dialog.choose.end(res);
+                        if (response == "save") {
+                            do_edit_save();
+                        } else {
+                            var cur_row = list_box.get_row_at_index(idx);
+                            if (cur_row != null) {
+                                list_box.select_row(cur_row);
+                                cur_row.grab_focus();
+                            } else {
+                                list_box.grab_focus();
+                            }
                         }
                     });
 
@@ -277,26 +291,34 @@ namespace VCommander {
                 add_dialog.set_close_response("cancel");
                 add_dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED);
 
+                bool add_executed = false;
+                SimpleAction do_add_save = () => {
+                    if (add_executed) return;
+                    add_executed = true;
+                    string custom_name = (entry.text != null) ? entry.text.strip() : "";
+                    config.add_bookmark(custom_name, cur_path);
+                    populate_list();
+                    add_dialog.force_close();
+
+                    // Select the newly added bookmark (last in list)
+                    int last_idx = (int) config.bookmarks.length - 1;
+                    if (last_idx >= 0) {
+                        var new_row = list_box.get_row_at_index(last_idx);
+                        if (new_row != null) {
+                            list_box.select_row(new_row);
+                            new_row.grab_focus();
+                        }
+                    }
+                };
+
                 entry.activate.connect(() => {
-                    add_dialog.response("add");
+                    do_add_save();
                 });
 
                 add_dialog.choose.begin(dialog, null, (obj, res) => {
                     string response = add_dialog.choose.end(res);
                     if (response == "add") {
-                        string custom_name = (entry.text != null) ? entry.text.strip() : "";
-                        config.add_bookmark(custom_name, cur_path);
-                        populate_list();
-
-                        // Select the newly added bookmark (last in list)
-                        int last_idx = (int) config.bookmarks.length - 1;
-                        if (last_idx >= 0) {
-                            var new_row = list_box.get_row_at_index(last_idx);
-                            if (new_row != null) {
-                                list_box.select_row(new_row);
-                                new_row.grab_focus();
-                            }
-                        }
+                        do_add_save();
                     } else {
                         var sel_row = list_box.get_selected_row();
                         if (sel_row != null) {

@@ -116,21 +116,8 @@ row * {
     border-top: 1px solid alpha(@borders, 0.25);
 }
 
-.fn-button {
-    padding: 3px 6px;
-    border-radius: 4px;
-    border: 1px solid alpha(@borders, 0.3);
-    background-color: alpha(@headerbar_bg_color, 0.4);
-    transition: background-color 150ms ease, border-color 150ms ease;
-}
-
-.fn-button:hover {
-    background-color: alpha(@accent_color, 0.15);
-    border-color: alpha(@accent_color, 0.4);
-}
-
-.fn-button:active {
-    background-color: alpha(@accent_color, 0.3);
+.fn-item {
+    padding: 2px 4px;
 }
 
 .fn-key-badge {

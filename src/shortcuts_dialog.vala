@@ -22,6 +22,7 @@ namespace VCommander {
             add_item(fn_section, "View File", "F3");
             add_item(fn_section, "Edit File", "F4");
             add_item(fn_section, "Copy Selected File(s)", "F5");
+            add_item(fn_section, "Create Symbolic Link(s)", "<Shift>F5");
             add_item(fn_section, "Move Selected File(s)", "F6");
             add_item(fn_section, "Rename Item In-Place", "<Shift>F6");
             add_item(fn_section, "Create New Directory", "F7");
@@ -41,6 +42,7 @@ namespace VCommander {
             add_item(nav_section, "Jump to First Item", "Home", "or Left Arrow");
             add_item(nav_section, "Jump to Last Item", "End", "or Right Arrow");
             add_item(nav_section, "Focus Path Entry", "<Control>l");
+            add_item(nav_section, "Refresh Directory", "<Control>r");
             add_item(nav_section, "Sync Opposite Panel Directory", "<Alt>i", "or Esc then i");
             add_item(nav_section, "Quick Filter by Substring", "<Control>s");
             add_item(nav_section, "Calculate Folder / File Size", "<Control>space", "or Space on folder");

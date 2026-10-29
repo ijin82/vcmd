@@ -128,6 +128,18 @@ namespace VCommander {
             }
         }
 
+        public void update_items_progress(string current_filename, int current_item, int total_items) {
+            item_label.label = current_filename;
+            if (total_items > 0) {
+                double frac = (double) current_item / (double) total_items;
+                if (frac > 1.0) frac = 1.0;
+                if (frac < 0.0) frac = 0.0;
+                progress_bar.fraction = frac;
+                progress_bar.text = @"$((int) (frac * 100))%";
+                details_label.label = @"$current_item of $total_items items";
+            }
+        }
+
         public void finish() {
             if (pending_timeout_id != 0) {
                 Source.remove(pending_timeout_id);

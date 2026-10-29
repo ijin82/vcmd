@@ -1004,6 +1004,12 @@ namespace VCommander {
                     path_entry.select_region(0, -1);
                     return Gdk.EVENT_STOP;
                 }
+                if ((latin_key == Gdk.Key.r || keyval == Gdk.Key.r || keyval == Gdk.Key.R) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    refresh();
+                    return Gdk.EVENT_STOP;
+                }
 
                 // Ctrl+Space: calculate folder or file size
                 if (keyval == Gdk.Key.space && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {

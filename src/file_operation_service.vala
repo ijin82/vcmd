@@ -22,6 +22,8 @@ namespace VCommander {
                 return @"File or directory not found: $(err.message)";
             } else if (err.matches(IOError.quark(), IOError.PERMISSION_DENIED)) {
                 return @"Permission denied: $(err.message)";
+            } else if (err.matches(IOError.quark(), IOError.NOT_SUPPORTED)) {
+                return @"Operation not supported by destination filesystem: $(err.message)";
             } else if (err.matches(IOError.quark(), IOError.NOT_EMPTY)) {
                 return @"Directory is not empty: $(err.message)";
             } else if (err.matches(IOError.quark(), IOError.NO_SPACE)) {
@@ -38,6 +40,36 @@ namespace VCommander {
 
         public static async void make_directory(File dir, Cancellable? cancellable = null) throws Error {
             yield dir.make_directory_async(Priority.DEFAULT, cancellable);
+        }
+
+        public static async void create_symbolic_link(
+            File symlink_file,
+            string target_path,
+            bool overwrite,
+            Cancellable? cancellable = null
+        ) throws Error {
+            if (overwrite) {
+                try {
+                    var info = yield symlink_file.query_info_async(
+                        FileAttribute.STANDARD_TYPE,
+                        FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                        Priority.DEFAULT,
+                        cancellable
+                    );
+                    if (info != null) {
+                        if (info.get_file_type() == FileType.DIRECTORY) {
+                            yield delete_recursive(symlink_file, cancellable);
+                        } else {
+                            yield symlink_file.delete_async(Priority.DEFAULT, cancellable);
+                        }
+                    }
+                } catch (Error e) {
+                    if (!e.matches(IOError.quark(), IOError.NOT_FOUND)) {
+                        throw e;
+                    }
+                }
+            }
+            yield symlink_file.make_symbolic_link_async(target_path, Priority.DEFAULT, cancellable);
         }
 
         public static async void trash_file(File file, Cancellable? cancellable = null) throws Error {

@@ -18,6 +18,8 @@ namespace VCommander {
         private Gtk.Label title_label;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
+        private Gtk.Label fn_f5_label;
+        private bool fn_shift_active = false;
         private GenericArray<string> command_history;
         private int history_index = -1;
         private string saved_input = "";
@@ -51,6 +53,11 @@ namespace VCommander {
             }
 
             close_request.connect(on_close_requested);
+            notify["is-active"].connect(() => {
+                if (!is_active) {
+                    update_function_bar_shift_state(false);
+                }
+            });
 
             // Ensure config exists on first run
             Timeout.add_seconds(1, () => {
@@ -176,21 +183,8 @@ row * {
     border-top: 1px solid alpha(@borders, 0.25);
 }
 
-.fn-button {
-    padding: 3px 6px;
-    border-radius: 4px;
-    border: 1px solid alpha(@borders, 0.3);
-    background-color: alpha(@headerbar_bg_color, 0.4);
-    transition: background-color 150ms ease, border-color 150ms ease;
-}
-
-.fn-button:hover {
-    background-color: alpha(@accent_color, 0.15);
-    border-color: alpha(@accent_color, 0.4);
-}
-
-.fn-button:active {
-    background-color: alpha(@accent_color, 0.3);
+.fn-item {
+    padding: 2px 4px;
 }
 
 .fn-key-badge {
@@ -916,52 +910,69 @@ row:selected .file-item-tagged {
         private void build_function_bar(Gtk.Box parent_box) {
             var config = ConfigManager.get_instance();
             fn_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
+            fn_bar.homogeneous = true;
             fn_bar.add_css_class("function-bar");
             fn_bar.visible = config.show_function_bar;
 
-            fn_bar.append(create_fn_button("1", "Help", () => { ShortcutsDialog.show(this); }));
-            fn_bar.append(create_fn_button("3", "View", () => { on_f3_view(); }));
-            fn_bar.append(create_fn_button("4", "Edit", () => { on_f4_edit(); }));
-            fn_bar.append(create_fn_button("5", "Copy", () => { on_f5_copy(); }));
-            fn_bar.append(create_fn_button("6", "Move", () => { on_f6_move(); }));
-            fn_bar.append(create_fn_button("7", "Mkdir", () => { on_f7_mkdir(); }));
-            fn_bar.append(create_fn_button("8", "Delete", () => { on_delete(false); }));
-            fn_bar.append(create_fn_button("10", "Quit", () => { close(); }));
+            Gtk.Label dummy;
+            fn_bar.append(create_fn_item("F1", "Help", out dummy));
+            fn_bar.append(create_fn_item("F3", "View", out dummy));
+            fn_bar.append(create_fn_item("F4", "Edit", out dummy));
+            fn_bar.append(create_fn_item("F5", "Copy", out fn_f5_label));
+            fn_bar.append(create_fn_item("F6", "Move", out dummy));
+            fn_bar.append(create_fn_item("F7", "Mkdir", out dummy));
+            fn_bar.append(create_fn_item("F8", "Delete", out dummy));
+            fn_bar.append(create_fn_item("F10", "Quit", out dummy));
 
             parent_box.append(fn_bar);
         }
 
-        private delegate void FnAction();
+        private Gtk.Widget create_fn_item(string key_badge, string label_text, out Gtk.Label out_label) {
+            var item_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
+            item_box.add_css_class("fn-item");
+            item_box.hexpand = true;
 
-        private Gtk.Button create_fn_button(string key_num, string label_text, owned FnAction action) {
-            var btn = new Gtk.Button();
-            btn.add_css_class("fn-button");
-            btn.hexpand = true;
+            var content_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
+            content_box.halign = Gtk.Align.CENTER;
+            content_box.hexpand = true;
 
-            var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
-            box.halign = Gtk.Align.CENTER;
-
-            var badge = new Gtk.Label(key_num);
+            var badge = new Gtk.Label(key_badge);
             badge.add_css_class("fn-key-badge");
 
             var lbl = new Gtk.Label(label_text);
             lbl.add_css_class("fn-key-label");
+            out_label = lbl;
 
-            box.append(badge);
-            box.append(lbl);
-            btn.child = box;
+            content_box.append(badge);
+            content_box.append(lbl);
+            item_box.append(content_box);
 
-            btn.clicked.connect(() => {
-                action();
-            });
+            return item_box;
+        }
 
-            return btn;
+        private void update_function_bar_shift_state(bool shift_pressed) {
+            if (fn_shift_active == shift_pressed) return;
+            fn_shift_active = shift_pressed;
+            if (fn_f5_label != null) {
+                fn_f5_label.label = shift_pressed ? "Symlink" : "Copy";
+            }
         }
 
         private void setup_keyboard_shortcuts(Gtk.Widget target_widget) {
             var key_controller = new Gtk.EventControllerKey();
             key_controller.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_controller.key_pressed.connect((keyval, keycode, state) => {
+                if (fn_bar != null && fn_bar.visible) {
+                    if (keyval == Gdk.Key.Shift_L || keyval == Gdk.Key.Shift_R) {
+                        update_function_bar_shift_state(true);
+                        return Gdk.EVENT_PROPAGATE;
+                    } else if ((state & Gdk.ModifierType.SHIFT_MASK) != 0) {
+                        update_function_bar_shift_state(true);
+                    } else {
+                        update_function_bar_shift_state(false);
+                    }
+                }
+
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
 
                 // When terminal drawer is visible, lock focus & inputs inside terminal except for toggle/close
@@ -1073,6 +1084,16 @@ row:selected .file-item-tagged {
                     (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
                     if (active_panel != null) {
                         BookmarksDialog.show(this, active_panel);
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+R: refresh directory of active panel (Midnight Commander style)
+                if ((latin_key == Gdk.Key.r || keyval == Gdk.Key.r || keyval == Gdk.Key.R) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (active_panel != null) {
+                        active_panel.refresh();
                     }
                     return Gdk.EVENT_STOP;
                 }
@@ -1239,9 +1260,13 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // F5: Copy
+                // F5: Copy (or Shift+F5: Symlink)
                 if (keyval == Gdk.Key.F5) {
-                    on_f5_copy();
+                    if ((state & Gdk.ModifierType.SHIFT_MASK) != 0) {
+                        on_shift_f5_symlink();
+                    } else {
+                        on_f5_copy();
+                    }
                     return Gdk.EVENT_STOP;
                 }
 
@@ -1299,6 +1324,20 @@ row:selected .file-item-tagged {
 
                 return Gdk.EVENT_PROPAGATE;
             });
+
+            key_controller.modifiers.connect((state) => {
+                if (fn_bar != null && fn_bar.visible) {
+                    update_function_bar_shift_state((state & Gdk.ModifierType.SHIFT_MASK) != 0);
+                }
+                return Gdk.EVENT_PROPAGATE;
+            });
+
+            key_controller.key_released.connect((keyval, keycode, state) => {
+                if (keyval == Gdk.Key.Shift_L || keyval == Gdk.Key.Shift_R) {
+                    update_function_bar_shift_state(false);
+                }
+            });
+
             target_widget.add_controller(key_controller);
         }
 
@@ -2345,6 +2384,215 @@ row:selected .file-item-tagged {
                 dlg.finish();
                 if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
                     show_error_dialog("Copy Error", FileOperationService.format_error(e, "copy"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            }
+        }
+
+        private void on_shift_f5_symlink() {
+            if (active_panel == null) return;
+
+            var tagged_items = active_panel.get_tagged_items();
+            var opp = get_opposite_panel();
+            File? dest_dir = opp.current_directory;
+
+            if (tagged_items.length > 0) {
+                if (dest_dir == null) {
+                    show_error_dialog("Symlink Error", "Opposite panel has no directory open.");
+                    return;
+                }
+                if (active_panel.current_directory != null && dest_dir.equal(active_panel.current_directory)) {
+                    show_error_dialog("Symlink Error", "Cannot create symbolic links in the same directory with identical names.");
+                    return;
+                }
+
+                string dest_path = dest_dir.get_path();
+                if (dest_path == null) dest_path = dest_dir.get_parse_name();
+
+                var dialog = new Adw.AlertDialog("Create Symbolic Links", @"Create $(tagged_items.length) symbolic links in:\n$dest_path");
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("create", "Create");
+                dialog.set_default_response("create");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "create") {
+                        do_symlink_multiple_items.begin(tagged_items, dest_dir);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
+            var item = active_panel.get_selected_item();
+            if (item == null || item.is_parent_dir) {
+                show_error_dialog("Symlink", "Please select a file or folder to create a symbolic link.");
+                return;
+            }
+
+            File default_dest_dir = (dest_dir != null) ? dest_dir : active_panel.current_directory;
+            File default_target_file = default_dest_dir.get_child(item.name);
+
+            string default_dest_path = default_target_file.get_path();
+            if (default_dest_path == null) {
+                default_dest_path = default_target_file.get_parse_name();
+            }
+
+            var dialog = new Adw.AlertDialog("Create Symbolic Link", @"Create symbolic link to '$(item.display_name)' at:");
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("create", "Create");
+            dialog.set_default_response("create");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED);
+
+            var entry = new Gtk.Entry();
+            entry.text = default_dest_path;
+            entry.margin_start = 12;
+            entry.margin_end = 12;
+            entry.margin_top = 8;
+            entry.margin_bottom = 8;
+            dialog.set_extra_child(entry);
+
+            bool action_executed = false;
+
+            entry.activate.connect(() => {
+                if (action_executed) return;
+                action_executed = true;
+                string dest_input = entry.text.strip();
+                dialog.force_close();
+                if (dest_input.length > 0) {
+                    prompt_execute_symlink.begin(item, dest_input);
+                }
+            });
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (action_executed) return;
+                if (resp == "create") {
+                    action_executed = true;
+                    string dest_input = entry.text.strip();
+                    if (dest_input.length > 0) {
+                        prompt_execute_symlink.begin(item, dest_input);
+                    }
+                } else {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
+                }
+            });
+
+            GLib.Idle.add(() => {
+                entry.grab_focus();
+                entry.set_position(-1);
+                return GLib.Source.REMOVE;
+            });
+        }
+
+        private async void prompt_execute_symlink(FileItem item, string dest_input) {
+            File? dest_target = resolve_dest_file(item, dest_input, "Symlink");
+            if (dest_target == null) return;
+
+            if (dest_target.equal(item.file)) {
+                show_error_dialog("Symlink Error", "Destination cannot be the same as the source file.");
+                return;
+            }
+
+            bool dest_exists = false;
+            try {
+                var info = yield dest_target.query_info_async(
+                    FileAttribute.STANDARD_TYPE,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    null
+                );
+                dest_exists = (info != null);
+            } catch (Error e) {
+                dest_exists = false;
+            }
+
+            string target_path = (item.file.get_path() != null) ? item.file.get_path() : item.file.get_uri();
+
+            if (dest_exists) {
+                var conflict_dlg = new Adw.AlertDialog(
+                    "File Already Exists",
+                    @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
+                );
+                conflict_dlg.add_response("cancel", "Cancel");
+                conflict_dlg.add_response("overwrite", "Overwrite");
+                conflict_dlg.set_default_response("cancel");
+                conflict_dlg.set_close_response("cancel");
+                conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                conflict_dlg.choose.begin(this, null, (obj, res) => {
+                    string resp = conflict_dlg.choose.end(res);
+                    if (resp == "overwrite") {
+                        do_create_symlink.begin(dest_target, target_path, true);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
+                    }
+                });
+            } else {
+                yield do_create_symlink(dest_target, target_path, false);
+            }
+        }
+
+        private async void do_create_symlink(File dest, string target_path, bool overwrite) {
+            var cancellable = new Cancellable();
+            try {
+                yield FileOperationService.create_symbolic_link(
+                    dest,
+                    target_path,
+                    overwrite,
+                    cancellable
+                );
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            } catch (Error e) {
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Symlink Error", FileOperationService.format_error(e, "create symbolic link"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            }
+        }
+
+        private async void do_symlink_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Creating $(items.length) symbolic links", cancellable);
+            dlg.present(this);
+
+            try {
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    var it = items[i];
+                    var dest_child = dest_dir.get_child(it.name);
+                    string target_path = (it.file.get_path() != null) ? it.file.get_path() : it.file.get_uri();
+                    dlg.update_items_progress(it.name, i + 1, items.length);
+
+                    yield FileOperationService.create_symbolic_link(
+                        dest_child,
+                        target_path,
+                        true,
+                        cancellable
+                    );
+                }
+
+                dlg.finish();
+                if (!cancellable.is_cancelled() && active_panel != null) {
+                    active_panel.clear_tags();
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Symlink Error", FileOperationService.format_error(e, "create symbolic link"));
                 }
                 left_panel.refresh();
                 right_panel.refresh();
