@@ -23,7 +23,11 @@ namespace VCommander {
 
             var quit_action = new SimpleAction("quit", null);
             quit_action.activate.connect(() => {
-                quit();
+                // Close windows gracefully so close_request handlers run
+                // (MainWindow saves its state there); the app exits once the last window closes.
+                foreach (var win in get_windows().copy()) {
+                    win.close();
+                }
             });
             add_action(quit_action);
             set_accels_for_action("app.quit", new string[] { "<Control>q", "<Control>Q" });
