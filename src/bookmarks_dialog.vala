@@ -343,6 +343,17 @@ namespace VCommander {
                 var focus_widget = dialog.get_focus();
                 bool list_has_focus = (focus_widget != null && (focus_widget == list_box || focus_widget.is_ancestor(list_box)));
                 if (list_has_focus) {
+                    // Tab / Shift+Tab: move out of list to bottom buttons
+                    if (keyval == Gdk.Key.Tab || keyval == Gdk.Key.KP_Tab || keyval == Gdk.Key.ISO_Left_Tab) {
+                        bool is_backward = (keyval == Gdk.Key.ISO_Left_Tab) || ((state & Gdk.ModifierType.SHIFT_MASK) != 0);
+                        if (is_backward) {
+                            close_button.grab_focus();
+                        } else {
+                            add_button.grab_focus();
+                        }
+                        return Gdk.EVENT_STOP;
+                    }
+
                     // Ctrl+Up / Ctrl+KP_Up: Move bookmark up
                     if ((keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) &&
                         (state & Gdk.ModifierType.CONTROL_MASK) != 0) {

@@ -319,9 +319,26 @@ namespace VCommander {
                     dialog.close();
                     return Gdk.EVENT_STOP;
                 }
+
+                var focused = dialog.get_focus();
+                bool list_has_focus = (focused != null && (focused == list_box || focused.is_ancestor(list_box)));
+
+                // Tab / Shift+Tab navigation when focus is in list_box:
+                // Move out of list to next/previous control instead of cycling through individual rows
+                if (keyval == Gdk.Key.Tab || keyval == Gdk.Key.KP_Tab || keyval == Gdk.Key.ISO_Left_Tab) {
+                    if (list_has_focus) {
+                        bool is_backward = (keyval == Gdk.Key.ISO_Left_Tab) || ((state & Gdk.ModifierType.SHIFT_MASK) != 0);
+                        if (is_backward) {
+                            search_entry.grab_focus();
+                        } else {
+                            always_use_check.grab_focus();
+                        }
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
                 // Enter / KP_Enter / ISO_Enter: only activate open when search entry or list row is focused
                 if (keyval == Gdk.Key.Return || keyval == Gdk.Key.KP_Enter || keyval == Gdk.Key.ISO_Enter) {
-                    var focused = dialog.get_focus();
                     if (focused != null && focused == cancel_button) {
                         return Gdk.EVENT_PROPAGATE;
                     }
