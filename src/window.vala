@@ -529,7 +529,7 @@ row:selected .file-item-tagged {
                     if (p != null) {
                         string escaped = p.replace("'", "'\\''");
                         if (vte_terminal != null && terminal_alive) {
-                            vte_terminal.feed_child(@"cd '$escaped'\n", -1);
+                            vte_terminal.feed_child(@"cd '$escaped'\n".data);
                             last_terminal_dir = p;
                         }
                     }
@@ -546,7 +546,7 @@ row:selected .file-item-tagged {
             clear_btn.clicked.connect(() => {
                 if (vte_terminal != null) {
                     vte_terminal.reset(true, true);
-                    vte_terminal.feed_child("\x0c", 1);
+                    vte_terminal.feed_child("\x0c".data);
                     vte_terminal.grab_focus();
                 }
             });
@@ -630,7 +630,11 @@ row:selected .file-item-tagged {
 
         private bool is_terminal_at_prompt() {
             if (vte_terminal == null || !terminal_alive) return false;
-            int pgrp = vte_terminal.get_foreground_pgrp();
+            var pty = vte_terminal.get_pty();
+            if (pty == null) return false;
+            int fd = pty.get_fd();
+            if (fd < 0) return false;
+            long pgrp = (long) Posix.tcgetpgrp(fd);
             if (pgrp <= 0) return false;
             string comm_path = @"/proc/$pgrp/comm";
             try {
@@ -652,7 +656,7 @@ row:selected .file-item-tagged {
 
             if (is_terminal_at_prompt()) {
                 string escaped = target_dir.replace("'", "'\\''");
-                vte_terminal.feed_child(@"cd '$escaped'\n", -1);
+                vte_terminal.feed_child(@"cd '$escaped'\n".data);
                 last_terminal_dir = target_dir;
             }
         }
@@ -700,13 +704,16 @@ row:selected .file-item-tagged {
             env = GLib.Environ.set_variable(env, "TERM", "xterm-256color", true);
             env = GLib.Environ.set_variable(env, "COLORTERM", "truecolor", true);
 
-            vte_terminal.spawn(
+            vte_terminal.spawn_async(
                 Vte.PtyFlags.DEFAULT,
                 cwd,
                 argv,
                 env,
                 GLib.SpawnFlags.SEARCH_PATH,
-                -1
+                null,
+                -1,
+                null,
+                null
             );
             terminal_alive = true;
             last_terminal_dir = cwd;
@@ -808,7 +815,7 @@ row:selected .file-item-tagged {
 
                     // Ctrl+Shift+C: copy terminal selection
                     if (latin_key == Gdk.Key.c && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
-                        if (vte_terminal != null) vte_terminal.copy_clipboard();
+                        if (vte_terminal != null) vte_terminal.copy_clipboard_format(Vte.Format.TEXT);
                         return Gdk.EVENT_STOP;
                     }
 
@@ -1287,7 +1294,7 @@ row:selected .file-item-tagged {
 
                     set_console_visible(true);
                     if (vte_terminal != null) {
-                        vte_terminal.feed_child(cmd + "\n", -1);
+                        vte_terminal.feed_child((cmd + "\n").data);
                     }
                     return;
                 }
