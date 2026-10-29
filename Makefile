@@ -23,6 +23,7 @@ SOURCES = \
 	src/shortcuts_dialog.vala \
 	src/preferences_dialog.vala \
 	src/bookmarks_dialog.vala \
+	src/open_with_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala

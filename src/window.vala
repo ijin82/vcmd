@@ -631,6 +631,16 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // Ctrl+O: Open selected file with...
+                if (latin_key == Gdk.Key.o &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (active_panel != null) {
+                        active_panel.open_selected_with_dialog();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
                 // Tab switches active panel (unless user is typing in command line)
                 if (keyval == Gdk.Key.Tab && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
                     if (cmd_entry.has_focus && cmd_entry.text.length > 0) {

@@ -1772,10 +1772,48 @@ namespace VCommander {
         }
 
         public void open_file_with_default_app(FileItem item) {
+            // Determine content type
+            string? content_type = null;
             try {
-                AppInfo.launch_default_for_uri(item.file.get_uri(), null);
+                var info = item.file.query_info(
+                    FileAttribute.STANDARD_CONTENT_TYPE + "," + FileAttribute.STANDARD_FAST_CONTENT_TYPE,
+                    FileQueryInfoFlags.NONE,
+                    null
+                );
+                content_type = info.get_content_type();
             } catch (Error e) {
-                error_occurred("Error opening file", @"Could not open $(item.name): $(e.message)");
+                // Ignore
+            }
+
+            if (content_type == null || content_type == "application/octet-stream") {
+                bool uncertain = false;
+                content_type = ContentType.guess(item.display_name, null, out uncertain);
+            }
+
+            if (content_type == null || content_type.length == 0) {
+                content_type = "application/octet-stream";
+            }
+
+            AppInfo? default_app = AppInfo.get_default_for_type(content_type, false);
+            if (default_app != null) {
+                try {
+                    var files = new GLib.List<File>();
+                    files.append(item.file);
+                    default_app.launch(files, null);
+                    return;
+                } catch (Error e) {
+                    warning("Failed to launch default app %s for %s: %s", default_app.get_display_name(), item.name, e.message);
+                }
+            }
+
+            // Fallback: If no default app exists or launching failed, open the "Open With..." dialog
+            open_file_with_dialog(item);
+        }
+
+        public void open_file_with_dialog(FileItem item) {
+            var root_window = get_root() as Gtk.Window;
+            if (root_window != null) {
+                OpenWithDialog.show(root_window, item.file, item.display_name);
             }
         }
 

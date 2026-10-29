@@ -158,6 +158,16 @@ namespace VCommander {
             return page != null ? page.get_selected_item() : null;
         }
 
+        public void open_selected_with_dialog() {
+            var page = get_current_page();
+            if (page != null) {
+                var item = page.get_selected_item();
+                if (item != null && !item.is_dir && !item.is_parent_dir) {
+                    page.open_file_with_dialog(item);
+                }
+            }
+        }
+
         public string? get_item_above_selection_or_first_tag() {
             var page = get_current_page();
             return page != null ? page.get_item_above_selection_or_first_tag() : null;

@@ -68,6 +68,8 @@ namespace VCommander {
         public int col_width_mtime { get; set; default = 175; }
         public string select_mask { get; set; default = "*"; }
         public bool select_mask_include_dirs { get; set; default = false; }
+        public int bookmarks_dialog_width { get; set; default = 640; }
+        public int bookmarks_dialog_height { get; set; default = 580; }
 
         public GenericArray<BookmarkItem> bookmarks { get; private set; }
 
@@ -365,6 +367,20 @@ namespace VCommander {
                         bookmarks.add(new BookmarkItem(n, p));
                     }
                 }
+                if (key_file.has_group("Bookmarks")) {
+                    if (key_file.has_key("Bookmarks", "DialogWidth")) {
+                        int bw = key_file.get_integer("Bookmarks", "DialogWidth");
+                        if (bw >= 400 && bw <= 3840) {
+                            bookmarks_dialog_width = bw;
+                        }
+                    }
+                    if (key_file.has_key("Bookmarks", "DialogHeight")) {
+                        int bh = key_file.get_integer("Bookmarks", "DialogHeight");
+                        if (bh >= 300 && bh <= 2160) {
+                            bookmarks_dialog_height = bh;
+                        }
+                    }
+                }
             } catch (Error e) {
                 warning("Failed to load configuration: %s", e.message);
             }
@@ -449,6 +465,8 @@ namespace VCommander {
                     key_file.set_string_list("Bookmarks", "Names", b_names);
                     key_file.set_string_list("Bookmarks", "Paths", b_paths);
                 }
+                key_file.set_integer("Bookmarks", "DialogWidth", bookmarks_dialog_width);
+                key_file.set_integer("Bookmarks", "DialogHeight", bookmarks_dialog_height);
 
                 // Ensure directory exists
                 string config_dir = Path.get_dirname(config_path);

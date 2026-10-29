@@ -1,110 +1,108 @@
 namespace VCommander {
 
     public class ShortcutsDialog : Object {
+        private static Adw.ShortcutsDialog? active_dialog = null;
+
         public static void show(Gtk.Window parent) {
-            var dialog = new Adw.AlertDialog("Vala Commander", "Keyboard Shortcuts & Controls");
-            dialog.add_response("close", "Close");
-            dialog.set_default_response("close");
-            dialog.set_close_response("close");
+            if (active_dialog != null) {
+                active_dialog.present(parent);
+                return;
+            }
 
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 16);
-            box.margin_top = 8;
-            box.margin_bottom = 8;
-            box.margin_start = 8;
-            box.margin_end = 8;
+            var dialog = new Adw.ShortcutsDialog();
+            active_dialog = dialog;
 
-            // 1. Navigation & Panes
-            var nav_group = new Adw.PreferencesGroup();
-            nav_group.title = "Navigation & Panes";
-            add_shortcut_row(nav_group, "Switch Active Pane", "Tab");
-            add_shortcut_row(nav_group, "Tag / Untag File or Folder", "Insert / Right Click");
-            add_shortcut_row(nav_group, "Clear All Tags / Selection", "Double Escape");
-            add_shortcut_row(nav_group, "Select by Mask", "+ (Keypad) / Shift + +");
-            add_shortcut_row(nav_group, "Enter Folder / Open File", "Enter / Double Click");
-            add_shortcut_row(nav_group, "Go to Parent Directory", "Backspace / Alt + Up");
-            add_shortcut_row(nav_group, "Focus Path Entry", "Ctrl + L");
-            add_shortcut_row(nav_group, "Cycle View (Brief / Detailed / Super)", "Alt + T");
-            add_shortcut_row(nav_group, "Toggle Hidden Files", "Ctrl + H");
-            add_shortcut_row(nav_group, "Jump to Top / Beginning", "Left Arrow");
-            add_shortcut_row(nav_group, "Jump to End / Last Item", "Right Arrow");
-            add_shortcut_row(nav_group, "Calculate Directory / File Size", "Ctrl + Space");
-            add_shortcut_row(nav_group, "Quick Filter (Substring)", "Ctrl + S");
-            add_shortcut_row(nav_group, "Increase Brief Column Width", "Ctrl + +");
-            add_shortcut_row(nav_group, "Decrease Brief Column Width", "Ctrl + -");
-            add_shortcut_row(nav_group, "Sync Other Panel Directory", "Esc > i / Alt + i");
-            box.append(nav_group);
+            dialog.closed.connect(() => {
+                active_dialog = null;
+            });
 
-            // 2. Terminal Command Line
-            var cmd_group = new Adw.PreferencesGroup();
-            cmd_group.title = "Terminal Command Line";
-            add_shortcut_row(cmd_group, "Start Typing Command", "Type letters / digits");
-            add_shortcut_row(cmd_group, "Insert Selected File Name", "Ctrl + Enter");
-            add_shortcut_row(cmd_group, "Execute in Active Directory", "Enter (in command bar)");
-            add_shortcut_row(cmd_group, "Fast Directory Navigation", "cd <dir> (e.g. cd /, cd ~)");
-            add_shortcut_row(cmd_group, "Command History", "↑ / ↓");
-            add_shortcut_row(cmd_group, "Cancel & Focus File List", "Escape");
-            box.append(cmd_group);
+            // 1. Function Keys (F1..F10)
+            var fn_section = new Adw.ShortcutsSection("Function Keys (F1..F10)");
+            add_item(fn_section, "Help & Shortcuts", "F1");
+            add_item(fn_section, "View File", "F3");
+            add_item(fn_section, "Edit File", "F4");
+            add_item(fn_section, "Copy Selected File(s)", "F5");
+            add_item(fn_section, "Move Selected File(s)", "F6");
+            add_item(fn_section, "Rename Item In-Place", "<Shift>F6");
+            add_item(fn_section, "Create New Directory", "F7");
+            add_item(fn_section, "Move to Trash", "F8", "or Delete");
+            add_item(fn_section, "Permanently Delete", "<Shift>F8", "or Shift+Delete");
+            add_item(fn_section, "Quit Vala Commander", "F10", "or Ctrl+Q");
+            add_item(fn_section, "Search Files & Content", "<Alt>F7", "Stage 6");
+            dialog.add(fn_section);
 
-            // 3. Tab Management
-            var tab_group = new Adw.PreferencesGroup();
-            tab_group.title = "Tab Management";
-            add_shortcut_row(tab_group, "New Tab", "Ctrl + T");
-            add_shortcut_row(tab_group, "Rename Current Tab (max 15 chars)", "Ctrl + Shift + T");
-            add_shortcut_row(tab_group, "Close Current Tab", "Ctrl + W");
-            add_shortcut_row(tab_group, "Previous Tab", "Ctrl + Page Up / Ctrl + Shift + Tab");
-            add_shortcut_row(tab_group, "Next Tab", "Ctrl + Page Down / Ctrl + Tab");
-            box.append(tab_group);
+            // 2. Navigation & Panels
+            var nav_section = new Adw.ShortcutsSection("Navigation & Panes");
+            add_item(nav_section, "Switch Active Pane", "Tab");
+            add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
+            add_item(nav_section, "Open With...", "<Control>o", "Choose custom application");
+            add_item(nav_section, "Go to Parent Directory", "BackSpace", "or Alt+Up");
+            add_item(nav_section, "Jump to First Item", "Home", "or Left Arrow");
+            add_item(nav_section, "Jump to Last Item", "End", "or Right Arrow");
+            add_item(nav_section, "Focus Path Entry", "<Control>l");
+            add_item(nav_section, "Sync Opposite Panel Directory", "<Alt>i", "or Esc then i");
+            add_item(nav_section, "Quick Filter by Substring", "<Control>s");
+            add_item(nav_section, "Calculate Folder / File Size", "<Control>space", "or Space on folder");
+            add_item(nav_section, "Cycle View Mode", "<Alt>t", "Brief -> Detailed -> Super Detailed");
+            add_item(nav_section, "Toggle Hidden Files", "<Control>h");
+            add_item(nav_section, "Increase Brief Column Width", "<Control>plus");
+            add_item(nav_section, "Decrease Brief Column Width", "<Control>minus");
+            dialog.add(nav_section);
 
-            // 4. Directory Bookmarks (Hotlist)
-            var bm_group = new Adw.PreferencesGroup();
-            bm_group.title = "Directory Bookmarks (Ctrl + \\)";
-            add_shortcut_row(bm_group, "Open Bookmarks Dialog", "Ctrl + \\");
-            add_shortcut_row(bm_group, "Add Current Directory", "Ctrl + A");
-            add_shortcut_row(bm_group, "Navigate to Selected Bookmark", "Enter / Double Click");
-            add_shortcut_row(bm_group, "Edit Bookmark Name", "E");
-            add_shortcut_row(bm_group, "Move Bookmark Up", "Ctrl + Up");
-            add_shortcut_row(bm_group, "Move Bookmark Down", "Ctrl + Down");
-            add_shortcut_row(bm_group, "Delete Selected Bookmark", "Delete");
-            box.append(bm_group);
+            // 3. Selection & Tagging
+            var sel_section = new Adw.ShortcutsSection("Selection & Tagging");
+            add_item(sel_section, "Tag / Untag Current Item", "Insert", "or Right Click");
+            add_item(sel_section, "Select by Mask (Wildcards)", "plus", "Keypad + or Shift + +");
+            add_item(sel_section, "Clear All Tags / Selection", "Escape", "Press Escape twice quickly");
+            dialog.add(sel_section);
 
-            // 5. General & Function Keys (with stage indicators)
-            var gen_group = new Adw.PreferencesGroup();
-            gen_group.title = "General & Function Keys";
-            add_shortcut_row(gen_group, "Keyboard Shortcuts", "F1");
-            add_shortcut_row(gen_group, "Preferences", "Ctrl + ,");
-            add_shortcut_row(gen_group, "Toggle Window Header Bar", "Ctrl + Shift + H");
-            add_shortcut_row(gen_group, "View File", "F3");
-            add_shortcut_row(gen_group, "Edit File", "F4");
-            add_shortcut_row(gen_group, "Copy Files", "F5");
-            add_shortcut_row(gen_group, "Move Files", "F6");
-            add_shortcut_row(gen_group, "Rename File / Folder", "Shift + F6");
-            add_shortcut_row(gen_group, "Create Folder", "F7");
-            add_shortcut_row(gen_group, "Delete (Trash)", "Delete / F8");
-            add_shortcut_row(gen_group, "Permanent Delete", "Shift + Delete / Shift + F8");
-            add_shortcut_row(gen_group, "Quit Application", "F10 / Ctrl + Q");
-            add_shortcut_row(gen_group, "Directory Bookmarks", "Ctrl + \\");
-            add_shortcut_row(gen_group, "Search Files (Stage 6)", "Alt + F7");
-            box.append(gen_group);
+            // 4. Tabs Management
+            var tab_section = new Adw.ShortcutsSection("Tab Management");
+            add_item(tab_section, "New Tab", "<Control>t");
+            add_item(tab_section, "Rename Current Tab", "<Control><Shift>t", "Up to 15 characters");
+            add_item(tab_section, "Close Current Tab", "<Control>w");
+            add_item(tab_section, "Previous Tab", "<Control>Page_Up", "or Ctrl+Shift+Tab");
+            add_item(tab_section, "Next Tab", "<Control>Page_Down", "or Ctrl+Tab");
+            dialog.add(tab_section);
 
-            var scrolled = new Gtk.ScrolledWindow();
-            scrolled.propagate_natural_height = true;
-            scrolled.max_content_height = 540;
-            scrolled.min_content_width = 640;
-            scrolled.width_request = 640;
-            scrolled.set_child(box);
+            // 5. Directory Bookmarks (Hotlist)
+            var bm_section = new Adw.ShortcutsSection("Directory Bookmarks");
+            add_item(bm_section, "Open Bookmarks Dialog", "<Control>backslash");
+            add_item(bm_section, "Add Current Directory", "<Control>a", "Inside bookmarks dialog");
+            add_item(bm_section, "Open Selected Bookmark", "Return", "Inside bookmarks dialog");
+            add_item(bm_section, "Edit Bookmark Name", "e", "Inside bookmarks dialog");
+            add_item(bm_section, "Move Bookmark Up", "<Control>Up", "Inside bookmarks dialog");
+            add_item(bm_section, "Move Bookmark Down", "<Control>Down", "Inside bookmarks dialog");
+            add_item(bm_section, "Delete Selected Bookmark", "Delete", "Inside bookmarks dialog");
+            dialog.add(bm_section);
 
-            dialog.set_extra_child(scrolled);
+            // 6. Terminal Command Bar
+            var cmd_section = new Adw.ShortcutsSection("Terminal Command Line");
+            add_item(cmd_section, "Start Typing Command", "Return", "Type letters or digits anywhere in list");
+            add_item(cmd_section, "Insert Selected File Name", "<Control>Return");
+            add_item(cmd_section, "Execute Command in Active Dir", "Return", "When command entry is focused");
+            add_item(cmd_section, "Fast Directory Navigation", "Return", "cd <dir> (e.g. cd /, cd ~)");
+            add_item(cmd_section, "Command History", "Up", "Up / Down arrow keys");
+            add_item(cmd_section, "Cancel & Focus File List", "Escape");
+            dialog.add(cmd_section);
+
+            // 7. Application & Settings
+            var app_section = new Adw.ShortcutsSection("Application & Settings");
+            add_item(app_section, "Preferences Dialog", "<Control>comma");
+            add_item(app_section, "Toggle Header Bar", "<Control><Shift>h");
+            add_item(app_section, "Reset Splitter to 50/50", "Return", "Double click pane divider handle");
+            add_item(app_section, "Quit Vala Commander", "<Control>q", "or F10");
+            dialog.add(app_section);
+
             dialog.present(parent);
         }
 
-        private static void add_shortcut_row(Adw.PreferencesGroup group, string title, string shortcut) {
-            var row = new Adw.ActionRow();
-            row.title = Markup.escape_text(title);
-            var badge = new Gtk.Label("<tt><b>%s</b></tt>".printf(Markup.escape_text(shortcut)));
-            badge.use_markup = true;
-            badge.add_css_class("dim-label");
-            row.add_suffix(badge);
-            group.add(row);
+        private static void add_item(Adw.ShortcutsSection section, string title, string accelerator, string? subtitle = null) {
+            var item = new Adw.ShortcutsItem(title, accelerator);
+            if (subtitle != null && subtitle.length > 0) {
+                item.subtitle = subtitle;
+            }
+            section.add(item);
         }
     }
 }
