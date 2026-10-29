@@ -12,7 +12,7 @@ This document tracks the original 7-stage architectural plan for **Vala Commande
 | **Stage 2** | Tabs, Configuration & State Persistence | **Completed (100%)** | `Adw.TabBar` + `Adw.TabView`, `Ctrl+T`, `Ctrl+W`, `Ctrl+Shift+T` rename, `~/.config/vcmd/config` via `GLib.KeyFile`, Preferences dialog (`Ctrl+,`). |
 | **Stage 3** | File Operations & Unified Error Handling (F5, F6, F7, F8) | **Completed (100%)** | Centralized `FileOperationService` (`GLib.IOError` handler), F7 mkdir, F8 recursive delete, F5 copy, F6 move/rename with conflict resolution, bottom F1-F10 bar. |
 | **Stage 4** | File Viewing & Editing (F3, F4) | **Completed (100%)** | Configurable external editor/viewer execution (gnome-text-editor, gvim, code, terminal fallback). |
-| **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) | **Pending** | Midnight Commander-style directory bookmark popup, add/remove hotlist, persistent storage. |
+| **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) | **Completed (100%)** | Midnight Commander-style directory bookmark popup, add/remove hotlist, persistent storage. |
 | **Stage 6** | Search Engine (`Alt+F7`) | **Pending** | Background recursive directory search by filename mask and file contents. |
 | **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Pending** | GVfs SFTP connection prompt and integration. |
 
@@ -110,13 +110,14 @@ This document tracks the original 7-stage architectural plan for **Vala Commande
 
 ---
 
-### [ ] Stage 5: Directory Bookmarks / Hotlist (`Ctrl+\`)
-- [ ] Bookmarks dialog (`Ctrl+\`):
-  - View list of saved directory bookmarks.
-  - Add current directory to bookmarks (`Ctrl+A` or button).
-  - Remove bookmark (`Delete` or button).
-  - Jump to selected bookmark in active panel (`Enter`).
-- [ ] Persist bookmarks in `~/.config/vcmd/config`.
+### [x] Stage 5: Directory Bookmarks / Hotlist (`Ctrl+\`)
+- [x] Bookmarks dialog (`Ctrl+\`):
+  - View list of saved directory bookmarks with titles, subtitles (full path/URI), and folder icons.
+  - Add current directory to bookmarks (`Ctrl+A` or button) with custom title (up to 50 chars, defaults to full path if empty).
+  - Remove bookmark (`Delete` key or row delete button).
+  - Jump to selected bookmark in active panel (`Enter` or double click).
+  - Support for local paths and remote/virtual GVfs URIs (sftp, ftp, etc.).
+- [x] Persist bookmarks in `~/.config/vcmd/config` under `[Bookmarks]`.
 
 ---
 

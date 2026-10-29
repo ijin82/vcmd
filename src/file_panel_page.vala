@@ -22,7 +22,7 @@ namespace VCommander {
 
     public class FilePanelPage : Gtk.Box {
         public File current_directory { get; private set; }
-        public bool show_hidden { get; set; default = false; }
+        public bool show_hidden { get; private set; default = false; }
         public PanelViewMode view_mode { get; private set; default = PanelViewMode.DETAILED; }
         public bool is_brief_view { get { return view_mode == PanelViewMode.BRIEF; } }
         public bool is_active { get; private set; default = false; }
@@ -54,6 +54,7 @@ namespace VCommander {
         private Gtk.Box status_box;
         private Gtk.Label status_label;
         private Gtk.Button view_toggle_button;
+        private Gtk.ToggleButton hidden_toggle;
         private Cancellable? load_cancellable = null;
         private Cancellable? dir_calc_cancellable = null;
         private FileItem? calculating_item = null;
@@ -85,6 +86,7 @@ namespace VCommander {
         public signal void columns_layout_changed();
         public signal void sort_changed();
         public signal void view_mode_changed();
+        public signal void toggle_hidden_requested();
 
         public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc") {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -167,14 +169,15 @@ namespace VCommander {
             });
             header_box.append(refresh_button);
 
-            var hidden_toggle = new Gtk.ToggleButton();
+            hidden_toggle = new Gtk.ToggleButton();
             hidden_toggle.focusable = false;
             hidden_toggle.icon_name = "view-more-symbolic";
             hidden_toggle.tooltip_text = "Show hidden files (Ctrl+H)";
             hidden_toggle.active = show_hidden;
             hidden_toggle.toggled.connect(() => {
-                show_hidden = hidden_toggle.active;
-                refresh();
+                if (show_hidden != hidden_toggle.active) {
+                    toggle_hidden_requested();
+                }
             });
             header_box.append(hidden_toggle);
 
@@ -975,8 +978,7 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
                 if (latin_key == Gdk.Key.h && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    show_hidden = !show_hidden;
-                    refresh();
+                    toggle_hidden_requested();
                     return Gdk.EVENT_STOP;
                 }
                 if (latin_key == Gdk.Key.l && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
@@ -1750,6 +1752,16 @@ namespace VCommander {
             if (parent != null) {
                 string prev_folder_name = current_directory.get_basename();
                 load_directory(parent, prev_folder_name);
+            }
+        }
+
+        public void apply_show_hidden(bool hidden) {
+            if (this.show_hidden != hidden) {
+                this.show_hidden = hidden;
+                if (hidden_toggle != null && hidden_toggle.active != hidden) {
+                    hidden_toggle.active = hidden;
+                }
+                refresh();
             }
         }
 

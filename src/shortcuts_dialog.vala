@@ -55,7 +55,19 @@ namespace VCommander {
             add_shortcut_row(tab_group, "Next Tab", "Ctrl + Page Down / Ctrl + Tab");
             box.append(tab_group);
 
-            // 4. General & Function Keys (with stage indicators)
+            // 4. Directory Bookmarks (Hotlist)
+            var bm_group = new Adw.PreferencesGroup();
+            bm_group.title = "Directory Bookmarks (Ctrl + \\)";
+            add_shortcut_row(bm_group, "Open Bookmarks Dialog", "Ctrl + \\");
+            add_shortcut_row(bm_group, "Add Current Directory", "Ctrl + A");
+            add_shortcut_row(bm_group, "Navigate to Selected Bookmark", "Enter / Double Click");
+            add_shortcut_row(bm_group, "Edit Bookmark Name", "E");
+            add_shortcut_row(bm_group, "Move Bookmark Up", "Ctrl + Up");
+            add_shortcut_row(bm_group, "Move Bookmark Down", "Ctrl + Down");
+            add_shortcut_row(bm_group, "Delete Selected Bookmark", "Delete");
+            box.append(bm_group);
+
+            // 5. General & Function Keys (with stage indicators)
             var gen_group = new Adw.PreferencesGroup();
             gen_group.title = "General & Function Keys";
             add_shortcut_row(gen_group, "Keyboard Shortcuts", "F1");
@@ -70,7 +82,7 @@ namespace VCommander {
             add_shortcut_row(gen_group, "Delete (Trash)", "Delete / F8");
             add_shortcut_row(gen_group, "Permanent Delete", "Shift + Delete / Shift + F8");
             add_shortcut_row(gen_group, "Quit Application", "F10 / Ctrl + Q");
-            add_shortcut_row(gen_group, "Directory Bookmarks (Stage 5)", "Ctrl + \\");
+            add_shortcut_row(gen_group, "Directory Bookmarks", "Ctrl + \\");
             add_shortcut_row(gen_group, "Search Files (Stage 6)", "Alt + F7");
             box.append(gen_group);
 

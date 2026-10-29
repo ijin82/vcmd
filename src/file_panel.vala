@@ -14,6 +14,7 @@ namespace VCommander {
         public signal void tab_sort_changed(FilePanel panel);
         public signal void tabs_state_changed(FilePanel panel);
         public signal void view_mode_changed(FilePanel panel);
+        public signal void toggle_hidden_requested();
 
         public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -196,11 +197,11 @@ namespace VCommander {
                 if (current != null && current.current_directory != null) {
                     target_dir = current.current_directory;
                     vmode = current.view_mode.to_string_id();
-                    hidden = current.show_hidden;
                 } else {
                     target_dir = File.new_for_path(Environment.get_home_dir());
                 }
             }
+            hidden = ConfigManager.get_instance().show_hidden;
 
             var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order);
             page_widget.hexpand = true;
@@ -234,6 +235,9 @@ namespace VCommander {
             page_widget.view_mode_changed.connect(() => {
                 tabs_state_changed(this);
                 view_mode_changed(this);
+            });
+            page_widget.toggle_hidden_requested.connect(() => {
+                toggle_hidden_requested();
             });
 
             var page = tab_view.append(page_widget);
@@ -481,6 +485,14 @@ namespace VCommander {
             var page = get_current_page();
             if (page != null) {
                 page.load_directory(dir, target_select_name);
+            }
+        }
+
+        public void set_show_hidden(bool hidden) {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pw.apply_show_hidden(hidden);
             }
         }
 

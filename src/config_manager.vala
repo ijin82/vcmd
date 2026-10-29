@@ -1,5 +1,20 @@
 namespace VCommander {
 
+    public class BookmarkItem : Object {
+        public string name { get; set; default = ""; }
+        public string uri_or_path { get; set; default = ""; }
+
+        public BookmarkItem(string name, string uri_or_path) {
+            this.name = (name != null) ? name.strip() : "";
+            this.uri_or_path = (uri_or_path != null) ? uri_or_path.strip() : "";
+        }
+
+        public string get_display_title() {
+            string trimmed = (name != null) ? name.strip() : "";
+            return (trimmed.length > 0) ? trimmed : uri_or_path;
+        }
+    }
+
     public class ConfigManager : Object {
         private static ConfigManager? _instance = null;
         public static ConfigManager get_instance() {
@@ -39,6 +54,7 @@ namespace VCommander {
 
         public bool show_path_toolbar { get; set; default = true; }
         public bool show_function_bar { get; set; default = true; }
+        public bool show_hidden { get; set; default = false; }
         public int brief_column_width { get; set; default = 180; }
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
@@ -50,6 +66,10 @@ namespace VCommander {
         public int col_width_type { get; set; default = 80; }
         public int col_width_size { get; set; default = 110; }
         public int col_width_mtime { get; set; default = 175; }
+        public string select_mask { get; set; default = "*"; }
+        public bool select_mask_include_dirs { get; set; default = false; }
+
+        public GenericArray<BookmarkItem> bookmarks { get; private set; }
 
         public static string detect_default_editor() {
             string[] candidates = {
@@ -95,7 +115,63 @@ namespace VCommander {
             viewer_command = detect_default_editor();
             editor_command = detect_default_editor();
 
+            bookmarks = new GenericArray<BookmarkItem>();
+            bookmarks.add(new BookmarkItem("Home", home));
+            bookmarks.add(new BookmarkItem("Root", "/"));
+
             load();
+        }
+
+        public void add_bookmark(string name, string uri_or_path) {
+            string trimmed_name = name.strip();
+            if (trimmed_name.char_count() > 50) {
+                trimmed_name = trimmed_name.substring(0, 50);
+            }
+            bookmarks.add(new BookmarkItem(trimmed_name, uri_or_path.strip()));
+            save();
+        }
+
+        public void remove_bookmark(uint index) {
+            if (index < bookmarks.length) {
+                bookmarks.remove_index(index);
+                save();
+            }
+        }
+
+        public bool move_bookmark_up(uint index) {
+            if (index > 0 && index < bookmarks.length) {
+                var item = bookmarks.get(index);
+                var prev = bookmarks.get(index - 1);
+                bookmarks.set(index - 1, item);
+                bookmarks.set(index, prev);
+                save();
+                return true;
+            }
+            return false;
+        }
+
+        public bool move_bookmark_down(uint index) {
+            if (index + 1 < bookmarks.length) {
+                var item = bookmarks.get(index);
+                var next = bookmarks.get(index + 1);
+                bookmarks.set(index + 1, item);
+                bookmarks.set(index, next);
+                save();
+                return true;
+            }
+            return false;
+        }
+
+        public void update_bookmark_name(uint index, string new_name) {
+            if (index < bookmarks.length) {
+                var bm = bookmarks.get(index);
+                string trimmed = (new_name != null) ? new_name.strip() : "";
+                if (trimmed.char_count() > 50) {
+                    trimmed = trimmed.substring(0, 50);
+                }
+                bm.name = trimmed;
+                save();
+            }
         }
 
         public void load() {
@@ -131,6 +207,13 @@ namespace VCommander {
                 if (key_file.has_key("General", "ShowFunctionBar")) {
                     show_function_bar = key_file.get_boolean("General", "ShowFunctionBar");
                 }
+                if (key_file.has_key("General", "ShowHidden")) {
+                    show_hidden = key_file.get_boolean("General", "ShowHidden");
+                } else if (key_file.has_key("LeftPanel", "ShowHidden")) {
+                    show_hidden = key_file.get_boolean("LeftPanel", "ShowHidden");
+                }
+                left_show_hidden = show_hidden;
+                right_show_hidden = show_hidden;
                 if (key_file.has_key("General", "BriefColumnWidth")) {
                     brief_column_width = key_file.get_integer("General", "BriefColumnWidth");
                     if (brief_column_width < 100) brief_column_width = 100;
@@ -161,6 +244,15 @@ namespace VCommander {
                     if (ecmd.length > 0) {
                         editor_command = ecmd;
                     }
+                }
+                if (key_file.has_key("General", "SelectMask")) {
+                    string smask = key_file.get_string("General", "SelectMask");
+                    if (smask.length > 0) {
+                        select_mask = smask;
+                    }
+                }
+                if (key_file.has_key("General", "SelectMaskIncludeDirs")) {
+                    select_mask_include_dirs = key_file.get_boolean("General", "SelectMaskIncludeDirs");
                 }
                 if (key_file.has_key("Columns", "Order")) {
                     var order = key_file.get_string_list("Columns", "Order");
@@ -258,6 +350,21 @@ namespace VCommander {
                 if (key_file.has_key("RightPanel", "ShowHidden")) {
                     right_show_hidden = key_file.get_boolean("RightPanel", "ShowHidden");
                 }
+
+                // Bookmarks
+                if (key_file.has_group("Bookmarks") && key_file.has_key("Bookmarks", "Paths")) {
+                    var paths = key_file.get_string_list("Bookmarks", "Paths");
+                    string[] names = {};
+                    if (key_file.has_key("Bookmarks", "Names")) {
+                        names = key_file.get_string_list("Bookmarks", "Names");
+                    }
+                    bookmarks = new GenericArray<BookmarkItem>();
+                    for (int i = 0; i < paths.length; i++) {
+                        string p = paths[i];
+                        string n = (i < names.length) ? names[i] : "";
+                        bookmarks.add(new BookmarkItem(n, p));
+                    }
+                }
             } catch (Error e) {
                 warning("Failed to load configuration: %s", e.message);
             }
@@ -275,12 +382,15 @@ namespace VCommander {
                 // General
                 key_file.set_boolean("General", "ShowPathToolbar", show_path_toolbar);
                 key_file.set_boolean("General", "ShowFunctionBar", show_function_bar);
+                key_file.set_boolean("General", "ShowHidden", show_hidden);
                 key_file.set_integer("General", "BriefColumnWidth", brief_column_width);
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);
                 key_file.set_string("General", "CommandShell", command_shell);
                 key_file.set_string("General", "ViewerCommand", viewer_command.length > 0 ? viewer_command : detect_default_editor());
                 key_file.set_string("General", "EditorCommand", editor_command.length > 0 ? editor_command : detect_default_editor());
+                key_file.set_string("General", "SelectMask", select_mask.length > 0 ? select_mask : "*");
+                key_file.set_boolean("General", "SelectMaskIncludeDirs", select_mask_include_dirs);
 
                 // Columns
                 if (col_order != null && col_order.length > 0) {
@@ -326,6 +436,19 @@ namespace VCommander {
                 key_file.set_integer("RightPanel", "ActiveTab", right_active_tab);
                 key_file.set_boolean("RightPanel", "BriefView", right_brief_view);
                 key_file.set_boolean("RightPanel", "ShowHidden", right_show_hidden);
+
+                // Bookmarks
+                if (bookmarks != null) {
+                    string[] b_names = new string[bookmarks.length];
+                    string[] b_paths = new string[bookmarks.length];
+                    for (uint i = 0; i < bookmarks.length; i++) {
+                        var bm = bookmarks.get(i);
+                        b_names[i] = bm.name;
+                        b_paths[i] = bm.uri_or_path;
+                    }
+                    key_file.set_string_list("Bookmarks", "Names", b_names);
+                    key_file.set_string_list("Bookmarks", "Paths", b_paths);
+                }
 
                 // Ensure directory exists
                 string config_dir = Path.get_dirname(config_path);

@@ -22,6 +22,7 @@ SOURCES = \
 	src/operation_progress_dialog.vala \
 	src/shortcuts_dialog.vala \
 	src/preferences_dialog.vala \
+	src/bookmarks_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala

@@ -332,8 +332,8 @@ row:selected .file-item-tagged {
             paned.vexpand = true;
             paned.wide_handle = true;
 
-            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.left_show_hidden, config.left_sort_cols, config.left_sort_orders, config.left_view_modes);
-            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.right_show_hidden, config.right_sort_cols, config.right_sort_orders, config.right_view_modes);
+            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.show_hidden, config.left_sort_cols, config.left_sort_orders, config.left_view_modes);
+            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.show_hidden, config.right_sort_cols, config.right_sort_orders, config.right_view_modes);
 
             left_panel.panel_activated.connect(on_panel_activated);
             right_panel.panel_activated.connect(on_panel_activated);
@@ -366,6 +366,13 @@ row:selected .file-item-tagged {
             });
             right_panel.view_mode_changed.connect((p) => {
                 update_super_view_layout();
+            });
+
+            left_panel.toggle_hidden_requested.connect(() => {
+                toggle_show_hidden();
+            });
+            right_panel.toggle_hidden_requested.connect(() => {
+                toggle_show_hidden();
             });
 
             left_panel.columns_layout_changed.connect((origin) => {
@@ -601,6 +608,16 @@ row:selected .file-item-tagged {
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
                     (state & Gdk.ModifierType.SHIFT_MASK) != 0) {
                     header_bar.visible = !header_bar.visible;
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+\: Directory Bookmarks / Hotlist (Midnight Commander style)
+                if ((latin_key == Gdk.Key.backslash || keyval == Gdk.Key.backslash) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (active_panel != null) {
+                        BookmarksDialog.show(this, active_panel);
+                    }
                     return Gdk.EVENT_STOP;
                 }
 
@@ -1158,6 +1175,8 @@ row:selected .file-item-tagged {
             dialog.set_close_response("cancel");
             dialog.set_response_appearance("select", Adw.ResponseAppearance.SUGGESTED);
 
+            var config = ConfigManager.get_instance();
+
             var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
             box.margin_start = 12;
             box.margin_end = 12;
@@ -1165,11 +1184,11 @@ row:selected .file-item-tagged {
             box.margin_bottom = 8;
 
             var entry = new Gtk.Entry();
-            entry.text = "*";
+            entry.text = (config.select_mask != null && config.select_mask.length > 0) ? config.select_mask : "*";
             entry.placeholder_text = "*.lst, *abc*";
 
             var check_dirs = new Gtk.CheckButton.with_label("Apply to folders");
-            check_dirs.active = false;
+            check_dirs.active = config.select_mask_include_dirs;
 
             box.append(entry);
             box.append(check_dirs);
@@ -1180,6 +1199,10 @@ row:selected .file-item-tagged {
                 bool inc_dirs = check_dirs.active;
                 dialog.force_close();
                 if (pattern.length > 0 && active_panel != null) {
+                    config.select_mask = pattern;
+                    config.select_mask_include_dirs = inc_dirs;
+                    config.save();
+
                     active_panel.select_by_mask(pattern, inc_dirs);
                     active_panel.grab_focus_to_list();
                 }
@@ -1190,6 +1213,10 @@ row:selected .file-item-tagged {
                 if (resp == "select") {
                     string pattern = entry.text.strip();
                     if (pattern.length > 0 && active_panel != null) {
+                        config.select_mask = pattern;
+                        config.select_mask_include_dirs = check_dirs.active;
+                        config.save();
+
                         active_panel.select_by_mask(pattern, check_dirs.active);
                     }
                 }
@@ -2214,6 +2241,7 @@ row:selected .file-item-tagged {
             config.left_view_modes = left_panel.get_tab_view_modes();
             config.left_active_tab = left_panel.get_active_tab_index();
             config.left_brief_view = left_panel.is_brief_view;
+            config.show_hidden = left_panel.show_hidden;
             config.left_show_hidden = left_panel.show_hidden;
 
             // Right panel state
@@ -2227,6 +2255,18 @@ row:selected .file-item-tagged {
             config.right_show_hidden = right_panel.show_hidden;
 
             config.save();
+        }
+
+        public void toggle_show_hidden() {
+            var config = ConfigManager.get_instance();
+            bool new_val = !config.show_hidden;
+            config.show_hidden = new_val;
+            config.left_show_hidden = new_val;
+            config.right_show_hidden = new_val;
+            config.save();
+
+            left_panel.set_show_hidden(new_val);
+            right_panel.set_show_hidden(new_val);
         }
 
         private bool on_close_requested() {
