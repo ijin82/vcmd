@@ -1,26 +1,28 @@
 namespace VCommander {
 
     public class BookmarksDialog : Object {
-        private static Adw.Dialog? active_dialog = null;
+        private static Adw.Window? active_dialog = null;
 
         private delegate void SimpleAction();
 
         public static void show(Gtk.Window parent_window, FilePanel target_panel) {
             if (active_dialog != null) {
-                active_dialog.present(parent_window);
+                active_dialog.present();
                 return;
             }
 
             var config = ConfigManager.get_instance();
 
-            var dialog = new Adw.Dialog();
+            var dialog = new Adw.Window();
             active_dialog = dialog;
             dialog.title = "Directory Bookmarks";
+            dialog.transient_for = parent_window;
+            dialog.modal = true;
+            dialog.resizable = true;
 
             int init_w = (config.bookmarks_dialog_width >= 400) ? config.bookmarks_dialog_width : 640;
             int init_h = (config.bookmarks_dialog_height >= 300) ? config.bookmarks_dialog_height : 580;
-            dialog.content_width = init_w;
-            dialog.content_height = init_h;
+            dialog.set_default_size(init_w, init_h);
 
             var toolbar_view = new Adw.ToolbarView();
 
@@ -67,7 +69,7 @@ namespace VCommander {
 
             toolbar_view.add_bottom_bar(bottom_bar);
 
-            dialog.set_child(toolbar_view);
+            dialog.set_content(toolbar_view);
 
             // Helper to populate list
             SimpleAction populate_list = () => {
@@ -373,9 +375,15 @@ namespace VCommander {
             });
             toolbar_view.add_controller(key_ctrl);
 
-            dialog.closed.connect(() => {
-                int cur_w = dialog.content_width;
-                int cur_h = dialog.content_height;
+            dialog.close_request.connect(() => {
+                int cur_w = dialog.get_width();
+                int cur_h = dialog.get_height();
+                if (cur_w <= 0 || cur_h <= 0) {
+                    int def_w, def_h;
+                    dialog.get_default_size(out def_w, out def_h);
+                    if (cur_w <= 0) cur_w = def_w;
+                    if (cur_h <= 0) cur_h = def_h;
+                }
                 if (cur_w >= 400 && cur_h >= 300) {
                     config.bookmarks_dialog_width = cur_w;
                     config.bookmarks_dialog_height = cur_h;
@@ -384,9 +392,10 @@ namespace VCommander {
 
                 active_dialog = null;
                 target_panel.grab_focus_to_list();
+                return false;
             });
 
-            dialog.present(parent_window);
+            dialog.present();
 
             GLib.Idle.add(() => {
                 var first_row = list_box.get_row_at_index(0);

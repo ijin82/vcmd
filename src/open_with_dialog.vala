@@ -312,15 +312,19 @@ namespace VCommander {
                 dialog.close();
             });
 
-            // Key controller
+            // Key controller (BUBBLE phase so buttons receive Enter/Space naturally)
             var key_ctrl = new Gtk.EventControllerKey();
-            key_ctrl.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_ctrl.key_pressed.connect((keyval, keycode, state) => {
                 if (keyval == Gdk.Key.Escape) {
                     dialog.close();
                     return Gdk.EVENT_STOP;
                 }
+                // Enter / KP_Enter / ISO_Enter: only activate open when search entry or list row is focused
                 if (keyval == Gdk.Key.Return || keyval == Gdk.Key.KP_Enter || keyval == Gdk.Key.ISO_Enter) {
+                    var focused = dialog.get_focus();
+                    if (focused != null && focused == cancel_button) {
+                        return Gdk.EVENT_PROPAGATE;
+                    }
                     execute_open();
                     return Gdk.EVENT_STOP;
                 }

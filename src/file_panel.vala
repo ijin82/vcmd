@@ -319,18 +319,7 @@ namespace VCommander {
             dialog.set_focus(entry);
 
             entry.activate.connect(() => {
-                string new_name = entry.text.strip();
-                if (new_name.char_count() > 15) {
-                    new_name = new_name.substring(0, 15);
-                }
-                if (new_name.length > 0) {
-                    page_widget.custom_title = new_name;
-                } else {
-                    page_widget.custom_title = null;
-                }
-                update_tab_title(page_widget);
-                dialog.force_close();
-                grab_focus_to_list();
+                dialog.response("apply");
             });
 
             dialog.choose.begin(parent_window, null, (obj, res) => {
