@@ -56,6 +56,7 @@ namespace VCommander {
         public bool show_function_bar { get; set; default = true; }
         public bool show_hidden { get; set; default = false; }
         public int brief_column_width { get; set; default = 180; }
+        public string app_theme { get; set; default = "system"; }
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
         public string command_shell { get; set; default = "/bin/bash"; }
@@ -232,6 +233,12 @@ namespace VCommander {
                     brief_column_width = key_file.get_integer("General", "BriefColumnWidth");
                     if (brief_column_width < 100) brief_column_width = 100;
                     if (brief_column_width > 800) brief_column_width = 800;
+                }
+                if (key_file.has_key("General", "Theme")) {
+                    string th = key_file.get_string("General", "Theme").strip();
+                    if (th.length > 0) {
+                        app_theme = th;
+                    }
                 }
                 if (key_file.has_key("General", "PanelFontName")) {
                     panel_font_name = key_file.get_string("General", "PanelFontName");
@@ -475,6 +482,7 @@ namespace VCommander {
                 key_file.set_boolean("General", "ShowFunctionBar", show_function_bar);
                 key_file.set_boolean("General", "ShowHidden", show_hidden);
                 key_file.set_integer("General", "BriefColumnWidth", brief_column_width);
+                key_file.set_string("General", "Theme", app_theme);
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);
                 key_file.set_string("General", "CommandShell", command_shell);

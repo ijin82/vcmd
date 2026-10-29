@@ -71,10 +71,56 @@ namespace VCommander {
             panel_group.add(column_width_row);
             page.add(panel_group);
 
-            // Fonts & Appearance Group
+            // Appearance & Typography Group
             var font_group = new Adw.PreferencesGroup();
-            font_group.title = "Fonts &amp; Appearance";
-            font_group.description = "Typography settings for dual-pane file lists and grids";
+            font_group.title = "Appearance &amp; Typography";
+            font_group.description = "Color scheme and typography settings for panels and interface";
+
+            var app_theme_row = new Adw.ComboRow();
+            app_theme_row.title = "Application theme";
+            app_theme_row.subtitle = "Color theme for the window and interface";
+            var app_theme_list = new Gtk.StringList(null);
+            app_theme_list.append("Follow System (Auto)");
+            app_theme_list.append("Light");
+            app_theme_list.append("Dark");
+            app_theme_list.append("Solarized Dark");
+            app_theme_list.append("Solarized Light");
+            app_theme_row.model = app_theme_list;
+
+            if (config.app_theme == "light") {
+                app_theme_row.selected = 1;
+            } else if (config.app_theme == "dark") {
+                app_theme_row.selected = 2;
+            } else if (config.app_theme == "solarized-dark") {
+                app_theme_row.selected = 3;
+            } else if (config.app_theme == "solarized-light") {
+                app_theme_row.selected = 4;
+            } else {
+                app_theme_row.selected = 0;
+            }
+
+            app_theme_row.notify["selected"].connect(() => {
+                switch (app_theme_row.selected) {
+                    case 1:
+                        config.app_theme = "light";
+                        break;
+                    case 2:
+                        config.app_theme = "dark";
+                        break;
+                    case 3:
+                        config.app_theme = "solarized-dark";
+                        break;
+                    case 4:
+                        config.app_theme = "solarized-light";
+                        break;
+                    default:
+                        config.app_theme = "system";
+                        break;
+                }
+                config.save();
+                main_win.apply_preferences();
+            });
+            font_group.add(app_theme_row);
 
             var font_row = new Adw.ActionRow();
             font_row.title = "Panel font";

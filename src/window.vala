@@ -21,6 +21,7 @@ namespace VCommander {
         private GenericArray<string> command_history;
         private int history_index = -1;
         private string saved_input = "";
+        private Gtk.CssProvider theme_css_provider;
         private Gtk.CssProvider font_css_provider;
         private bool escape_sequence_pending = false;
         private uint escape_sequence_timeout_id = 0;
@@ -233,6 +234,50 @@ row:selected .file-item-tagged {
 }
 """;
 
+        private const string SOLARIZED_DARK_CSS = """
+@define-color accent_color #268bd2;
+@define-color accent_bg_color #268bd2;
+@define-color accent_fg_color #ffffff;
+@define-color window_bg_color #002b36;
+@define-color window_fg_color #839496;
+@define-color view_bg_color #073642;
+@define-color view_fg_color #93a1a1;
+@define-color headerbar_bg_color #002b36;
+@define-color headerbar_fg_color #839496;
+@define-color headerbar_border_color alpha(#586e75, 0.5);
+@define-color headerbar_backdrop_color #002b36;
+@define-color card_bg_color #073642;
+@define-color card_fg_color #93a1a1;
+@define-color dialog_bg_color #002b36;
+@define-color dialog_fg_color #839496;
+@define-color popover_bg_color #073642;
+@define-color popover_fg_color #93a1a1;
+@define-color borders alpha(#586e75, 0.45);
+@define-color secondary_color #586e75;
+""";
+
+        private const string SOLARIZED_LIGHT_CSS = """
+@define-color accent_color #268bd2;
+@define-color accent_bg_color #268bd2;
+@define-color accent_fg_color #ffffff;
+@define-color window_bg_color #fdf6e3;
+@define-color window_fg_color #657b83;
+@define-color view_bg_color #eee8d5;
+@define-color view_fg_color #586e75;
+@define-color headerbar_bg_color #fdf6e3;
+@define-color headerbar_fg_color #657b83;
+@define-color headerbar_border_color alpha(#93a1a1, 0.5);
+@define-color headerbar_backdrop_color #fdf6e3;
+@define-color card_bg_color #eee8d5;
+@define-color card_fg_color #586e75;
+@define-color dialog_bg_color #fdf6e3;
+@define-color dialog_fg_color #657b83;
+@define-color popover_bg_color #eee8d5;
+@define-color popover_fg_color #586e75;
+@define-color borders alpha(#93a1a1, 0.45);
+@define-color secondary_color #93a1a1;
+""";
+
         private void load_css_styles() {
             var provider = new Gtk.CssProvider();
             provider.load_from_string(DEFAULT_STYLE_CSS);
@@ -257,13 +302,55 @@ row:selected .file-item-tagged {
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             );
 
+            theme_css_provider = new Gtk.CssProvider();
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                theme_css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5
+            );
+
             font_css_provider = new Gtk.CssProvider();
             Gtk.StyleContext.add_provider_for_display(
                 Gdk.Display.get_default(),
                 font_css_provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10
             );
+            apply_app_theme();
             apply_font_styles();
+        }
+
+        public void apply_app_theme() {
+            var config = ConfigManager.get_instance();
+            var sm = Adw.StyleManager.get_default();
+            string theme = config.app_theme.strip();
+
+            if (theme == "light") {
+                sm.color_scheme = Adw.ColorScheme.FORCE_LIGHT;
+                if (theme_css_provider != null) {
+                    theme_css_provider.load_from_string("");
+                }
+            } else if (theme == "dark") {
+                sm.color_scheme = Adw.ColorScheme.FORCE_DARK;
+                if (theme_css_provider != null) {
+                    theme_css_provider.load_from_string("");
+                }
+            } else if (theme == "solarized-dark") {
+                sm.color_scheme = Adw.ColorScheme.FORCE_DARK;
+                if (theme_css_provider != null) {
+                    theme_css_provider.load_from_string(SOLARIZED_DARK_CSS);
+                }
+            } else if (theme == "solarized-light") {
+                sm.color_scheme = Adw.ColorScheme.FORCE_LIGHT;
+                if (theme_css_provider != null) {
+                    theme_css_provider.load_from_string(SOLARIZED_LIGHT_CSS);
+                }
+            } else {
+                // "system" / default
+                sm.color_scheme = Adw.ColorScheme.DEFAULT;
+                if (theme_css_provider != null) {
+                    theme_css_provider.load_from_string("");
+                }
+            }
         }
 
         public void apply_font_styles() {
@@ -2644,6 +2731,7 @@ row:selected .file-item-tagged {
             }
             left_panel.update_brief_column_width();
             right_panel.update_brief_column_width();
+            apply_app_theme();
             apply_font_styles();
             apply_terminal_font();
             apply_terminal_theme();
