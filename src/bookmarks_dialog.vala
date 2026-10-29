@@ -370,29 +370,17 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
 
-                return Gdk.EVENT_PROPAGATE;
-            });
-
-            // Key controller for dialog shortcuts (BUBBLE phase so focused buttons receive Enter/Space)
-            var key_ctrl = new Gtk.EventControllerKey();
-            key_ctrl.key_pressed.connect((keyval, keycode, state) => {
-                uint latin_key = KeyUtils.to_latin(keyval, keycode);
-
-                // Escape: Close
-                if (keyval == Gdk.Key.Escape) {
-                    dialog.close();
-                    return Gdk.EVENT_STOP;
-                }
-
-                // Ctrl+A: Add current directory
-                if (latin_key == Gdk.Key.a && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                // Ctrl+A: Add current directory (must be handled here, otherwise
+                // GtkListBox's built-in select-all binding consumes it)
+                if (latin_key == Gdk.Key.a &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
                     prompt_add_current();
                     return Gdk.EVENT_STOP;
                 }
 
                 return Gdk.EVENT_PROPAGATE;
             });
-            toolbar_view.add_controller(key_ctrl);
 
             dialog.closed.connect(() => {
                 active_dialog = null;
