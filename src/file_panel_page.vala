@@ -1125,6 +1125,36 @@ namespace VCommander {
             view_mode_changed();
         }
 
+        public void apply_sort(string sort_col, string sort_order) {
+            this.sort_column_id = (sort_col == "size" || sort_col == "mtime" || sort_col == "owner" || sort_col == "group" || sort_col == "perm") ? sort_col : "name";
+            this.sort_order_str = (sort_order == "desc") ? "desc" : "asc";
+
+            Gtk.ColumnViewColumn target_col = name_col;
+            if (sort_column_id == "size") {
+                target_col = size_col;
+            } else if (sort_column_id == "mtime") {
+                target_col = time_col;
+            }
+            Gtk.SortType target_dir = (sort_order_str == "desc") ? Gtk.SortType.DESCENDING : Gtk.SortType.ASCENDING;
+            if (column_view != null) {
+                column_view.sort_by_column(target_col, target_dir);
+            }
+
+            Gtk.ColumnViewColumn super_target_col = super_name_col;
+            if (sort_column_id == "size") {
+                super_target_col = super_size_col;
+            } else if (sort_column_id == "owner") {
+                super_target_col = super_owner_col;
+            } else if (sort_column_id == "group") {
+                super_target_col = super_group_col;
+            } else if (sort_column_id == "perm") {
+                super_target_col = super_perm_col;
+            }
+            if (super_column_view != null) {
+                super_column_view.sort_by_column(super_target_col, target_dir);
+            }
+        }
+
         private void update_view_toggle_button() {
             if (view_toggle_button == null) return;
             switch (view_mode) {
@@ -1554,8 +1584,27 @@ namespace VCommander {
             return null;
         }
         public void apply_columns_order(string[] order) {
-            updating_columns = true;
             var cols_model = column_view.get_columns();
+            uint n = cols_model.get_n_items();
+
+            // Check if current order already matches the requested order
+            bool matches = true;
+            uint real_cols = 0;
+            for (uint i = 0; i < n; i++) {
+                var c = (Gtk.ColumnViewColumn) cols_model.get_item(i);
+                if (c.id == "dummy") continue;
+                if (real_cols >= order.length || c.id != order[real_cols]) {
+                    matches = false;
+                    break;
+                }
+                real_cols++;
+            }
+            if (matches && real_cols == order.length) {
+                return;
+            }
+
+            bool prev_updating = updating_columns;
+            updating_columns = true;
             while (cols_model.get_n_items() > 0) {
                 column_view.remove_column((Gtk.ColumnViewColumn) cols_model.get_item(0));
             }
@@ -1579,7 +1628,7 @@ namespace VCommander {
             if (dummy_col != null) {
                 column_view.append_column(dummy_col);
             }
-            updating_columns = false;
+            updating_columns = prev_updating;
         }
 
         private bool column_has_been_added(string col_id) {
@@ -1651,25 +1700,27 @@ namespace VCommander {
         }
 
         public void update_columns_layout() {
+            if (updating_columns) return;
             var config = ConfigManager.get_instance();
             updating_columns = true;
 
             apply_columns_order(config.col_order);
 
             // Detailed view
-            if (config.col_width_name > 30) name_col.fixed_width = config.col_width_name;
-            if (config.col_width_size > 30) size_col.fixed_width = config.col_width_size;
-            if (config.col_width_mtime > 30) time_col.fixed_width = config.col_width_mtime;
+            if (config.col_width_name > 30 && name_col.fixed_width != config.col_width_name) name_col.fixed_width = config.col_width_name;
+            if (config.col_width_size > 30 && size_col.fixed_width != config.col_width_size) size_col.fixed_width = config.col_width_size;
+            if (config.col_width_mtime > 30 && time_col.fixed_width != config.col_width_mtime) time_col.fixed_width = config.col_width_mtime;
 
             // Super Detailed view
-            if (config.super_col_width_name > 30) super_name_col.fixed_width = config.super_col_width_name;
-            if (config.super_col_width_owner > 20) super_owner_col.fixed_width = config.super_col_width_owner;
-            if (config.super_col_width_group > 20) super_group_col.fixed_width = config.super_col_width_group;
-            if (config.super_col_width_perm > 20) super_perm_col.fixed_width = config.super_col_width_perm;
-            if (config.super_col_width_size > 20) super_size_col.fixed_width = config.super_col_width_size;
+            if (config.super_col_width_name > 30 && super_name_col.fixed_width != config.super_col_width_name) super_name_col.fixed_width = config.super_col_width_name;
+            if (config.super_col_width_owner > 20 && super_owner_col.fixed_width != config.super_col_width_owner) super_owner_col.fixed_width = config.super_col_width_owner;
+            if (config.super_col_width_group > 20 && super_group_col.fixed_width != config.super_col_width_group) super_group_col.fixed_width = config.super_col_width_group;
+            if (config.super_col_width_perm > 20 && super_perm_col.fixed_width != config.super_col_width_perm) super_perm_col.fixed_width = config.super_col_width_perm;
+            if (config.super_col_width_size > 20 && super_size_col.fixed_width != config.super_col_width_size) super_size_col.fixed_width = config.super_col_width_size;
 
             updating_columns = false;
         }
+
         private void apply_tag_class(Gtk.Widget widget, bool is_tagged) {
             if (is_tagged) {
                 widget.add_css_class("file-item-tagged");

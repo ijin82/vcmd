@@ -405,7 +405,7 @@ namespace VCommander {
             }
         }
 
-        private void update_tab_title(FilePanelPage page_widget) {
+        public void update_tab_title(FilePanelPage page_widget) {
             var page = tab_view.get_page(page_widget);
             if (page == null) return;
 

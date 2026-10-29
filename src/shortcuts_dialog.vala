@@ -44,6 +44,7 @@ namespace VCommander {
             add_item(nav_section, "Focus Path Entry", "<Control>l");
             add_item(nav_section, "Refresh Directory", "<Control>r");
             add_item(nav_section, "Sync Opposite Panel Directory", "<Alt>i", "or Esc then i");
+            add_item(nav_section, "Swap Panels", "<Control>u", "Exchange active tabs between panels");
             add_item(nav_section, "Quick Filter by Substring", "<Control>s");
             add_item(nav_section, "Calculate Folder / File Size", "<Control>space", "or Space on folder");
             add_item(nav_section, "Cycle View Mode", "<Alt>t", "Brief -> Detailed -> Super Detailed");

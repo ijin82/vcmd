@@ -815,12 +815,12 @@ row:selected .file-item-tagged {
             var config = ConfigManager.get_instance();
             string theme = config.terminal_color_theme.strip();
 
-            if (theme == "solarized-dark") {
+            if (theme == "dracula" || theme == "solarized-dark") {
                 string[] hex_palette = {
-                    "#073642", "#dc322f", "#859900", "#b58900",
-                    "#268bd2", "#d33682", "#2aa198", "#eee8d5",
-                    "#002b36", "#cb4b16", "#586e75", "#657b83",
-                    "#839496", "#6c71c4", "#93a1a1", "#fdf6e3"
+                    "#21222c", "#ff3333", "#50fa7b", "#f1fa8c",
+                    "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+                    "#6272a4", "#ff5555", "#69ff94", "#ffffa5",
+                    "#d6acff", "#ff92df", "#a4ffff", "#ffffff"
                 };
                 Gdk.RGBA[] palette = new Gdk.RGBA[16];
                 for (int i = 0; i < 16; i++) {
@@ -829,19 +829,26 @@ row:selected .file-item-tagged {
                     palette[i] = c;
                 }
                 Gdk.RGBA fg = {};
-                fg.parse("#839496");
+                fg.parse("#f8f8f2");
                 Gdk.RGBA bg = {};
-                bg.parse("#002b36");
+                bg.parse("#282a36");
                 Gdk.RGBA cur = {};
-                cur.parse("#93a1a1");
+                cur.parse("#f8f8f2");
+                Gdk.RGBA sel_fg = {};
+                sel_fg.parse("#ffffff");
+                Gdk.RGBA sel_bg = {};
+                sel_bg.parse("#44475a");
                 vte_terminal.set_colors(fg, bg, palette);
                 vte_terminal.set_color_cursor(cur);
-            } else if (theme == "solarized-light") {
+                vte_terminal.set_color_cursor_foreground(bg);
+                vte_terminal.set_color_highlight(sel_bg);
+                vte_terminal.set_color_highlight_foreground(sel_fg);
+            } else if (theme == "tango" || theme == "solarized-light") {
                 string[] hex_palette = {
-                    "#073642", "#dc322f", "#859900", "#b58900",
-                    "#268bd2", "#d33682", "#2aa198", "#eee8d5",
-                    "#002b36", "#cb4b16", "#586e75", "#657b83",
-                    "#839496", "#6c71c4", "#93a1a1", "#fdf6e3"
+                    "#2e3436", "#cc0000", "#4e9a06", "#c4a000",
+                    "#3465a4", "#75507b", "#06989a", "#d3d7cf",
+                    "#555753", "#ef2929", "#8ae234", "#fce94f",
+                    "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec"
                 };
                 Gdk.RGBA[] palette = new Gdk.RGBA[16];
                 for (int i = 0; i < 16; i++) {
@@ -850,13 +857,22 @@ row:selected .file-item-tagged {
                     palette[i] = c;
                 }
                 Gdk.RGBA fg = {};
-                fg.parse("#657b83");
+                fg.parse("#eeeeec");
                 Gdk.RGBA bg = {};
-                bg.parse("#fdf6e3");
+                bg.parse("#300a24");
                 Gdk.RGBA cur = {};
-                cur.parse("#586e75");
+                cur.parse("#bbbbbb");
+                Gdk.RGBA cur_fg = {};
+                cur_fg.parse("#ffffff");
+                Gdk.RGBA sel_fg = {};
+                sel_fg.parse("#300a24");
+                Gdk.RGBA sel_bg = {};
+                sel_bg.parse("#eeeeec");
                 vte_terminal.set_colors(fg, bg, palette);
                 vte_terminal.set_color_cursor(cur);
+                vte_terminal.set_color_cursor_foreground(cur_fg);
+                vte_terminal.set_color_highlight(sel_bg);
+                vte_terminal.set_color_highlight_foreground(sel_fg);
             } else if (theme == "green-on-black") {
                 string[] hex_palette = {
                     "#000000", "#aa0000", "#00aa00", "#aa5500",
@@ -878,9 +894,45 @@ row:selected .file-item-tagged {
                 cur.parse("#20c20e");
                 vte_terminal.set_colors(fg, bg, palette);
                 vte_terminal.set_color_cursor(cur);
+                vte_terminal.set_color_cursor_foreground(null);
+                vte_terminal.set_color_highlight(null);
+                vte_terminal.set_color_highlight_foreground(null);
+            } else if (theme == "ansi-1987") {
+                string[] hex_palette = {
+                    "#000000", "#aa0000", "#00aa00", "#aa5500",
+                    "#004499", "#aa00aa", "#00aaaa", "#aaaaaa",
+                    "#555555", "#ff5555", "#55ff55", "#ffff55",
+                    "#5555ff", "#ff55ff", "#55ffff", "#ffffff"
+                };
+                Gdk.RGBA[] palette = new Gdk.RGBA[16];
+                for (int i = 0; i < 16; i++) {
+                    Gdk.RGBA c = {};
+                    c.parse(hex_palette[i]);
+                    palette[i] = c;
+                }
+                Gdk.RGBA fg = {};
+                fg.parse("#50aa4b");
+                Gdk.RGBA bg = {};
+                bg.parse("#000000");
+                Gdk.RGBA cur = {};
+                cur.parse("#50aa4b");
+                Gdk.RGBA cur_fg = {};
+                cur_fg.parse("#aaaaaa");
+                Gdk.RGBA sel_fg = {};
+                sel_fg.parse("#000000");
+                Gdk.RGBA sel_bg = {};
+                sel_bg.parse("#aaaaaa");
+                vte_terminal.set_colors(fg, bg, palette);
+                vte_terminal.set_color_cursor(cur);
+                vte_terminal.set_color_cursor_foreground(cur_fg);
+                vte_terminal.set_color_highlight(sel_bg);
+                vte_terminal.set_color_highlight_foreground(sel_fg);
             } else {
                 vte_terminal.set_colors(null, null, null);
                 vte_terminal.set_color_cursor(null);
+                vte_terminal.set_color_cursor_foreground(null);
+                vte_terminal.set_color_highlight(null);
+                vte_terminal.set_color_highlight_foreground(null);
             }
         }
 
@@ -1105,6 +1157,17 @@ row:selected .file-item-tagged {
                     if (active_panel != null) {
                         active_panel.show_filter();
                     }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+U: Swap panels (Midnight Commander / Total Commander style)
+                if ((latin_key == Gdk.Key.u || keyval == Gdk.Key.u || keyval == Gdk.Key.U) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (cmd_entry.has_focus && cmd_entry.text.length > 0) {
+                        return Gdk.EVENT_PROPAGATE;
+                    }
+                    on_ctrl_u_swap_panels();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -1632,6 +1695,65 @@ row:selected .file-item-tagged {
                 target_name = item.name;
             }
             opp.load_directory(active_panel.current_directory, target_name);
+        }
+
+        private void on_ctrl_u_swap_panels() {
+            var left_page = left_panel.get_current_page();
+            var right_page = right_panel.get_current_page();
+            if (left_page == null || right_page == null) return;
+            if (left_page.current_directory == null || right_page.current_directory == null) return;
+
+            File dir_left = left_page.current_directory;
+            File dir_right = right_page.current_directory;
+
+            var sel_left = left_page.get_selected_item();
+            string? sel_left_name = (sel_left != null && !sel_left.is_parent_dir) ? sel_left.name : null;
+
+            var sel_right = right_page.get_selected_item();
+            string? sel_right_name = (sel_right != null && !sel_right.is_parent_dir) ? sel_right.name : null;
+
+            string? title_left = left_page.custom_title;
+            string? title_right = right_page.custom_title;
+
+            PanelViewMode vmode_left = left_page.view_mode;
+            PanelViewMode vmode_right = right_page.view_mode;
+
+            string sort_col_left = left_page.sort_column_id;
+            string sort_ord_left = left_page.sort_order_str;
+            string sort_col_right = right_page.sort_column_id;
+            string sort_ord_right = right_page.sort_order_str;
+
+            // Apply right state to left panel's active tab
+            left_page.custom_title = title_right;
+            if (left_page.view_mode != vmode_right) {
+                left_page.switch_view_mode(vmode_right);
+            }
+            left_page.apply_sort(sort_col_right, sort_ord_right);
+            left_page.load_directory(dir_right, sel_right_name);
+            left_panel.update_tab_title(left_page);
+
+            // Apply left state to right panel's active tab
+            right_page.custom_title = title_left;
+            if (right_page.view_mode != vmode_left) {
+                right_page.switch_view_mode(vmode_left);
+            }
+            right_page.apply_sort(sort_col_left, sort_ord_left);
+            right_page.load_directory(dir_left, sel_left_name);
+            right_panel.update_tab_title(right_page);
+
+            left_panel.tabs_state_changed(left_panel);
+            right_panel.tabs_state_changed(right_panel);
+
+            update_window_title();
+            if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
+                string? path = active_panel.current_directory.get_path();
+                if (path != null) {
+                    sync_terminal_directory(path);
+                }
+            }
+            if (active_panel != null) {
+                active_panel.grab_focus_to_list();
+            }
         }
 
         private void prompt_select_by_mask() {

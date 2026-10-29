@@ -458,6 +458,11 @@ namespace VCommander {
                     }
                     if (key_file.has_key("Console", "ColorTheme")) {
                         string ct = key_file.get_string("Console", "ColorTheme").strip();
+                        if (ct == "solarized-dark") {
+                            ct = "dracula";
+                        } else if (ct == "solarized-light") {
+                            ct = "tango";
+                        }
                         if (ct.length > 0) {
                             terminal_color_theme = ct;
                         }

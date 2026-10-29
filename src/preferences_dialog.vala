@@ -240,17 +240,20 @@ namespace VCommander {
             term_theme_row.subtitle = "Color palette for the built-in terminal emulator";
             var theme_list = new Gtk.StringList(null);
             theme_list.append("Default (System)");
-            theme_list.append("Solarized Dark");
-            theme_list.append("Solarized Light");
+            theme_list.append("Dracula");
+            theme_list.append("Tango (Ubuntu)");
             theme_list.append("Green on Black (Linux Console)");
+            theme_list.append("ANSI 1987 (DOS / OS/2)");
             term_theme_row.model = theme_list;
 
-            if (config.terminal_color_theme == "solarized-dark") {
+            if (config.terminal_color_theme == "dracula" || config.terminal_color_theme == "solarized-dark") {
                 term_theme_row.selected = 1;
-            } else if (config.terminal_color_theme == "solarized-light") {
+            } else if (config.terminal_color_theme == "tango" || config.terminal_color_theme == "solarized-light") {
                 term_theme_row.selected = 2;
             } else if (config.terminal_color_theme == "green-on-black") {
                 term_theme_row.selected = 3;
+            } else if (config.terminal_color_theme == "ansi-1987") {
+                term_theme_row.selected = 4;
             } else {
                 term_theme_row.selected = 0;
             }
@@ -258,13 +261,16 @@ namespace VCommander {
             term_theme_row.notify["selected"].connect(() => {
                 switch (term_theme_row.selected) {
                     case 1:
-                        config.terminal_color_theme = "solarized-dark";
+                        config.terminal_color_theme = "dracula";
                         break;
                     case 2:
-                        config.terminal_color_theme = "solarized-light";
+                        config.terminal_color_theme = "tango";
                         break;
                     case 3:
                         config.terminal_color_theme = "green-on-black";
+                        break;
+                    case 4:
+                        config.terminal_color_theme = "ansi-1987";
                         break;
                     default:
                         config.terminal_color_theme = "default";
