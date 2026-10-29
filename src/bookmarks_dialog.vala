@@ -44,6 +44,13 @@ namespace VCommander {
             list_box.margin_top = 12;
             list_box.margin_bottom = 12;
 
+            // Direct key controller on list_box in CAPTURE phase to intercept
+            // Ctrl+Up / Ctrl+Down (which GtkListBox/GtkScrolledWindow would otherwise consume)
+            // as well as Tab / Shift+Tab, E, Delete
+            var list_key_ctrl = new Gtk.EventControllerKey();
+            list_key_ctrl.propagation_phase = Gtk.PropagationPhase.CAPTURE;
+            list_box.add_controller(list_key_ctrl);
+
             scrolled.set_child(list_box);
             toolbar_view.set_content(scrolled);
 
@@ -322,6 +329,52 @@ namespace VCommander {
                 activate_selected_bookmark();
             });
 
+            // Direct list key controller (CAPTURE phase on list_box)
+            // Intercepts Ctrl+Up, Ctrl+Down, Tab, Shift+Tab, E, Delete before GtkScrolledWindow or GtkListBox bindings
+            list_key_ctrl.key_pressed.connect((keyval, keycode, state) => {
+                uint latin_key = KeyUtils.to_latin(keyval, keycode);
+
+                // Tab / Shift+Tab: move out of list to bottom buttons
+                if (keyval == Gdk.Key.Tab || keyval == Gdk.Key.KP_Tab || keyval == Gdk.Key.ISO_Left_Tab) {
+                    bool is_backward = (keyval == Gdk.Key.ISO_Left_Tab) || ((state & Gdk.ModifierType.SHIFT_MASK) != 0);
+                    if (is_backward) {
+                        close_button.grab_focus();
+                    } else {
+                        add_button.grab_focus();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+Up / Ctrl+KP_Up: Move bookmark up
+                if ((keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                    move_selected_bookmark_up();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+Down / Ctrl+KP_Down: Move bookmark down
+                if ((keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                    move_selected_bookmark_down();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // E: Edit selected bookmark name
+                if ((latin_key == Gdk.Key.e || keyval == Gdk.Key.e || keyval == Gdk.Key.E) &&
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    prompt_edit_selected_bookmark();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Delete or Shift+Delete: Delete selected bookmark
+                if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.KP_Delete) {
+                    delete_selected_bookmark();
+                    return Gdk.EVENT_STOP;
+                }
+
+                return Gdk.EVENT_PROPAGATE;
+            });
+
             // Key controller for dialog shortcuts (BUBBLE phase so focused buttons receive Enter/Space)
             var key_ctrl = new Gtk.EventControllerKey();
             key_ctrl.key_pressed.connect((keyval, keycode, state) => {
@@ -337,49 +390,6 @@ namespace VCommander {
                 if (latin_key == Gdk.Key.a && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
                     prompt_add_current();
                     return Gdk.EVENT_STOP;
-                }
-
-                // List-specific shortcuts: only when list_box or a row is focused
-                var focus_widget = dialog.get_focus();
-                bool list_has_focus = (focus_widget != null && (focus_widget == list_box || focus_widget.is_ancestor(list_box)));
-                if (list_has_focus) {
-                    // Tab / Shift+Tab: move out of list to bottom buttons
-                    if (keyval == Gdk.Key.Tab || keyval == Gdk.Key.KP_Tab || keyval == Gdk.Key.ISO_Left_Tab) {
-                        bool is_backward = (keyval == Gdk.Key.ISO_Left_Tab) || ((state & Gdk.ModifierType.SHIFT_MASK) != 0);
-                        if (is_backward) {
-                            close_button.grab_focus();
-                        } else {
-                            add_button.grab_focus();
-                        }
-                        return Gdk.EVENT_STOP;
-                    }
-
-                    // Ctrl+Up / Ctrl+KP_Up: Move bookmark up
-                    if ((keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) &&
-                        (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                        move_selected_bookmark_up();
-                        return Gdk.EVENT_STOP;
-                    }
-
-                    // Ctrl+Down / Ctrl+KP_Down: Move bookmark down
-                    if ((keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) &&
-                        (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                        move_selected_bookmark_down();
-                        return Gdk.EVENT_STOP;
-                    }
-
-                    // E: Edit selected bookmark name
-                    if ((latin_key == Gdk.Key.e || keyval == Gdk.Key.e || keyval == Gdk.Key.E) &&
-                        (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
-                        prompt_edit_selected_bookmark();
-                        return Gdk.EVENT_STOP;
-                    }
-
-                    // Delete or Shift+Delete: Delete selected bookmark
-                    if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.KP_Delete) {
-                        delete_selected_bookmark();
-                        return Gdk.EVENT_STOP;
-                    }
                 }
 
                 return Gdk.EVENT_PROPAGATE;
