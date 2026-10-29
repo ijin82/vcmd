@@ -9,6 +9,7 @@ namespace VCommander {
         public bool is_dir { get; construct set; default = false; }
         public bool is_parent_dir { get; construct set; default = false; }
         public bool is_symlink { get; construct set; default = false; }
+        public string? symlink_target { get; construct set; default = null; }
         public bool is_hidden { get; construct set; default = false; }
         public Icon? icon { get; construct set; default = null; }
         public string file_type { get; construct set; default = ""; }
@@ -154,6 +155,15 @@ namespace VCommander {
             }
 
             bool symlink = info.get_is_symlink();
+            string? link_target = null;
+            if (symlink) {
+                link_target = info.get_symlink_target();
+                if (link_target == null && file.get_path() != null) {
+                    try {
+                        link_target = GLib.FileUtils.read_link(file.get_path());
+                    } catch (Error e) {}
+                }
+            }
 
             string item_owner = "";
             string? o_user = info.get_attribute_string("owner::user");
@@ -195,6 +205,7 @@ namespace VCommander {
                 is_dir: dir,
                 is_parent_dir: false,
                 is_symlink: symlink,
+                symlink_target: link_target,
                 is_hidden: hidden,
                 icon: item_icon,
                 file_type: ftype,

@@ -448,7 +448,13 @@ namespace VCommander {
                 var label = (Gtk.Label) image.get_next_sibling();
 
                 image.gicon = file_item.icon;
-                label.label = file_item.display_name;
+                if (file_item.is_symlink && file_item.symlink_target != null && file_item.symlink_target.length > 0) {
+                    label.label = @"$(file_item.display_name) -> $(file_item.symlink_target)";
+                    box.tooltip_text = @"$(file_item.display_name) -> $(file_item.symlink_target)";
+                } else {
+                    label.label = file_item.display_name;
+                    box.tooltip_text = null;
+                }
 
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
@@ -475,6 +481,10 @@ namespace VCommander {
             super_name_factory.unbind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
                 var file_item = (FileItem) list_item.item;
+                var box = list_item.child as Gtk.Box;
+                if (box != null) {
+                    box.tooltip_text = null;
+                }
                 ulong tag_handler_id = list_item.get_data<ulong>("s_name_tag_id");
                 if (tag_handler_id != 0 && file_item != null) {
                     file_item.disconnect(tag_handler_id);
@@ -1913,7 +1923,7 @@ namespace VCommander {
 
             try {
                 var enumerator = yield dir.enumerate_children_async(
-                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode",
+                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode",
                     FileQueryInfoFlags.NONE,
                     Priority.DEFAULT,
                     cancellable
