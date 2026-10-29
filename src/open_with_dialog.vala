@@ -107,11 +107,12 @@ namespace VCommander {
                 content_type = "application/octet-stream";
             }
 
+            var config = ConfigManager.get_instance();
             var dialog = new Adw.Dialog();
             active_dialog = dialog;
             dialog.title = "Open With";
-            dialog.content_width = 560;
-            dialog.content_height = 520;
+            dialog.content_width = (config.open_with_dialog_width >= 400) ? config.open_with_dialog_width : 560;
+            dialog.content_height = (config.open_with_dialog_height >= 300) ? config.open_with_dialog_height : 520;
 
             var toolbar_view = new Adw.ToolbarView();
 

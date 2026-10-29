@@ -35,7 +35,8 @@ namespace VCommander {
             var nav_section = new Adw.ShortcutsSection("Navigation & Panes");
             add_item(nav_section, "Switch Active Pane", "Tab");
             add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
-            add_item(nav_section, "Open With...", "<Control>o", "Choose custom application");
+            add_item(nav_section, "Open With...", "<Control><Shift>o", "Choose custom application");
+            add_item(nav_section, "Toggle Console Output Drawer", "<Control>o", "or Ctrl+~");
             add_item(nav_section, "Go to Parent Directory", "BackSpace", "or Alt+Up");
             add_item(nav_section, "Jump to First Item", "Home", "or Left Arrow");
             add_item(nav_section, "Jump to Last Item", "End", "or Right Arrow");

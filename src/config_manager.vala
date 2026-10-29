@@ -70,6 +70,10 @@ namespace VCommander {
         public bool select_mask_include_dirs { get; set; default = false; }
         public int bookmarks_dialog_width { get; set; default = 640; }
         public int bookmarks_dialog_height { get; set; default = 580; }
+        public int open_with_dialog_width { get; set; default = 560; }
+        public int open_with_dialog_height { get; set; default = 520; }
+        public int console_height { get; set; default = 400; }
+        public int console_history_limit { get; set; default = 2000; }
 
         public GenericArray<BookmarkItem> bookmarks { get; private set; }
 
@@ -381,6 +385,36 @@ namespace VCommander {
                         }
                     }
                 }
+
+                if (key_file.has_group("OpenWith")) {
+                    if (key_file.has_key("OpenWith", "DialogWidth")) {
+                        int ow = key_file.get_integer("OpenWith", "DialogWidth");
+                        if (ow >= 400 && ow <= 3840) {
+                            open_with_dialog_width = ow;
+                        }
+                    }
+                    if (key_file.has_key("OpenWith", "DialogHeight")) {
+                        int oh = key_file.get_integer("OpenWith", "DialogHeight");
+                        if (oh >= 300 && oh <= 2160) {
+                            open_with_dialog_height = oh;
+                        }
+                    }
+                }
+
+                if (key_file.has_group("Console")) {
+                    if (key_file.has_key("Console", "Height")) {
+                        int ch = key_file.get_integer("Console", "Height");
+                        if (ch >= 80 && ch <= 1600) {
+                            console_height = ch;
+                        }
+                    }
+                    if (key_file.has_key("Console", "HistoryLimit")) {
+                        int hl = key_file.get_integer("Console", "HistoryLimit");
+                        if (hl >= 100 && hl <= 50000) {
+                            console_history_limit = hl;
+                        }
+                    }
+                }
             } catch (Error e) {
                 warning("Failed to load configuration: %s", e.message);
             }
@@ -467,6 +501,14 @@ namespace VCommander {
                 }
                 key_file.set_integer("Bookmarks", "DialogWidth", bookmarks_dialog_width);
                 key_file.set_integer("Bookmarks", "DialogHeight", bookmarks_dialog_height);
+
+                // Open With Dialog
+                key_file.set_integer("OpenWith", "DialogWidth", open_with_dialog_width);
+                key_file.set_integer("OpenWith", "DialogHeight", open_with_dialog_height);
+
+                // Console
+                key_file.set_integer("Console", "Height", console_height);
+                key_file.set_integer("Console", "HistoryLimit", console_history_limit);
 
                 // Ensure directory exists
                 string config_dir = Path.get_dirname(config_path);

@@ -146,7 +146,18 @@ namespace VCommander {
                 config.save();
             });
 
+            var history_row = new Adw.SpinRow.with_range(100, 50000, 500);
+            history_row.title = "Console history limit (lines)";
+            history_row.subtitle = "Maximum number of lines to retain in the built-in console buffer";
+            history_row.value = config.console_history_limit;
+
+            history_row.notify["value"].connect(() => {
+                config.console_history_limit = (int) history_row.value;
+                config.save();
+            });
+
             cmd_group.add(shell_row);
+            cmd_group.add(history_row);
             page.add(cmd_group);
 
             // File Viewer & Editor Group (F3 / F4)
@@ -174,9 +185,54 @@ namespace VCommander {
                 config.editor_command = entered.length > 0 ? entered : ConfigManager.detect_default_editor();
                 config.save();
             });
-            tools_group.add(editor_row);
-
             page.add(tools_group);
+
+            // Dialog Sizes Group
+            var dialog_sizes_group = new Adw.PreferencesGroup();
+            dialog_sizes_group.title = "Dialog Sizes";
+            dialog_sizes_group.description = "Custom width and height dimensions for modal dialogs (px)";
+
+            var bm_width_row = new Adw.SpinRow.with_range(400, 1920, 20);
+            bm_width_row.title = "Bookmarks dialog width (px)";
+            bm_width_row.subtitle = "Content width for Directory Bookmarks dialog (Ctrl+\\)";
+            bm_width_row.value = config.bookmarks_dialog_width;
+            bm_width_row.notify["value"].connect(() => {
+                config.bookmarks_dialog_width = (int) bm_width_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(bm_width_row);
+
+            var bm_height_row = new Adw.SpinRow.with_range(300, 1440, 20);
+            bm_height_row.title = "Bookmarks dialog height (px)";
+            bm_height_row.subtitle = "Content height for Directory Bookmarks dialog (Ctrl+\\)";
+            bm_height_row.value = config.bookmarks_dialog_height;
+            bm_height_row.notify["value"].connect(() => {
+                config.bookmarks_dialog_height = (int) bm_height_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(bm_height_row);
+
+            var ow_width_row = new Adw.SpinRow.with_range(400, 1920, 20);
+            ow_width_row.title = "Open With dialog width (px)";
+            ow_width_row.subtitle = "Content width for Open With application chooser dialog (Ctrl+Shift+O)";
+            ow_width_row.value = config.open_with_dialog_width;
+            ow_width_row.notify["value"].connect(() => {
+                config.open_with_dialog_width = (int) ow_width_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(ow_width_row);
+
+            var ow_height_row = new Adw.SpinRow.with_range(300, 1440, 20);
+            ow_height_row.title = "Open With dialog height (px)";
+            ow_height_row.subtitle = "Content height for Open With application chooser dialog (Ctrl+Shift+O)";
+            ow_height_row.value = config.open_with_dialog_height;
+            ow_height_row.notify["value"].connect(() => {
+                config.open_with_dialog_height = (int) ow_height_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(ow_height_row);
+
+            page.add(dialog_sizes_group);
 
             dialog.add(page);
             dialog.present(parent);

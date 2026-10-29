@@ -2,6 +2,14 @@ namespace VCommander {
 
     public class MainWindow : Adw.ApplicationWindow {
         private Gtk.Paned paned;
+        private Gtk.Paned vertical_paned;
+        private Gtk.Box console_drawer;
+        private Vte.Terminal? vte_terminal = null;
+        private Gtk.ScrolledWindow console_scrolled;
+        private bool terminal_alive = false;
+        private string? last_terminal_dir = null;
+        private Gtk.Box command_bar;
+        private Adw.ToastOverlay toast_overlay;
         public FilePanel left_panel { get; private set; }
         public FilePanel right_panel { get; private set; }
         public FilePanel active_panel { get; private set; }
@@ -18,6 +26,7 @@ namespace VCommander {
         private uint escape_sequence_timeout_id = 0;
         private int saved_dual_paned_position = -1;
         private bool paned_resetting_half = false;
+        private bool updating_vertical_paned = false;
 
         public MainWindow(Gtk.Application app) {
             Object(application: app, title: "Vala Commander");
@@ -447,7 +456,33 @@ row:selected .file-item-tagged {
                 }
             }
 
-            root_box.append(paned);
+            // Vertical paned splitting dual file panels (top) and console output drawer (bottom)
+            vertical_paned = new Gtk.Paned(Gtk.Orientation.VERTICAL);
+            vertical_paned.hexpand = true;
+            vertical_paned.vexpand = true;
+            vertical_paned.wide_handle = true;
+
+            vertical_paned.start_child = paned;
+
+            // Build console drawer
+            build_console_drawer();
+            vertical_paned.end_child = console_drawer;
+
+            // Track vertical paned position changes
+            vertical_paned.notify["position"].connect(() => {
+                if (!updating_vertical_paned && console_drawer.visible) {
+                    int total_h = vertical_paned.get_height();
+                    int pos = vertical_paned.position;
+                    if (total_h > 0 && pos > 0 && total_h > pos) {
+                        int ch = total_h - pos;
+                        if (ch >= 80 && ch <= 1600) {
+                            config.console_height = ch;
+                        }
+                    }
+                }
+            });
+
+            root_box.append(vertical_paned);
 
             // Bottom MC-style Command Line Bar
             build_command_bar(root_box);
@@ -455,13 +490,240 @@ row:selected .file-item-tagged {
             // Bottom MC-style Function Key Bar
             build_function_bar(root_box);
 
-            content = root_box;
+            toast_overlay = new Adw.ToastOverlay();
+            toast_overlay.child = root_box;
+            content = toast_overlay;
 
             setup_keyboard_shortcuts(root_box);
         }
 
+        private void build_console_drawer() {
+            var config = ConfigManager.get_instance();
+            console_drawer = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
+            console_drawer.add_css_class("console-drawer");
+            console_drawer.visible = false;
+
+            // Console header bar
+            var header = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            header.add_css_class("console-header");
+
+            var icon = new Gtk.Image.from_icon_name("utilities-terminal-symbolic");
+            icon.pixel_size = 14;
+            header.append(icon);
+
+            var title = new Gtk.Label("Terminal");
+            title.add_css_class("heading");
+            title.halign = Gtk.Align.START;
+            header.append(title);
+
+            var spacer = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            spacer.hexpand = true;
+            header.append(spacer);
+
+            var sync_btn = new Gtk.Button.from_icon_name("folder-symbolic");
+            sync_btn.tooltip_text = "Change directory to active pane";
+            sync_btn.add_css_class("flat");
+            sync_btn.clicked.connect(() => {
+                if (active_panel != null && active_panel.current_directory != null) {
+                    string? p = active_panel.current_directory.get_path();
+                    if (p != null) {
+                        string escaped = p.replace("'", "'\\''");
+                        if (vte_terminal != null && terminal_alive) {
+                            vte_terminal.feed_child(@"cd '$escaped'\n", -1);
+                            last_terminal_dir = p;
+                        }
+                    }
+                }
+                if (vte_terminal != null) {
+                    vte_terminal.grab_focus();
+                }
+            });
+            header.append(sync_btn);
+
+            var clear_btn = new Gtk.Button.from_icon_name("edit-clear-symbolic");
+            clear_btn.tooltip_text = "Clear terminal";
+            clear_btn.add_css_class("flat");
+            clear_btn.clicked.connect(() => {
+                if (vte_terminal != null) {
+                    vte_terminal.reset(true, true);
+                    vte_terminal.feed_child("\x0c", 1);
+                    vte_terminal.grab_focus();
+                }
+            });
+            header.append(clear_btn);
+
+            var close_btn = new Gtk.Button.from_icon_name("window-close-symbolic");
+            close_btn.tooltip_text = "Hide terminal (Ctrl+O or Ctrl+~)";
+            close_btn.add_css_class("flat");
+            close_btn.clicked.connect(() => {
+                set_console_visible(false);
+            });
+            header.append(close_btn);
+
+            console_drawer.append(header);
+
+            // Scrolled window container for VTE terminal
+            console_scrolled = new Gtk.ScrolledWindow();
+            console_scrolled.hexpand = true;
+            console_scrolled.vexpand = true;
+            console_scrolled.min_content_height = 80;
+
+            console_drawer.append(console_scrolled);
+        }
+
+        public void toggle_console_drawer() {
+            set_console_visible(!console_drawer.visible);
+        }
+
+        public void set_console_visible(bool visible) {
+            if (console_drawer.visible == visible) {
+                if (visible && vte_terminal != null) {
+                    vte_terminal.grab_focus();
+                }
+                return;
+            }
+
+            console_drawer.visible = visible;
+            if (command_bar != null) {
+                command_bar.visible = !visible;
+            }
+
+            if (visible) {
+                string? cwd = null;
+                if (active_panel != null && active_panel.current_directory != null) {
+                    cwd = active_panel.current_directory.get_path();
+                }
+                if (!terminal_alive || vte_terminal == null) {
+                    spawn_terminal(cwd);
+                } else if (cwd != null) {
+                    sync_terminal_directory(cwd);
+                }
+
+                apply_console_paned_position();
+
+                GLib.Idle.add(() => {
+                    if (vte_terminal != null && console_drawer.visible) {
+                        vte_terminal.grab_focus();
+                    }
+                    return GLib.Source.REMOVE;
+                });
+            } else {
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
+            }
+        }
+
+        private void apply_console_paned_position() {
+            int total_h = vertical_paned.get_height();
+            if (total_h > 150) {
+                var config = ConfigManager.get_instance();
+                int ch = config.console_height > 0 ? config.console_height : 400;
+                int target_pos = int.max(80, total_h - ch);
+                updating_vertical_paned = true;
+                vertical_paned.position = target_pos;
+                updating_vertical_paned = false;
+            }
+        }
+
+        private bool is_terminal_at_prompt() {
+            if (vte_terminal == null || !terminal_alive) return false;
+            int pgrp = vte_terminal.get_foreground_pgrp();
+            if (pgrp <= 0) return false;
+            string comm_path = @"/proc/$pgrp/comm";
+            try {
+                string comm;
+                FileUtils.get_contents(comm_path, out comm);
+                string trimmed = comm.strip();
+                return (trimmed == "bash" || trimmed == "zsh" || trimmed == "sh" || trimmed == "fish");
+            } catch (Error e) {
+                return false;
+            }
+        }
+
+        private void sync_terminal_directory(string target_dir) {
+            if (vte_terminal == null || !terminal_alive) {
+                spawn_terminal(target_dir);
+                return;
+            }
+            if (target_dir == last_terminal_dir) return;
+
+            if (is_terminal_at_prompt()) {
+                string escaped = target_dir.replace("'", "'\\''");
+                vte_terminal.feed_child(@"cd '$escaped'\n", -1);
+                last_terminal_dir = target_dir;
+            }
+        }
+
+        private void spawn_terminal(string? working_dir) {
+            string? cwd = working_dir;
+            if (cwd == null || cwd.length == 0) {
+                if (active_panel != null && active_panel.current_directory != null) {
+                    cwd = active_panel.current_directory.get_path();
+                }
+            }
+            if (cwd == null || cwd.length == 0) {
+                cwd = Environment.get_home_dir();
+            }
+
+            if (vte_terminal == null) {
+                vte_terminal = new Vte.Terminal();
+                vte_terminal.hexpand = true;
+                vte_terminal.vexpand = true;
+                vte_terminal.set_audible_bell(false);
+                console_scrolled.set_child(vte_terminal);
+
+                vte_terminal.child_exited.connect((status) => {
+                    terminal_alive = false;
+                    if (console_drawer.visible) {
+                        set_console_visible(false);
+                    }
+                });
+            }
+
+            apply_terminal_font();
+            var config = ConfigManager.get_instance();
+            vte_terminal.set_scrollback_lines(config.console_history_limit > 0 ? config.console_history_limit : 2000);
+
+            string shell_bin = config.command_shell.strip();
+            if (shell_bin.length == 0 || Environment.find_program_in_path(shell_bin) == null) {
+                shell_bin = Environment.get_variable("SHELL");
+                if (shell_bin == null || shell_bin.length == 0) {
+                    shell_bin = "/bin/bash";
+                }
+            }
+
+            string[] argv = { shell_bin, "-i" };
+            string[] env = GLib.Environ.get();
+            env = GLib.Environ.set_variable(env, "TERM", "xterm-256color", true);
+            env = GLib.Environ.set_variable(env, "COLORTERM", "truecolor", true);
+
+            vte_terminal.spawn(
+                Vte.PtyFlags.DEFAULT,
+                cwd,
+                argv,
+                env,
+                GLib.SpawnFlags.SEARCH_PATH,
+                -1
+            );
+            terminal_alive = true;
+            last_terminal_dir = cwd;
+        }
+
+        public void apply_terminal_font() {
+            if (vte_terminal == null) return;
+            var config = ConfigManager.get_instance();
+            string font_name = config.panel_font_name;
+            if (font_name.length == 0) font_name = "Monospace";
+            int font_size = config.panel_font_size > 0 ? config.panel_font_size : 11;
+            var desc = Pango.FontDescription.from_string(@"$font_name $font_size");
+            vte_terminal.set_font(desc);
+        }
+
         private void build_command_bar(Gtk.Box parent_box) {
-            var command_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            command_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
             command_bar.add_css_class("command-bar");
             command_bar.margin_top = 5;
             command_bar.margin_start = 4;
@@ -533,6 +795,32 @@ row:selected .file-item-tagged {
             key_controller.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_controller.key_pressed.connect((keyval, keycode, state) => {
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
+
+                // When terminal drawer is visible, lock focus & inputs inside terminal except for toggle/close
+                if (console_drawer.visible) {
+                    bool is_tilde = (keyval == Gdk.Key.grave || keyval == Gdk.Key.asciitilde || latin_key == Gdk.Key.grave || latin_key == Gdk.Key.asciitilde);
+                    if (((latin_key == Gdk.Key.o && (state & Gdk.ModifierType.SHIFT_MASK) == 0) || is_tilde) &&
+                        (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                        (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                        set_console_visible(false);
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    // Ctrl+Shift+C: copy terminal selection
+                    if (latin_key == Gdk.Key.c && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
+                        if (vte_terminal != null) vte_terminal.copy_clipboard();
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    // Ctrl+Shift+V: paste from clipboard
+                    if (latin_key == Gdk.Key.v && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
+                        if (vte_terminal != null) vte_terminal.paste_clipboard();
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    // All other keys pass straight to Vte.Terminal without being intercepted
+                    return Gdk.EVENT_PROPAGATE;
+                }
 
                 // Handle pending Escape sequence (e.g. Esc > i)
                 if (escape_sequence_pending) {
@@ -631,13 +919,23 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Ctrl+O: Open selected file with...
+                // Ctrl+Shift+O: Open selected file with...
                 if (latin_key == Gdk.Key.o &&
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
-                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    (state & Gdk.ModifierType.SHIFT_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
                     if (active_panel != null) {
                         active_panel.open_selected_with_dialog();
                     }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+O or Ctrl+~ / Ctrl+` : Toggle Console Output Drawer (Midnight Commander / IDE style)
+                bool is_tilde_grave = (keyval == Gdk.Key.grave || keyval == Gdk.Key.asciitilde || latin_key == Gdk.Key.grave || latin_key == Gdk.Key.asciitilde);
+                if (((latin_key == Gdk.Key.o && (state & Gdk.ModifierType.SHIFT_MASK) == 0) || is_tilde_grave) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    toggle_console_drawer();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -980,9 +1278,18 @@ row:selected .file-item-tagged {
                 cmd_entry.text = "";
 
                 if (active_panel != null && active_panel.current_directory != null) {
-                    if (!handle_builtin_cd(cmd)) {
-                        execute_shell_command.begin(cmd, active_panel.current_directory);
+                    if (handle_builtin_cd(cmd)) {
+                        if (active_panel != null) {
+                            active_panel.grab_focus_to_list();
+                        }
+                        return;
                     }
+
+                    set_console_visible(true);
+                    if (vte_terminal != null) {
+                        vte_terminal.feed_child(cmd + "\n", -1);
+                    }
+                    return;
                 }
             }
             if (active_panel != null) {
@@ -1028,14 +1335,22 @@ row:selected .file-item-tagged {
                     if (file_type == FileType.DIRECTORY) {
                         active_panel.load_directory(target_file);
                     } else {
-                        show_error_dialog("cd: Not a directory", target_raw);
+                        show_command_toast("cd: Not a directory");
                     }
                 } else {
-                    show_error_dialog("cd: No such directory", target_raw);
+                    show_command_toast("cd: No such directory");
                 }
                 return true;
             }
             return false;
+        }
+
+        public void show_command_toast(string message) {
+            if (toast_overlay != null) {
+                var toast = new Adw.Toast(message);
+                toast.timeout = 3;
+                toast_overlay.add_toast(toast);
+            }
         }
 
         private bool on_command_entry_key_pressed(uint keyval, uint keycode, Gdk.ModifierType state) {
@@ -1082,69 +1397,6 @@ row:selected .file-item-tagged {
             return Gdk.EVENT_PROPAGATE;
         }
 
-        private async void execute_shell_command(string command_str, File working_dir) {
-            string? cwd_path = working_dir.get_path();
-            if (cwd_path == null) {
-                cwd_path = Environment.get_home_dir();
-            }
-
-            string shell_setting = ConfigManager.get_instance().command_shell.strip();
-            if (shell_setting.length == 0) {
-                shell_setting = "/bin/bash";
-            }
-
-            string? shell_bin = null;
-            if (shell_setting.contains("/")) {
-                var f = File.new_for_path(shell_setting);
-                if (f.query_exists()) {
-                    shell_bin = shell_setting;
-                }
-            } else {
-                shell_bin = Environment.find_program_in_path(shell_setting);
-            }
-
-            if (shell_bin == null) {
-                show_error_dialog("Shell Interpreter Error",
-                    @"Configured shell interpreter '$shell_setting' was not found or is not executable.\nPlease check your shell path in Preferences (Ctrl+,).");
-                return;
-            }
-
-            try {
-                var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
-                launcher.set_cwd(cwd_path);
-
-                string[] argv;
-                string base_name = Path.get_basename(shell_bin);
-                if (base_name == "bash" || base_name == "zsh") {
-                    argv = new string[] { shell_bin, "-l", "-i", "-c", command_str };
-                } else {
-                    argv = new string[] { shell_bin, "-c", command_str };
-                }
-                var subprocess = launcher.spawnv(argv);
-
-                string stdout_buf;
-                string stderr_buf;
-                yield subprocess.communicate_utf8_async(null, null, out stdout_buf, out stderr_buf);
-
-                if (!subprocess.get_successful()) {
-                    int status = subprocess.get_exit_status();
-                    string err_msg = stderr_buf.strip();
-                    if (err_msg.length == 0) {
-                        err_msg = stdout_buf.strip();
-                    }
-                    if (err_msg.length == 0) {
-                        err_msg = @"Command exited with code $status";
-                    }
-                    show_error_dialog(@"Command failed: $command_str", err_msg);
-                }
-
-                // Refresh both panels as files might have been created or modified
-                left_panel.refresh();
-                right_panel.refresh();
-            } catch (Error e) {
-                show_error_dialog("Execution Error", @"Cannot execute '$command_str': $(e.message)");
-            }
-        }
 
         public void show_error_dialog(string title, string message) {
             var dialog = new Adw.AlertDialog(title, message);
@@ -2242,6 +2494,14 @@ row:selected .file-item-tagged {
                 config.paned_position = paned.position;
             }
             config.active_pane = (active_panel == right_panel) ? "right" : "left";
+            int total_h = vertical_paned.get_height();
+            int v_pos = vertical_paned.position;
+            if (total_h > 0 && v_pos > 0 && total_h > v_pos) {
+                int ch = total_h - v_pos;
+                if (ch >= 80 && ch <= 1600) {
+                    config.console_height = ch;
+                }
+            }
 
             // Left panel state
             config.left_tabs = left_panel.get_tab_paths();
@@ -2298,6 +2558,7 @@ row:selected .file-item-tagged {
             left_panel.update_brief_column_width();
             right_panel.update_brief_column_width();
             apply_font_styles();
+            apply_terminal_font();
         }
 
         public override void unmap() {

@@ -174,3 +174,21 @@ row:selected .file-item-tagged {
     font-weight: bold;
 }
 
+/* Built-in Console Drawer */
+.console-drawer {
+    border-top: 1px solid alpha(@borders, 0.4);
+    background-color: @view_bg_color;
+}
+
+.console-header {
+    padding: 3px 8px;
+    background-color: alpha(@headerbar_bg_color, 0.6);
+    border-bottom: 1px solid alpha(@borders, 0.3);
+}
+
+.console-view {
+    background-color: @view_bg_color;
+    color: @view_fg_color;
+    padding: 6px;
+}
+

@@ -13,6 +13,14 @@ namespace VCommander {
         protected override void startup() {
             base.startup();
 
+            // Disable all audio bells, error beeps, and event sounds application-wide
+            var settings = Gtk.Settings.get_default();
+            if (settings != null) {
+                settings.gtk_error_bell = false;
+                settings.gtk_enable_event_sounds = false;
+                settings.gtk_enable_input_feedback_sounds = false;
+            }
+
             var quit_action = new SimpleAction("quit", null);
             quit_action.activate.connect(() => {
                 quit();
