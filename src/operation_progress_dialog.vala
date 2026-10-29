@@ -1,7 +1,6 @@
 namespace VCommander {
 
-    public class OperationProgressDialog : Gtk.Window {
-        private Gtk.Label title_label;
+    public class OperationProgressDialog : Adw.Dialog {
         private Gtk.Label item_label;
         private Gtk.Label details_label;
         private Gtk.ProgressBar progress_bar;
@@ -20,18 +19,22 @@ namespace VCommander {
             this.cancellable = cancellable;
 
             set_title(op_title);
-            set_default_size(480, 180);
-            set_resizable(false);
+            set_content_width(460);
+            set_content_height(190);
+
+            var toolbar_view = new Adw.ToolbarView();
+
+            var header_bar = new Adw.HeaderBar();
+            header_bar.show_title = true;
+            header_bar.show_start_title_buttons = false;
+            header_bar.show_end_title_buttons = false;
+            toolbar_view.add_top_bar(header_bar);
 
             var main_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 12);
-            main_box.margin_start = 20;
-            main_box.margin_end = 20;
-            main_box.margin_top = 20;
+            main_box.margin_start = 24;
+            main_box.margin_end = 24;
+            main_box.margin_top = 16;
             main_box.margin_bottom = 20;
-
-            title_label = new Gtk.Label(op_title);
-            title_label.xalign = 0.0f;
-            title_label.add_css_class("title-3");
 
             item_label = new Gtk.Label("Preparing operation...");
             item_label.xalign = 0.0f;
@@ -53,25 +56,32 @@ namespace VCommander {
             cancel_button.clicked.connect(() => {
                 cancel_button.sensitive = false;
                 item_label.label = "Cancelling...";
-                cancellable.cancel();
-                cancelled();
+                if (!is_finished) {
+                    cancellable.cancel();
+                    cancelled();
+                }
+                force_close();
             });
             btn_box.append(cancel_button);
 
-            main_box.append(title_label);
             main_box.append(item_label);
             main_box.append(progress_bar);
             main_box.append(details_label);
             main_box.append(btn_box);
 
-            set_child(main_box);
+            toolbar_view.set_content(main_box);
+            set_child(toolbar_view);
 
-            close_request.connect(() => {
+            closed.connect(() => {
+                if (pending_timeout_id != 0) {
+                    Source.remove(pending_timeout_id);
+                    pending_timeout_id = 0;
+                }
                 if (!is_finished) {
+                    is_finished = true;
                     cancellable.cancel();
                     cancelled();
                 }
-                return false;
             });
         }
 
@@ -83,8 +93,8 @@ namespace VCommander {
             int64 now = GLib.get_monotonic_time();
             int64 elapsed = now - last_update_time;
 
-            // Update at most 2 times per second (>= 500ms / 500,000 µs), or on initial/completion update
-            if (last_update_time == 0 || elapsed >= 500000 || (total_bytes > 0 && current_bytes >= total_bytes)) {
+            // Throttle UI updates smoothly (at most 10 times per sec, or on initial/completion update)
+            if (last_update_time == 0 || elapsed >= 100000 || (total_bytes > 0 && current_bytes >= total_bytes)) {
                 if (pending_timeout_id != 0) {
                     Source.remove(pending_timeout_id);
                     pending_timeout_id = 0;
@@ -92,7 +102,7 @@ namespace VCommander {
                 apply_progress(pending_filename, pending_current_bytes, pending_total_bytes);
                 last_update_time = now;
             } else if (pending_timeout_id == 0) {
-                uint remaining_ms = (uint) ((500000 - elapsed) / 1000);
+                uint remaining_ms = (uint) ((100000 - elapsed) / 1000);
                 if (remaining_ms < 10) remaining_ms = 10;
                 pending_timeout_id = Timeout.add(remaining_ms, () => {
                     pending_timeout_id = 0;
@@ -114,7 +124,7 @@ namespace VCommander {
                 details_label.label = @"$(GLib.format_size(current_bytes)) of $(GLib.format_size(total_bytes))";
             } else {
                 progress_bar.pulse();
-                details_label.label = GLib.format_size(current_bytes);
+                details_label.label = current_bytes > 0 ? GLib.format_size(current_bytes) : "";
             }
         }
 
@@ -124,7 +134,7 @@ namespace VCommander {
                 pending_timeout_id = 0;
             }
             is_finished = true;
-            close();
+            force_close();
         }
     }
 }

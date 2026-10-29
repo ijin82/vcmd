@@ -498,7 +498,6 @@ row:selected .file-item-tagged {
         }
 
         private void build_console_drawer() {
-            var config = ConfigManager.get_instance();
             console_drawer = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             console_drawer.add_css_class("console-drawer");
             console_drawer.visible = false;
@@ -1680,13 +1679,13 @@ row:selected .file-item-tagged {
             var cancellable = new Cancellable();
             string op_title = permanent ? @"Permanently deleting $(items.length) items" : @"Moving $(items.length) items to Trash";
             var dlg = new OperationProgressDialog(op_title, cancellable);
-            dlg.present();
+            dlg.present(this);
 
             try {
                 for (int i = 0; i < items.length; i++) {
                     if (cancellable.is_cancelled()) break;
                     var it = items[i];
-                    dlg.update_progress(it.display_name, i, items.length);
+                    dlg.update_progress(it.display_name, i + 1, items.length);
                     if (permanent) {
                         yield FileOperationService.delete_recursive(it.file, cancellable);
                     } else {
@@ -2102,7 +2101,7 @@ row:selected .file-item-tagged {
         private async void do_copy_file(File source, File dest, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(source.get_basename())", cancellable);
-            dlg.present();
+            dlg.present(this);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -2140,7 +2139,7 @@ row:selected .file-item-tagged {
         private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
-            dlg.present();
+            dlg.present(this);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -2148,6 +2147,9 @@ row:selected .file-item-tagged {
                 int64 total_size = 0;
                 for (int i = 0; i < items.length; i++) {
                     if (cancellable.is_cancelled()) break;
+                    if (items.length > 1) {
+                        dlg.update_progress(@"Calculating size ($(i + 1)/$(items.length)): $(items[i].display_name)", 0, 0);
+                    }
                     total_size += yield FileOperationService.calculate_total_size(items[i].file, cancellable);
                 }
                 tracker.total_bytes = total_size;
@@ -2419,7 +2421,7 @@ row:selected .file-item-tagged {
         private async void do_move_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
-            dlg.present();
+            dlg.present(this);
 
             try {
                 for (int i = 0; i < items.length; i++) {
@@ -2427,7 +2429,7 @@ row:selected .file-item-tagged {
                     var it = items[i];
                     var dest_child = dest_dir.get_child(it.name);
 
-                    dlg.update_progress(it.display_name, i, items.length);
+                    dlg.update_progress(it.display_name, i + 1, items.length);
                     yield FileOperationService.move_file_or_dir(it.file, dest_child, true, cancellable);
                 }
 
