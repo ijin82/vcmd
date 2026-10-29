@@ -66,6 +66,11 @@ namespace VCommander {
         public int col_width_type { get; set; default = 80; }
         public int col_width_size { get; set; default = 110; }
         public int col_width_mtime { get; set; default = 175; }
+        public int super_col_width_name { get; set; default = 0; }
+        public int super_col_width_owner { get; set; default = 80; }
+        public int super_col_width_group { get; set; default = 80; }
+        public int super_col_width_perm { get; set; default = 110; }
+        public int super_col_width_size { get; set; default = 100; }
         public string select_mask { get; set; default = "*"; }
         public bool select_mask_include_dirs { get; set; default = false; }
         public int bookmarks_dialog_width { get; set; default = 640; }
@@ -74,6 +79,9 @@ namespace VCommander {
         public int open_with_dialog_height { get; set; default = 520; }
         public int console_height { get; set; default = 400; }
         public int console_history_limit { get; set; default = 2000; }
+        public string terminal_font_name { get; set; default = "Monospace"; }
+        public int terminal_font_size { get; set; default = 11; }
+        public string terminal_color_theme { get; set; default = "default"; }
 
         public GenericArray<BookmarkItem> bookmarks { get; private set; }
 
@@ -278,6 +286,21 @@ namespace VCommander {
                 if (key_file.has_key("Columns", "WidthMTime")) {
                     col_width_mtime = key_file.get_integer("Columns", "WidthMTime");
                 }
+                if (key_file.has_key("Columns", "SuperWidthName")) {
+                    super_col_width_name = key_file.get_integer("Columns", "SuperWidthName");
+                }
+                if (key_file.has_key("Columns", "SuperWidthOwner")) {
+                    super_col_width_owner = key_file.get_integer("Columns", "SuperWidthOwner");
+                }
+                if (key_file.has_key("Columns", "SuperWidthGroup")) {
+                    super_col_width_group = key_file.get_integer("Columns", "SuperWidthGroup");
+                }
+                if (key_file.has_key("Columns", "SuperWidthPerm")) {
+                    super_col_width_perm = key_file.get_integer("Columns", "SuperWidthPerm");
+                }
+                if (key_file.has_key("Columns", "SuperWidthSize")) {
+                    super_col_width_size = key_file.get_integer("Columns", "SuperWidthSize");
+                }
 
                 // Left Panel
                 if (key_file.has_key("LeftPanel", "Tabs")) {
@@ -414,6 +437,24 @@ namespace VCommander {
                             console_history_limit = hl;
                         }
                     }
+                    if (key_file.has_key("Console", "FontName")) {
+                        string fn = key_file.get_string("Console", "FontName").strip();
+                        if (fn.length > 0) {
+                            terminal_font_name = fn;
+                        }
+                    }
+                    if (key_file.has_key("Console", "FontSize")) {
+                        int fs = key_file.get_integer("Console", "FontSize");
+                        if (fs >= 6 && fs <= 72) {
+                            terminal_font_size = fs;
+                        }
+                    }
+                    if (key_file.has_key("Console", "ColorTheme")) {
+                        string ct = key_file.get_string("Console", "ColorTheme").strip();
+                        if (ct.length > 0) {
+                            terminal_color_theme = ct;
+                        }
+                    }
                 }
             } catch (Error e) {
                 warning("Failed to load configuration: %s", e.message);
@@ -450,6 +491,11 @@ namespace VCommander {
                 key_file.set_integer("Columns", "WidthType", col_width_type);
                 key_file.set_integer("Columns", "WidthSize", col_width_size);
                 key_file.set_integer("Columns", "WidthMTime", col_width_mtime);
+                key_file.set_integer("Columns", "SuperWidthName", super_col_width_name);
+                key_file.set_integer("Columns", "SuperWidthOwner", super_col_width_owner);
+                key_file.set_integer("Columns", "SuperWidthGroup", super_col_width_group);
+                key_file.set_integer("Columns", "SuperWidthPerm", super_col_width_perm);
+                key_file.set_integer("Columns", "SuperWidthSize", super_col_width_size);
 
                 // Left Panel
                 key_file.set_string_list("LeftPanel", "Tabs", left_tabs);
@@ -509,6 +555,9 @@ namespace VCommander {
                 // Console
                 key_file.set_integer("Console", "Height", console_height);
                 key_file.set_integer("Console", "HistoryLimit", console_history_limit);
+                key_file.set_string("Console", "FontName", terminal_font_name);
+                key_file.set_integer("Console", "FontSize", terminal_font_size);
+                key_file.set_string("Console", "ColorTheme", terminal_color_theme);
 
                 // Ensure directory exists
                 string config_dir = Path.get_dirname(config_path);

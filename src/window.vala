@@ -687,6 +687,7 @@ row:selected .file-item-tagged {
             }
 
             apply_terminal_font();
+            apply_terminal_theme();
             var config = ConfigManager.get_instance();
             vte_terminal.set_scrollback_lines(config.console_history_limit > 0 ? config.console_history_limit : 2000);
 
@@ -721,11 +722,85 @@ row:selected .file-item-tagged {
         public void apply_terminal_font() {
             if (vte_terminal == null) return;
             var config = ConfigManager.get_instance();
-            string font_name = config.panel_font_name;
+            string font_name = config.terminal_font_name;
             if (font_name.length == 0) font_name = "Monospace";
-            int font_size = config.panel_font_size > 0 ? config.panel_font_size : 11;
+            int font_size = config.terminal_font_size > 0 ? config.terminal_font_size : 11;
             var desc = Pango.FontDescription.from_string(@"$font_name $font_size");
             vte_terminal.set_font(desc);
+        }
+
+        public void apply_terminal_theme() {
+            if (vte_terminal == null) return;
+            var config = ConfigManager.get_instance();
+            string theme = config.terminal_color_theme.strip();
+
+            if (theme == "solarized-dark") {
+                string[] hex_palette = {
+                    "#073642", "#dc322f", "#859900", "#b58900",
+                    "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+                    "#002b36", "#cb4b16", "#586e75", "#657b83",
+                    "#839496", "#6c71c4", "#93a1a1", "#fdf6e3"
+                };
+                Gdk.RGBA[] palette = new Gdk.RGBA[16];
+                for (int i = 0; i < 16; i++) {
+                    Gdk.RGBA c = {};
+                    c.parse(hex_palette[i]);
+                    palette[i] = c;
+                }
+                Gdk.RGBA fg = {};
+                fg.parse("#839496");
+                Gdk.RGBA bg = {};
+                bg.parse("#002b36");
+                Gdk.RGBA cur = {};
+                cur.parse("#93a1a1");
+                vte_terminal.set_colors(fg, bg, palette);
+                vte_terminal.set_color_cursor(cur);
+            } else if (theme == "solarized-light") {
+                string[] hex_palette = {
+                    "#073642", "#dc322f", "#859900", "#b58900",
+                    "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+                    "#002b36", "#cb4b16", "#586e75", "#657b83",
+                    "#839496", "#6c71c4", "#93a1a1", "#fdf6e3"
+                };
+                Gdk.RGBA[] palette = new Gdk.RGBA[16];
+                for (int i = 0; i < 16; i++) {
+                    Gdk.RGBA c = {};
+                    c.parse(hex_palette[i]);
+                    palette[i] = c;
+                }
+                Gdk.RGBA fg = {};
+                fg.parse("#657b83");
+                Gdk.RGBA bg = {};
+                bg.parse("#fdf6e3");
+                Gdk.RGBA cur = {};
+                cur.parse("#586e75");
+                vte_terminal.set_colors(fg, bg, palette);
+                vte_terminal.set_color_cursor(cur);
+            } else if (theme == "green-on-black") {
+                string[] hex_palette = {
+                    "#000000", "#aa0000", "#00aa00", "#aa5500",
+                    "#0000aa", "#aa00aa", "#00aaaa", "#aaaaaa",
+                    "#555555", "#ff5555", "#55ff55", "#ffff55",
+                    "#5555ff", "#ff55ff", "#55ffff", "#ffffff"
+                };
+                Gdk.RGBA[] palette = new Gdk.RGBA[16];
+                for (int i = 0; i < 16; i++) {
+                    Gdk.RGBA c = {};
+                    c.parse(hex_palette[i]);
+                    palette[i] = c;
+                }
+                Gdk.RGBA fg = {};
+                fg.parse("#20c20e");
+                Gdk.RGBA bg = {};
+                bg.parse("#000000");
+                Gdk.RGBA cur = {};
+                cur.parse("#20c20e");
+                vte_terminal.set_colors(fg, bg, palette);
+                vte_terminal.set_color_cursor(cur);
+            } else {
+                vte_terminal.set_colors(null, null, null);
+                vte_terminal.set_color_cursor(null);
+            }
         }
 
         private void build_command_bar(Gtk.Box parent_box) {
@@ -2489,6 +2564,9 @@ row:selected .file-item-tagged {
 
         public void save_state() {
             var config = ConfigManager.get_instance();
+            left_panel.save_columns_to_config();
+            right_panel.save_columns_to_config();
+
             int cur_w, cur_h;
             get_default_size(out cur_w, out cur_h);
             if (cur_w <= 0) cur_w = get_width();
@@ -2568,6 +2646,7 @@ row:selected .file-item-tagged {
             right_panel.update_brief_column_width();
             apply_font_styles();
             apply_terminal_font();
+            apply_terminal_theme();
         }
 
         public override void unmap() {

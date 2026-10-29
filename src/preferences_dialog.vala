@@ -134,7 +134,100 @@ namespace VCommander {
             // Terminal & Command Line Group
             var cmd_group = new Adw.PreferencesGroup();
             cmd_group.title = "Terminal &amp; Command Line";
-            cmd_group.description = "Shell interpreter and environment for the bottom command bar";
+            cmd_group.description = "Shell interpreter, typography, colors, and buffer for the built-in terminal";
+
+            var term_font_row = new Adw.ActionRow();
+            term_font_row.title = "Terminal font";
+            term_font_row.subtitle = "Monospace font family for the built-in terminal";
+
+            var term_font_dialog = new Gtk.FontDialog();
+            var term_font_button = new Gtk.FontDialogButton(term_font_dialog);
+            var term_initial_desc = Pango.FontDescription.from_string(@"$(config.terminal_font_name) $(config.terminal_font_size)");
+            term_font_button.set_font_desc(term_initial_desc);
+            term_font_button.valign = Gtk.Align.CENTER;
+
+            term_font_row.add_suffix(term_font_button);
+            term_font_row.activatable_widget = term_font_button;
+            cmd_group.add(term_font_row);
+
+            var term_font_size_row = new Adw.SpinRow.with_range(6, 36, 1);
+            term_font_size_row.title = "Terminal font size (pt)";
+            term_font_size_row.subtitle = "Terminal font size in points (6 - 36 pt)";
+            term_font_size_row.value = config.terminal_font_size;
+            cmd_group.add(term_font_size_row);
+
+            bool updating_term_font = false;
+
+            term_font_button.notify["font-desc"].connect(() => {
+                if (updating_term_font) return;
+                updating_term_font = true;
+                var desc = term_font_button.get_font_desc();
+                if (desc != null) {
+                    string? family = desc.get_family();
+                    if (family != null && family.length > 0) {
+                        config.terminal_font_name = family;
+                    }
+                    int size = (int) (desc.get_size() / Pango.SCALE);
+                    if (size >= 6 && size <= 72) {
+                        config.terminal_font_size = size;
+                        term_font_size_row.value = size;
+                    }
+                    config.save();
+                    main_win.apply_preferences();
+                }
+                updating_term_font = false;
+            });
+
+            term_font_size_row.notify["value"].connect(() => {
+                if (updating_term_font) return;
+                updating_term_font = true;
+                config.terminal_font_size = (int) term_font_size_row.value;
+                var desc = Pango.FontDescription.from_string(@"$(config.terminal_font_name) $(config.terminal_font_size)");
+                term_font_button.set_font_desc(desc);
+                config.save();
+                main_win.apply_preferences();
+                updating_term_font = false;
+            });
+
+            var term_theme_row = new Adw.ComboRow();
+            term_theme_row.title = "Terminal color theme";
+            term_theme_row.subtitle = "Color palette for the built-in terminal emulator";
+            var theme_list = new Gtk.StringList(null);
+            theme_list.append("Default (System)");
+            theme_list.append("Solarized Dark");
+            theme_list.append("Solarized Light");
+            theme_list.append("Green on Black (Linux Console)");
+            term_theme_row.model = theme_list;
+
+            if (config.terminal_color_theme == "solarized-dark") {
+                term_theme_row.selected = 1;
+            } else if (config.terminal_color_theme == "solarized-light") {
+                term_theme_row.selected = 2;
+            } else if (config.terminal_color_theme == "green-on-black") {
+                term_theme_row.selected = 3;
+            } else {
+                term_theme_row.selected = 0;
+            }
+
+            term_theme_row.notify["selected"].connect(() => {
+                switch (term_theme_row.selected) {
+                    case 1:
+                        config.terminal_color_theme = "solarized-dark";
+                        break;
+                    case 2:
+                        config.terminal_color_theme = "solarized-light";
+                        break;
+                    case 3:
+                        config.terminal_color_theme = "green-on-black";
+                        break;
+                    default:
+                        config.terminal_color_theme = "default";
+                        break;
+                }
+                config.save();
+                main_win.apply_preferences();
+            });
+            cmd_group.add(term_theme_row);
 
             var shell_row = new Adw.EntryRow();
             shell_row.title = "Shell executable";

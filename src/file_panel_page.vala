@@ -486,8 +486,14 @@ namespace VCommander {
             super_name_col.id = "name";
             super_name_col.expand = true;
             super_name_col.resizable = true;
+            if (config.super_col_width_name > 50) {
+                super_name_col.fixed_width = config.super_col_width_name;
+            }
             super_name_col.sorter = new Gtk.CustomSorter((a, b) => {
                 return FileItem.compare_by_name((FileItem) a, (FileItem) b);
+            });
+            super_name_col.notify["fixed-width"].connect(() => {
+                on_column_width_changed();
             });
 
             var super_owner_factory = new Gtk.SignalListItemFactory();
@@ -528,10 +534,13 @@ namespace VCommander {
             });
             super_owner_col = new Gtk.ColumnViewColumn("Owner", super_owner_factory);
             super_owner_col.id = "owner";
-            super_owner_col.fixed_width = 80;
+            super_owner_col.fixed_width = config.super_col_width_owner > 20 ? config.super_col_width_owner : 80;
             super_owner_col.resizable = true;
             super_owner_col.sorter = new Gtk.CustomSorter((a, b) => {
                 return FileItem.compare_by_owner((FileItem) a, (FileItem) b);
+            });
+            super_owner_col.notify["fixed-width"].connect(() => {
+                on_column_width_changed();
             });
 
             var super_group_factory = new Gtk.SignalListItemFactory();
@@ -572,10 +581,13 @@ namespace VCommander {
             });
             super_group_col = new Gtk.ColumnViewColumn("Group", super_group_factory);
             super_group_col.id = "group";
-            super_group_col.fixed_width = 80;
+            super_group_col.fixed_width = config.super_col_width_group > 20 ? config.super_col_width_group : 80;
             super_group_col.resizable = true;
             super_group_col.sorter = new Gtk.CustomSorter((a, b) => {
                 return FileItem.compare_by_group((FileItem) a, (FileItem) b);
+            });
+            super_group_col.notify["fixed-width"].connect(() => {
+                on_column_width_changed();
             });
 
             var super_perm_factory = new Gtk.SignalListItemFactory();
@@ -616,10 +628,13 @@ namespace VCommander {
             });
             super_perm_col = new Gtk.ColumnViewColumn("Permission", super_perm_factory);
             super_perm_col.id = "perm";
-            super_perm_col.fixed_width = 110;
+            super_perm_col.fixed_width = config.super_col_width_perm > 20 ? config.super_col_width_perm : 110;
             super_perm_col.resizable = true;
             super_perm_col.sorter = new Gtk.CustomSorter((a, b) => {
                 return FileItem.compare_by_permissions((FileItem) a, (FileItem) b);
+            });
+            super_perm_col.notify["fixed-width"].connect(() => {
+                on_column_width_changed();
             });
 
             var super_size_factory = new Gtk.SignalListItemFactory();
@@ -670,10 +685,13 @@ namespace VCommander {
             });
             super_size_col = new Gtk.ColumnViewColumn("Size", super_size_factory);
             super_size_col.id = "size";
-            super_size_col.fixed_width = 100;
+            super_size_col.fixed_width = config.super_col_width_size > 20 ? config.super_col_width_size : 100;
             super_size_col.resizable = true;
             super_size_col.sorter = new Gtk.CustomSorter((a, b) => {
                 return FileItem.compare_by_size((FileItem) a, (FileItem) b);
+            });
+            super_size_col.notify["fixed-width"].connect(() => {
+                on_column_width_changed();
             });
 
             var super_dummy_factory = new Gtk.SignalListItemFactory();
@@ -1583,7 +1601,7 @@ namespace VCommander {
             columns_layout_changed();
         }
 
-        private void save_columns_to_config() {
+        public void save_columns_to_config() {
             var config = ConfigManager.get_instance();
             var cols_model = column_view.get_columns();
             uint n = cols_model.get_n_items();
@@ -1603,9 +1621,17 @@ namespace VCommander {
             }
             config.col_order = order_arr;
 
+            // Detailed view columns
             if (name_col.fixed_width > 30) config.col_width_name = name_col.fixed_width;
             if (size_col.fixed_width > 30) config.col_width_size = size_col.fixed_width;
             if (time_col.fixed_width > 30) config.col_width_mtime = time_col.fixed_width;
+
+            // Super Detailed view columns
+            if (super_name_col.fixed_width > 30) config.super_col_width_name = super_name_col.fixed_width;
+            if (super_owner_col.fixed_width > 20) config.super_col_width_owner = super_owner_col.fixed_width;
+            if (super_group_col.fixed_width > 20) config.super_col_width_group = super_group_col.fixed_width;
+            if (super_perm_col.fixed_width > 20) config.super_col_width_perm = super_perm_col.fixed_width;
+            if (super_size_col.fixed_width > 20) config.super_col_width_size = super_size_col.fixed_width;
         }
 
         public void update_columns_layout() {
@@ -1614,9 +1640,17 @@ namespace VCommander {
 
             apply_columns_order(config.col_order);
 
+            // Detailed view
             if (config.col_width_name > 30) name_col.fixed_width = config.col_width_name;
             if (config.col_width_size > 30) size_col.fixed_width = config.col_width_size;
             if (config.col_width_mtime > 30) time_col.fixed_width = config.col_width_mtime;
+
+            // Super Detailed view
+            if (config.super_col_width_name > 30) super_name_col.fixed_width = config.super_col_width_name;
+            if (config.super_col_width_owner > 20) super_owner_col.fixed_width = config.super_col_width_owner;
+            if (config.super_col_width_group > 20) super_group_col.fixed_width = config.super_col_width_group;
+            if (config.super_col_width_perm > 20) super_perm_col.fixed_width = config.super_col_width_perm;
+            if (config.super_col_width_size > 20) super_size_col.fixed_width = config.super_col_width_size;
 
             updating_columns = false;
         }

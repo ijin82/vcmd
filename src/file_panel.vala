@@ -521,6 +521,13 @@ namespace VCommander {
             }
         }
 
+        public void save_columns_to_config() {
+            var page = get_current_page();
+            if (page != null) {
+                page.save_columns_to_config();
+            }
+        }
+
         public string[] get_tab_paths() {
             var paths = new GenericArray<string>();
             for (int i = 0; i < tab_view.n_pages; i++) {
