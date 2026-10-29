@@ -1,28 +1,26 @@
 namespace VCommander {
 
     public class BookmarksDialog : Object {
-        private static Adw.Window? active_dialog = null;
+        private static Adw.Dialog? active_dialog = null;
 
         private delegate void SimpleAction();
 
         public static void show(Gtk.Window parent_window, FilePanel target_panel) {
             if (active_dialog != null) {
-                active_dialog.present();
+                active_dialog.present(parent_window);
                 return;
             }
 
             var config = ConfigManager.get_instance();
 
-            var dialog = new Adw.Window();
+            var dialog = new Adw.Dialog();
             active_dialog = dialog;
             dialog.title = "Directory Bookmarks";
-            dialog.transient_for = parent_window;
-            dialog.modal = true;
-            dialog.resizable = true;
 
             int init_w = (config.bookmarks_dialog_width >= 400) ? config.bookmarks_dialog_width : 640;
             int init_h = (config.bookmarks_dialog_height >= 300) ? config.bookmarks_dialog_height : 580;
-            dialog.set_default_size(init_w, init_h);
+            dialog.content_width = init_w;
+            dialog.content_height = init_h;
 
             var toolbar_view = new Adw.ToolbarView();
 
@@ -69,7 +67,7 @@ namespace VCommander {
 
             toolbar_view.add_bottom_bar(bottom_bar);
 
-            dialog.set_content(toolbar_view);
+            dialog.set_child(toolbar_view);
 
             // Helper to populate list
             SimpleAction populate_list = () => {
@@ -205,6 +203,7 @@ namespace VCommander {
                     entry.max_length = 50;
                     entry.text = bm.name != null ? bm.name : "";
                     entry.placeholder_text = "Bookmark name (optional, max 50 chars)";
+                    entry.activates_default = true;
                     edit_dialog.set_extra_child(entry);
 
                     edit_dialog.add_response("cancel", "Cancel");
@@ -213,35 +212,23 @@ namespace VCommander {
                     edit_dialog.set_close_response("cancel");
                     edit_dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED);
 
-                    bool action_executed = false;
-                    SimpleAction execute_save = () => {
-                        if (action_executed) return;
-                        action_executed = true;
-                        string new_name = (entry.text != null) ? entry.text.strip() : "";
-                        edit_dialog.force_close();
-                        config.update_bookmark_name((uint) idx, new_name);
-                        populate_list();
-                        var cur_row = list_box.get_row_at_index(idx);
-                        if (cur_row != null) {
-                            list_box.select_row(cur_row);
-                            cur_row.grab_focus();
-                        }
-                    };
-
                     entry.activate.connect(() => {
-                        execute_save();
+                        edit_dialog.response("save");
                     });
 
                     edit_dialog.choose.begin(dialog, null, (obj, res) => {
                         string response = edit_dialog.choose.end(res);
                         if (response == "save") {
-                            execute_save();
+                            string new_name = (entry.text != null) ? entry.text.strip() : "";
+                            config.update_bookmark_name((uint) idx, new_name);
+                            populate_list();
+                        }
+                        var cur_row = list_box.get_row_at_index(idx);
+                        if (cur_row != null) {
+                            list_box.select_row(cur_row);
+                            cur_row.grab_focus();
                         } else {
-                            var cur_row = list_box.get_row_at_index(idx);
-                            if (cur_row != null) {
-                                list_box.select_row(cur_row);
-                                cur_row.grab_focus();
-                            }
+                            list_box.grab_focus();
                         }
                     });
 
@@ -274,6 +261,7 @@ namespace VCommander {
                 entry.max_length = 50;
                 entry.text = "";
                 entry.placeholder_text = "Bookmark name (optional, max 50 chars)";
+                entry.activates_default = true;
                 add_dialog.set_extra_child(entry);
 
                 add_dialog.add_response("cancel", "Cancel");
@@ -282,34 +270,33 @@ namespace VCommander {
                 add_dialog.set_close_response("cancel");
                 add_dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED);
 
-                bool add_executed = false;
-                SimpleAction execute_add = () => {
-                    if (add_executed) return;
-                    add_executed = true;
-                    string custom_name = (entry.text != null) ? entry.text.strip() : "";
-                    add_dialog.force_close();
-                    config.add_bookmark(custom_name, cur_path);
-                    populate_list();
-
-                    // Select the newly added bookmark (last in list)
-                    int last_idx = (int) config.bookmarks.length - 1;
-                    if (last_idx >= 0) {
-                        var new_row = list_box.get_row_at_index(last_idx);
-                        if (new_row != null) {
-                            list_box.select_row(new_row);
-                            new_row.grab_focus();
-                        }
-                    }
-                };
-
                 entry.activate.connect(() => {
-                    execute_add();
+                    add_dialog.response("add");
                 });
 
                 add_dialog.choose.begin(dialog, null, (obj, res) => {
                     string response = add_dialog.choose.end(res);
                     if (response == "add") {
-                        execute_add();
+                        string custom_name = (entry.text != null) ? entry.text.strip() : "";
+                        config.add_bookmark(custom_name, cur_path);
+                        populate_list();
+
+                        // Select the newly added bookmark (last in list)
+                        int last_idx = (int) config.bookmarks.length - 1;
+                        if (last_idx >= 0) {
+                            var new_row = list_box.get_row_at_index(last_idx);
+                            if (new_row != null) {
+                                list_box.select_row(new_row);
+                                new_row.grab_focus();
+                            }
+                        }
+                    } else {
+                        var sel_row = list_box.get_selected_row();
+                        if (sel_row != null) {
+                            sel_row.grab_focus();
+                        } else {
+                            list_box.grab_focus();
+                        }
                     }
                 });
 
@@ -333,30 +320,14 @@ namespace VCommander {
                 activate_selected_bookmark();
             });
 
-            // Key controller for toolbar_view content
+            // Key controller for dialog shortcuts (BUBBLE phase so focused buttons receive Enter/Space)
             var key_ctrl = new Gtk.EventControllerKey();
-            key_ctrl.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_ctrl.key_pressed.connect((keyval, keycode, state) => {
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
 
-                // Ctrl+Up / Ctrl+KP_Up: Move bookmark up
-                if ((keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) &&
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    move_selected_bookmark_up();
-                    return Gdk.EVENT_STOP;
-                }
-
-                // Ctrl+Down / Ctrl+KP_Down: Move bookmark down
-                if ((keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) &&
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    move_selected_bookmark_down();
-                    return Gdk.EVENT_STOP;
-                }
-
-                // E: Edit selected bookmark name
-                if ((latin_key == Gdk.Key.e || keyval == Gdk.Key.e || keyval == Gdk.Key.E) &&
-                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
-                    prompt_edit_selected_bookmark();
+                // Escape: Close
+                if (keyval == Gdk.Key.Escape) {
+                    dialog.close();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -366,37 +337,45 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Delete or Shift+Delete: Delete selected bookmark
-                if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.KP_Delete) {
-                    delete_selected_bookmark();
-                    return Gdk.EVENT_STOP;
-                }
+                // List-specific shortcuts: only when list_box or a row is focused
+                var focus_widget = dialog.get_focus();
+                bool list_has_focus = (focus_widget != null && (focus_widget == list_box || focus_widget.is_ancestor(list_box)));
+                if (list_has_focus) {
+                    // Ctrl+Up / Ctrl+KP_Up: Move bookmark up
+                    if ((keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) &&
+                        (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                        move_selected_bookmark_up();
+                        return Gdk.EVENT_STOP;
+                    }
 
-                // Enter / KP_Enter / ISO_Enter: Activate selected
-                if (keyval == Gdk.Key.Return || keyval == Gdk.Key.KP_Enter || keyval == Gdk.Key.ISO_Enter) {
-                    activate_selected_bookmark();
-                    return Gdk.EVENT_STOP;
-                }
+                    // Ctrl+Down / Ctrl+KP_Down: Move bookmark down
+                    if ((keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) &&
+                        (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                        move_selected_bookmark_down();
+                        return Gdk.EVENT_STOP;
+                    }
 
-                // Escape: Close
-                if (keyval == Gdk.Key.Escape) {
-                    dialog.close();
-                    return Gdk.EVENT_STOP;
+                    // E: Edit selected bookmark name
+                    if ((latin_key == Gdk.Key.e || keyval == Gdk.Key.e || keyval == Gdk.Key.E) &&
+                        (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                        prompt_edit_selected_bookmark();
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    // Delete or Shift+Delete: Delete selected bookmark
+                    if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.KP_Delete) {
+                        delete_selected_bookmark();
+                        return Gdk.EVENT_STOP;
+                    }
                 }
 
                 return Gdk.EVENT_PROPAGATE;
             });
             toolbar_view.add_controller(key_ctrl);
 
-            dialog.close_request.connect(() => {
-                int cur_w = dialog.get_width();
-                int cur_h = dialog.get_height();
-                if (cur_w <= 0 || cur_h <= 0) {
-                    int def_w, def_h;
-                    dialog.get_default_size(out def_w, out def_h);
-                    if (cur_w <= 0) cur_w = def_w;
-                    if (cur_h <= 0) cur_h = def_h;
-                }
+            dialog.closed.connect(() => {
+                int cur_w = dialog.content_width;
+                int cur_h = dialog.content_height;
                 if (cur_w >= 400 && cur_h >= 300) {
                     config.bookmarks_dialog_width = cur_w;
                     config.bookmarks_dialog_height = cur_h;
@@ -405,10 +384,9 @@ namespace VCommander {
 
                 active_dialog = null;
                 target_panel.grab_focus_to_list();
-                return false;
             });
 
-            dialog.present();
+            dialog.present(parent_window);
 
             GLib.Idle.add(() => {
                 var first_row = list_box.get_row_at_index(0);
