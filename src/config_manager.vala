@@ -59,6 +59,8 @@ namespace VCommander {
         public string app_theme { get; set; default = "system"; }
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
+        public int panel_font_weight { get; set; default = 400; }
+        public string panel_font_style { get; set; default = "normal"; }
         public string command_shell { get; set; default = "/bin/bash"; }
         public string viewer_command { get; set; }
         public string editor_command { get; set; }
@@ -82,9 +84,56 @@ namespace VCommander {
         public int console_history_limit { get; set; default = 2000; }
         public string terminal_font_name { get; set; default = "Monospace"; }
         public int terminal_font_size { get; set; default = 11; }
+        public int terminal_font_weight { get; set; default = 400; }
+        public string terminal_font_style { get; set; default = "normal"; }
         public string terminal_color_theme { get; set; default = "default"; }
 
         public GenericArray<BookmarkItem> bookmarks { get; private set; }
+
+        public static int clamp_font_weight(int weight) {
+            if (weight < 100) return 400;
+            if (weight > 1000) return 1000;
+            return weight;
+        }
+
+        public static string normalize_font_style(string style) {
+            string s = style.strip().down();
+            if (s == "italic" || s == "oblique") return s;
+            return "normal";
+        }
+
+        public static Pango.Style pango_style_from_string(string style) {
+            switch (normalize_font_style(style)) {
+                case "italic":
+                    return Pango.Style.ITALIC;
+                case "oblique":
+                    return Pango.Style.OBLIQUE;
+                default:
+                    return Pango.Style.NORMAL;
+            }
+        }
+
+        public static string font_style_to_string(Pango.Style style) {
+            switch (style) {
+                case Pango.Style.ITALIC:
+                    return "italic";
+                case Pango.Style.OBLIQUE:
+                    return "oblique";
+                default:
+                    return "normal";
+            }
+        }
+
+        public static Pango.FontDescription make_font_description(string family, int size_pt, int weight, string style) {
+            var desc = new Pango.FontDescription();
+            string name = family.strip();
+            desc.set_family(name.length > 0 ? name : "Monospace");
+            int size = size_pt > 0 ? size_pt : 11;
+            desc.set_size(size * Pango.SCALE);
+            desc.set_weight((Pango.Weight) clamp_font_weight(weight));
+            desc.set_style(pango_style_from_string(style));
+            return desc;
+        }
 
         public static string detect_default_editor() {
             string[] candidates = {
@@ -247,6 +296,12 @@ namespace VCommander {
                     panel_font_size = key_file.get_integer("General", "PanelFontSize");
                     if (panel_font_size < 6) panel_font_size = 6;
                     if (panel_font_size > 72) panel_font_size = 72;
+                }
+                if (key_file.has_key("General", "PanelFontWeight")) {
+                    panel_font_weight = clamp_font_weight(key_file.get_integer("General", "PanelFontWeight"));
+                }
+                if (key_file.has_key("General", "PanelFontStyle")) {
+                    panel_font_style = normalize_font_style(key_file.get_string("General", "PanelFontStyle"));
                 }
                 if (key_file.has_key("General", "CommandShell")) {
                     string shell = key_file.get_string("General", "CommandShell").strip();
@@ -456,6 +511,12 @@ namespace VCommander {
                             terminal_font_size = fs;
                         }
                     }
+                    if (key_file.has_key("Console", "FontWeight")) {
+                        terminal_font_weight = clamp_font_weight(key_file.get_integer("Console", "FontWeight"));
+                    }
+                    if (key_file.has_key("Console", "FontStyle")) {
+                        terminal_font_style = normalize_font_style(key_file.get_string("Console", "FontStyle"));
+                    }
                     if (key_file.has_key("Console", "ColorTheme")) {
                         string ct = key_file.get_string("Console", "ColorTheme").strip();
                         if (ct == "solarized-dark") {
@@ -490,6 +551,8 @@ namespace VCommander {
                 key_file.set_string("General", "Theme", app_theme);
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);
+                key_file.set_integer("General", "PanelFontWeight", panel_font_weight);
+                key_file.set_string("General", "PanelFontStyle", panel_font_style);
                 key_file.set_string("General", "CommandShell", command_shell);
                 key_file.set_string("General", "ViewerCommand", viewer_command.length > 0 ? viewer_command : detect_default_editor());
                 key_file.set_string("General", "EditorCommand", editor_command.length > 0 ? editor_command : detect_default_editor());
@@ -570,6 +633,8 @@ namespace VCommander {
                 key_file.set_integer("Console", "HistoryLimit", console_history_limit);
                 key_file.set_string("Console", "FontName", terminal_font_name);
                 key_file.set_integer("Console", "FontSize", terminal_font_size);
+                key_file.set_integer("Console", "FontWeight", terminal_font_weight);
+                key_file.set_string("Console", "FontStyle", terminal_font_style);
                 key_file.set_string("Console", "ColorTheme", terminal_color_theme);
 
                 // Ensure directory exists

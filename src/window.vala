@@ -365,22 +365,42 @@ row:selected .file-item-tagged {
             int text_height = (status_font_size * 18 + 9) / 10;
             int min_bar_height = text_height + pad_top + pad_bottom + 2;
 
+            string panel_style = ConfigManager.normalize_font_style(config.panel_font_style);
+            int panel_weight = ConfigManager.clamp_font_weight(config.panel_font_weight);
             string css = """
 .file-list-view {
     font-family: '%s', monospace;
     font-size: %dpt;
+    font-weight: %d;
+    font-style: %s;
+}
+.command-entry {
+    font-family: '%s', monospace;
+    font-size: %dpt;
+    font-weight: %d;
+    font-style: %s;
 }
 .panel-status-bar {
     font-family: '%s', monospace;
     font-size: %dpt;
+    font-weight: %d;
+    font-style: %s;
     padding: %dpx 10px %dpx 10px;
     min-height: %dpx;
 }
 """.printf(
                 config.panel_font_name,
                 panel_font_size,
+                panel_weight,
+                panel_style,
+                config.panel_font_name,
+                panel_font_size,
+                panel_weight,
+                panel_style,
                 config.panel_font_name,
                 status_font_size,
+                panel_weight,
+                panel_style,
                 pad_top,
                 pad_bottom,
                 min_bar_height
@@ -803,10 +823,12 @@ row:selected .file-item-tagged {
         public void apply_terminal_font() {
             if (vte_terminal == null) return;
             var config = ConfigManager.get_instance();
-            string font_name = config.terminal_font_name;
-            if (font_name.length == 0) font_name = "Monospace";
-            int font_size = config.terminal_font_size > 0 ? config.terminal_font_size : 11;
-            var desc = Pango.FontDescription.from_string(@"$font_name $font_size");
+            var desc = ConfigManager.make_font_description(
+                config.terminal_font_name,
+                config.terminal_font_size,
+                config.terminal_font_weight,
+                config.terminal_font_style
+            );
             vte_terminal.set_font(desc);
         }
 

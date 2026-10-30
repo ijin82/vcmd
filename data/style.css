@@ -74,12 +74,14 @@ tabboxchild > tab {
 }
 
 .file-item-parent {
-    font-weight: bold;
+    /* font-weight: bold; */
+    font-weight: normal;
     color: @accent_color;
 }
 
 .file-item-dir {
-    font-weight: bold;
+    /* font-weight: bold; */
+    font-weight: normal;
 }
 
 .file-item-symlink {

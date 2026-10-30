@@ -128,7 +128,12 @@ namespace VCommander {
 
             var font_dialog = new Gtk.FontDialog();
             var font_button = new Gtk.FontDialogButton(font_dialog);
-            var initial_desc = Pango.FontDescription.from_string(@"$(config.panel_font_name) $(config.panel_font_size)");
+            var initial_desc = ConfigManager.make_font_description(
+                config.panel_font_name,
+                config.panel_font_size,
+                config.panel_font_weight,
+                config.panel_font_style
+            );
             font_button.set_font_desc(initial_desc);
             font_button.valign = Gtk.Align.CENTER;
 
@@ -153,6 +158,8 @@ namespace VCommander {
                     if (family != null && family.length > 0) {
                         config.panel_font_name = family;
                     }
+                    config.panel_font_weight = (int) desc.get_weight();
+                    config.panel_font_style = ConfigManager.font_style_to_string(desc.get_style());
                     int size = (int) (desc.get_size() / Pango.SCALE);
                     if (size >= 6 && size <= 72) {
                         config.panel_font_size = size;
@@ -168,7 +175,12 @@ namespace VCommander {
                 if (updating_font) return;
                 updating_font = true;
                 config.panel_font_size = (int) font_size_row.value;
-                var desc = Pango.FontDescription.from_string(@"$(config.panel_font_name) $(config.panel_font_size)");
+                var desc = ConfigManager.make_font_description(
+                    config.panel_font_name,
+                    config.panel_font_size,
+                    config.panel_font_weight,
+                    config.panel_font_style
+                );
                 font_button.set_font_desc(desc);
                 config.save();
                 main_win.apply_preferences();
@@ -188,7 +200,12 @@ namespace VCommander {
 
             var term_font_dialog = new Gtk.FontDialog();
             var term_font_button = new Gtk.FontDialogButton(term_font_dialog);
-            var term_initial_desc = Pango.FontDescription.from_string(@"$(config.terminal_font_name) $(config.terminal_font_size)");
+            var term_initial_desc = ConfigManager.make_font_description(
+                config.terminal_font_name,
+                config.terminal_font_size,
+                config.terminal_font_weight,
+                config.terminal_font_style
+            );
             term_font_button.set_font_desc(term_initial_desc);
             term_font_button.valign = Gtk.Align.CENTER;
 
@@ -213,6 +230,8 @@ namespace VCommander {
                     if (family != null && family.length > 0) {
                         config.terminal_font_name = family;
                     }
+                    config.terminal_font_weight = (int) desc.get_weight();
+                    config.terminal_font_style = ConfigManager.font_style_to_string(desc.get_style());
                     int size = (int) (desc.get_size() / Pango.SCALE);
                     if (size >= 6 && size <= 72) {
                         config.terminal_font_size = size;
@@ -228,7 +247,12 @@ namespace VCommander {
                 if (updating_term_font) return;
                 updating_term_font = true;
                 config.terminal_font_size = (int) term_font_size_row.value;
-                var desc = Pango.FontDescription.from_string(@"$(config.terminal_font_name) $(config.terminal_font_size)");
+                var desc = ConfigManager.make_font_description(
+                    config.terminal_font_name,
+                    config.terminal_font_size,
+                    config.terminal_font_weight,
+                    config.terminal_font_style
+                );
                 term_font_button.set_font_desc(desc);
                 config.save();
                 main_win.apply_preferences();
