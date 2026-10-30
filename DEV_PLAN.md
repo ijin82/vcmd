@@ -14,7 +14,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 4** | File Viewing & Editing (F3, F4) | **Completed (100%)** | Configurable external editor/viewer execution (gnome-text-editor, gvim, code, terminal fallback). |
 | **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) & Modern Dialogs | **Completed (100%)** | Midnight Commander-style directory bookmark popup, modern `Adw.Dialog` migration, customizable dialog dimensions. |
 | **Stage 6** | Search Engine (`Alt+F7`) | **Completed (100%)** | Async recursive search by name mask and file contents. Results open in a Super Detailed tab. The last query is stored in config; the start path comes from the active tab. |
-| **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Pending** | GVfs SFTP connection prompt and integration. |
+| **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Completed (100%)** | F2 connect dialog for SFTP, FTP, and SMB. Bookmarks store the URI without a password. |
 
 ---
 
@@ -177,8 +177,11 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [ ] Stage 7: Remote Connections & SFTP (`sftp://` / GVfs)
-- [ ] Connect to Server dialog:
-  - Fields for Protocol (`sftp://`), Server, Port, User, Directory.
-- [ ] Mount remote filesystem via `GLib.File.new_for_uri` and `GMountOperation`.
-- [ ] Seamless file operations (navigation, F5, F6, F7, F8) across remote and local panels.
+### [x] Stage 7: Remote Connections (`F2`, GVfs)
+- [x] Connect to Server dialog (`F2`):
+  - Protocol: SSH (`ssh://`), SFTP, FTP, or SMB. SSH uses the GVfs SFTP backend and the same key or password prompt.
+  - Host, optional port, user, and directory.
+  - Optional bookmark name. Remember stores the URI in the existing bookmark list, without a password.
+- [x] Mount through `GFile.mount_enclosing_volume` and `Gtk.MountOperation`. The system password dialog is used. An already loaded SSH key is picked up by GVfs for SFTP.
+- [x] Opening a bookmark or typing a `sftp://`, `ftp://`, or `smb://` path mounts before the directory is listed.
+- [x] Navigation and F5, F6, F7, F8 use the same GIO operations on the mounted location.

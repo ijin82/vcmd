@@ -2034,6 +2034,36 @@ namespace VCommander {
         private async void load_directory_async(File dir, string? target_select_name, GenericSet<string>? preserved_tags, Cancellable cancellable) {
             status_label.label = "Scanning directory...";
 
+            string? scheme = dir.get_uri_scheme();
+            if (scheme != null && scheme != "file") {
+                status_label.label = "Connecting…";
+                try {
+                    var root = get_root() as Gtk.Window;
+                    string? agent = null;
+                    var main = root as MainWindow;
+                    if (main != null) {
+                        agent = main.terminal_ssh_agent();
+                    }
+                    File opened = yield RemoteMount.prepare(dir, agent, root, cancellable);
+                    if (!opened.equal(dir)) {
+                        dir = opened;
+                        current_directory = opened;
+                        path_entry.text = opened.get_parse_name();
+                        directory_changed(opened);
+                    }
+                } catch (IOError.CANCELLED e) {
+                    return;
+                } catch (Error e) {
+                    error_occurred("Connection Error", e.message);
+                    status_label.label = @"Error: $(e.message)";
+                    return;
+                }
+                if (cancellable.is_cancelled()) {
+                    return;
+                }
+                status_label.label = "Scanning directory...";
+            }
+
             var items = new GenericArray<FileItem>();
 
             var parent = dir.get_parent();

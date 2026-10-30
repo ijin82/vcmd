@@ -29,6 +29,8 @@ SOURCES = \
 	src/open_with_dialog.vala \
 	src/file_search.vala \
 	src/search_dialog.vala \
+	src/remote_mount.vala \
+	src/connect_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala

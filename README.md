@@ -59,6 +59,11 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 * **Unified Conflict Resolution:** Centralized handling for overwrite, skip, or retry when encountering existing files or permissions issues.
 * **Trash & Direct Delete:** Support for both FreeDesktop Trash and direct permanent deletion.
 
+### 🌐 Remote Connections (<kbd>F2</kbd>)
+* Connect to SSH, SFTP, FTP, or SMB through GVfs. SSH and SFTP first try the SSH agent from the built-in terminal (`SSH_AUTH_SOCK`) via `sshfs`. If that key is not available, the system asks for a password.
+* The address can be saved as a bookmark without the password. Opening that bookmark mounts the location again.
+* Copy, move, delete, and navigation use the same file operations as local folders.
+
 ### 🔖 Directory Bookmarks / Hotlist (<kbd>Ctrl</kbd> + <kbd>\</kbd>)
 * Fast access to frequently visited directories and virtual GVfs URIs.
 * Add current directory with custom title, remove bookmarks, and jump instantly with <kbd>Enter</kbd>.
@@ -115,6 +120,7 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 | <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd> | Toggle window header bar visibility |
 | <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Insert selected item name into bottom command line |
 | <kbd>F1</kbd> | Open Keyboard Shortcuts & Help dialog |
+| <kbd>F2</kbd> | Connect to a remote server (SSH, SFTP, FTP, SMB) |
 | <kbd>F3</kbd> | View selected file in external viewer |
 | <kbd>F4</kbd> | Edit selected file in external editor |
 | <kbd>F5</kbd> | Copy selected / tagged items |

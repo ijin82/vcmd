@@ -19,6 +19,7 @@ namespace VCommander {
             // 1. Function Keys (F1..F10)
             var fn_section = new Adw.ShortcutsSection("Function Keys (F1..F10)");
             add_item(fn_section, "Help & Shortcuts", "F1");
+            add_item(fn_section, "Connect to Server", "F2", "SSH, SFTP, FTP, or SMB. Reopen later from bookmarks");
             add_item(fn_section, "View File", "F3");
             add_item(fn_section, "Edit File", "F4");
             add_item(fn_section, "Copy Selected File(s)", "F5");

@@ -5,6 +5,7 @@ namespace VCommander {
         private Gtk.Paned vertical_paned;
         private Gtk.Box console_drawer;
         private Vte.Terminal? vte_terminal = null;
+        private int terminal_child_pid = 0;
         private Gtk.ScrolledWindow console_scrolled;
         private bool terminal_alive = false;
         private string? last_terminal_dir = null;
@@ -816,7 +817,11 @@ row:selected .file-item-tagged {
                 null,
                 -1,
                 null,
-                null
+                (term, pid, err) => {
+                    if (err == null) {
+                        terminal_child_pid = (int) pid;
+                    }
+                }
             );
             terminal_alive = true;
             last_terminal_dir = cwd;
@@ -1070,6 +1075,13 @@ row:selected .file-item-tagged {
                     // Ctrl+Shift+V: paste from clipboard
                     if (latin_key == Gdk.Key.v && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
                         if (vte_terminal != null) vte_terminal.paste_clipboard();
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    if (keyval == Gdk.Key.F2 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                        if (active_panel != null) {
+                            ConnectDialog.show(this, active_panel);
+                        }
                         return Gdk.EVENT_STOP;
                     }
 
@@ -1341,6 +1353,14 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // F2: connect to a remote server
+                if (keyval == Gdk.Key.F2 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (active_panel != null) {
+                        ConnectDialog.show(this, active_panel);
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
                 // F3: View
                 if (keyval == Gdk.Key.F3) {
                     on_f3_view();
@@ -1511,6 +1531,10 @@ row:selected .file-item-tagged {
 
             cmd_entry.grab_focus();
             cmd_entry.set_position(-1);
+        }
+
+        public string? terminal_ssh_agent() {
+            return RemoteMount.discover_agent(terminal_child_pid);
         }
 
         public void show_file_search() {
