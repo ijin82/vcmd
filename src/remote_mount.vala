@@ -69,118 +69,10 @@ namespace VCommander {
                 }
             }
 
-            var op = new MountOperation();
-            op.password_save = PasswordSave.NEVER;
-            op.ask_password.connect((message, default_user, default_domain, flags) => {
-                ask_password_once(op, parent, message, default_user, default_domain, flags);
-            });
-            yield file.mount_enclosing_volume(MountMountFlags.NONE, op, cancellable);
-        }
-
-        private static void ask_password_once(MountOperation op, Gtk.Window? parent, string message, string default_user, string default_domain, AskPasswordFlags flags) {
-            op.password_save = PasswordSave.NEVER;
-
-            var dialog = new Adw.Dialog();
-            dialog.title = "Password";
-            dialog.content_width = 420;
-            dialog.content_height = 280;
-
-            var toolbar = new Adw.ToolbarView();
-            var header = new Adw.HeaderBar();
-            header.show_title = true;
-            toolbar.add_top_bar(header);
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-            box.margin_start = 16;
-            box.margin_end = 16;
-            box.margin_top = 12;
-            box.margin_bottom = 12;
-
-            var info = new Gtk.Label(message);
-            info.wrap = true;
-            info.xalign = 0;
-            box.append(info);
-
-            Gtk.Entry? user_entry = null;
-            if ((flags & AskPasswordFlags.NEED_USERNAME) != 0) {
-                user_entry = new Gtk.Entry();
-                user_entry.placeholder_text = "User";
-                user_entry.text = default_user;
-                box.append(user_entry);
-            }
-            Gtk.Entry? domain_entry = null;
-            if ((flags & AskPasswordFlags.NEED_DOMAIN) != 0) {
-                domain_entry = new Gtk.Entry();
-                domain_entry.placeholder_text = "Domain";
-                domain_entry.text = default_domain;
-                box.append(domain_entry);
-            }
-            Gtk.PasswordEntry? password_entry = null;
-            if ((flags & AskPasswordFlags.NEED_PASSWORD) != 0) {
-                password_entry = new Gtk.PasswordEntry();
-                password_entry.placeholder_text = "Password";
-                box.append(password_entry);
-            }
-
-            var note = new Gtk.Label("The password is used for this connection only and is not saved.");
-            note.wrap = true;
-            note.xalign = 0;
-            note.add_css_class("dim-label");
-            box.append(note);
-            toolbar.set_content(box);
-
-            bool replied = false;
-            var bottom = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
-            bottom.margin_start = 12;
-            bottom.margin_end = 12;
-            bottom.margin_top = 8;
-            bottom.margin_bottom = 8;
-            var cancel = new Gtk.Button.with_label("Cancel");
-            cancel.clicked.connect(() => {
-                if (!replied) {
-                    replied = true;
-                    op.password_save = PasswordSave.NEVER;
-                    op.reply(MountOperationResult.ABORTED);
-                }
-                dialog.close();
-            });
-            bottom.append(cancel);
-            var spacer = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
-            spacer.hexpand = true;
-            bottom.append(spacer);
-            var ok = new Gtk.Button.with_label("Connect");
-            ok.add_css_class("suggested-action");
-            ok.clicked.connect(() => {
-                if (replied) {
-                    return;
-                }
-                replied = true;
-                if (user_entry != null) {
-                    op.username = user_entry.text;
-                }
-                if (domain_entry != null) {
-                    op.domain = domain_entry.text;
-                }
-                if (password_entry != null) {
-                    op.password = password_entry.text;
-                }
-                op.password_save = PasswordSave.NEVER;
-                op.reply(MountOperationResult.HANDLED);
-                dialog.close();
-            });
-            bottom.append(ok);
-            toolbar.add_bottom_bar(bottom);
-            dialog.set_child(toolbar);
-            dialog.closed.connect(() => {
-                if (!replied) {
-                    replied = true;
-                    op.password_save = PasswordSave.NEVER;
-                    op.reply(MountOperationResult.ABORTED);
-                }
-            });
-            dialog.present(parent);
-            if (password_entry != null) {
-                password_entry.grab_focus();
+            var op = new RemoteMountOperation(parent);
+            try {
+                yield file.mount_enclosing_volume(MountMountFlags.NONE, op, cancellable);
+            } catch (IOError.ALREADY_MOUNTED e) {
             }
         }
 
@@ -309,6 +201,182 @@ namespace VCommander {
                 return mounts.contains(needle);
             } catch (Error e) {
                 return false;
+            }
+        }
+    }
+
+    public class RemoteMountOperation : MountOperation {
+        private delegate void ActionCallback();
+        private unowned Gtk.Window? parent_window;
+        private Adw.Dialog? current_dialog = null;
+
+        public RemoteMountOperation(Gtk.Window? parent) {
+            this.parent_window = parent;
+            this.password_save = PasswordSave.NEVER;
+        }
+
+        public override void ask_password(string message, string default_user, string default_domain, AskPasswordFlags flags) {
+            if (current_dialog != null) {
+                current_dialog.close();
+                current_dialog = null;
+            }
+
+            this.password_save = PasswordSave.NEVER;
+
+            var dialog = new Adw.Dialog();
+            current_dialog = dialog;
+            dialog.title = "Password";
+            dialog.content_width = 420;
+            dialog.content_height = 280;
+
+            var toolbar = new Adw.ToolbarView();
+            var header = new Adw.HeaderBar();
+            header.show_title = true;
+            toolbar.add_top_bar(header);
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+            box.margin_start = 16;
+            box.margin_end = 16;
+            box.margin_top = 12;
+            box.margin_bottom = 12;
+
+            var info = new Gtk.Label(message);
+            info.wrap = true;
+            info.xalign = 0;
+            box.append(info);
+
+            Gtk.Entry? user_entry = null;
+            if ((flags & AskPasswordFlags.NEED_USERNAME) != 0) {
+                user_entry = new Gtk.Entry();
+                user_entry.placeholder_text = "User";
+                user_entry.text = default_user;
+                box.append(user_entry);
+            }
+            Gtk.Entry? domain_entry = null;
+            if ((flags & AskPasswordFlags.NEED_DOMAIN) != 0) {
+                domain_entry = new Gtk.Entry();
+                domain_entry.placeholder_text = "Domain";
+                domain_entry.text = default_domain;
+                box.append(domain_entry);
+            }
+            Gtk.PasswordEntry? password_entry = null;
+            if ((flags & AskPasswordFlags.NEED_PASSWORD) != 0) {
+                password_entry = new Gtk.PasswordEntry();
+                password_entry.placeholder_text = "Password";
+                box.append(password_entry);
+            }
+
+            var note = new Gtk.Label("The password is used for this connection only and is not saved.");
+            note.wrap = true;
+            note.xalign = 0;
+            note.add_css_class("dim-label");
+            box.append(note);
+            toolbar.set_content(box);
+
+            bool replied = false;
+            var bottom = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            bottom.margin_start = 12;
+            bottom.margin_end = 12;
+            bottom.margin_top = 8;
+            bottom.margin_bottom = 8;
+            var cancel = new Gtk.Button.with_label("Cancel");
+            cancel.clicked.connect(() => {
+                if (!replied) {
+                    replied = true;
+                    this.password_save = PasswordSave.NEVER;
+                    this.reply(MountOperationResult.ABORTED);
+                }
+                dialog.close();
+            });
+            bottom.append(cancel);
+            var spacer = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            spacer.hexpand = true;
+            bottom.append(spacer);
+            var ok = new Gtk.Button.with_label("Connect");
+            ok.add_css_class("suggested-action");
+
+            ActionCallback submit = () => {
+                if (replied) {
+                    return;
+                }
+                replied = true;
+                if (user_entry != null) {
+                    this.username = user_entry.text;
+                }
+                if (domain_entry != null) {
+                    this.domain = domain_entry.text;
+                }
+                if (password_entry != null) {
+                    this.password = password_entry.text;
+                }
+                this.password_save = PasswordSave.NEVER;
+                this.reply(MountOperationResult.HANDLED);
+                dialog.close();
+            };
+
+            ok.clicked.connect(() => submit());
+            if (user_entry != null) {
+                user_entry.activate.connect(() => submit());
+            }
+            if (domain_entry != null) {
+                domain_entry.activate.connect(() => submit());
+            }
+            if (password_entry != null) {
+                password_entry.activate.connect(() => submit());
+            }
+
+            bottom.append(ok);
+            toolbar.add_bottom_bar(bottom);
+            dialog.set_child(toolbar);
+            dialog.closed.connect(() => {
+                if (!replied) {
+                    replied = true;
+                    this.password_save = PasswordSave.NEVER;
+                    this.reply(MountOperationResult.ABORTED);
+                }
+                if (current_dialog == dialog) {
+                    current_dialog = null;
+                }
+            });
+            dialog.present(parent_window);
+            if (password_entry != null) {
+                password_entry.grab_focus();
+            } else if (user_entry != null) {
+                user_entry.grab_focus();
+            }
+        }
+
+        public override void ask_question(string message, string[] choices) {
+            var dialog = new Adw.AlertDialog("Authentication Question", message);
+            for (int i = 0; i < choices.length; i++) {
+                string id = i.to_string();
+                dialog.add_response(id, choices[i]);
+            }
+            if (choices.length == 0) {
+                dialog.add_response("0", "OK");
+                dialog.add_response("1", "Cancel");
+            }
+            dialog.set_default_response("0");
+            dialog.set_close_response((choices.length > 1) ? "1" : "0");
+            bool replied = false;
+            dialog.response.connect((resp) => {
+                if (replied) return;
+                replied = true;
+                int chosen = int.parse(resp);
+                this.choice = chosen;
+                if (chosen == 0) {
+                    this.reply(MountOperationResult.HANDLED);
+                } else {
+                    this.reply(MountOperationResult.ABORTED);
+                }
+            });
+            dialog.present(parent_window);
+        }
+
+        public override void aborted() {
+            if (current_dialog != null) {
+                current_dialog.close();
+                current_dialog = null;
             }
         }
     }

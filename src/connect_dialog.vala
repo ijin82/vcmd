@@ -54,8 +54,8 @@ namespace VCommander {
             box.append(protocol_label);
 
             var protocols = new Gtk.StringList(null);
-            protocols.append("SFTP");
             protocols.append("SSH");
+            protocols.append("SFTP");
             protocols.append("FTP");
             protocols.append("SMB");
             protocol_dropdown = new Gtk.DropDown(protocols, null);
@@ -136,14 +136,16 @@ namespace VCommander {
 
         private string selected_scheme() {
             switch (protocol_dropdown.selected) {
-                case 1:
+                case 0:
                     return "ssh";
+                case 1:
+                    return "sftp";
                 case 2:
                     return "ftp";
                 case 3:
                     return "smb";
                 default:
-                    return "sftp";
+                    return "ssh";
             }
         }
 
