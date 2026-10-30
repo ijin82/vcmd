@@ -2,7 +2,7 @@
 
 .file-panel {
     border: 1px solid alpha(@borders, 0.4);
-    border-radius: 8px;
+    border-radius: 0px;
     margin: 4px;
     transition: border-color 200ms ease, box-shadow 200ms ease;
     background-color: @view_bg_color;
@@ -27,8 +27,17 @@ paned > separator:hover {
 }
 
 .file-panel tabbar {
-    border-bottom: 1px solid alpha(@borders, 0.3);
-    background-color: alpha(@headerbar_bg_color, 0.4);
+    /* border-bottom: 1px solid alpha(@borders, 0.3); */
+    /* background-color: alpha(@headerbar_bg_color, 0.4); */
+    border-radius: 0px;
+}
+
+tabboxchild {
+    border-radius: 4px;
+}
+
+tabboxchild > tab {
+    border-radius: 4px;
 }
 
 .panel-header {
