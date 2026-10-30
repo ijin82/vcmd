@@ -805,6 +805,10 @@ row:selected .file-item-tagged {
 
             string[] argv = { shell_bin, "-i" };
             string[] env = GLib.Environ.get();
+            string? discovered_agent = RemoteMount.discover_agent(0);
+            if (discovered_agent != null) {
+                env = GLib.Environ.set_variable(env, "SSH_AUTH_SOCK", discovered_agent, true);
+            }
             env = GLib.Environ.set_variable(env, "TERM", "xterm-256color", true);
             env = GLib.Environ.set_variable(env, "COLORTERM", "truecolor", true);
 

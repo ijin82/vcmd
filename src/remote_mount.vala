@@ -24,13 +24,63 @@ namespace VCommander {
         }
 
         public static string? discover_agent(int terminal_pid) {
-            string? from_terminal = read_proc_env(terminal_pid, "SSH_AUTH_SOCK");
-            if (agent_usable(from_terminal)) {
-                return from_terminal;
+            var candidates = new GenericArray<string>();
+
+            // 1. From terminal environment and its child processes
+            if (terminal_pid > 0) {
+                string? from_terminal = read_proc_env(terminal_pid, "SSH_AUTH_SOCK");
+                if (from_terminal != null && from_terminal.length > 0) {
+                    candidates.add(from_terminal);
+                }
+                scan_proc_children_for_agent(terminal_pid, candidates);
             }
+
+            // 2. Current environment
             string? own = Environment.get_variable("SSH_AUTH_SOCK");
-            if (agent_usable(own)) {
-                return own;
+            if (own != null && own.length > 0) {
+                candidates.add(own);
+            }
+
+            // 3. Scan /proc/net/unix for active agent sockets
+            scan_proc_net_unix(candidates);
+
+            // 4. Standard socket locations
+            string uid_str = ((uint) Posix.getuid()).to_string();
+            candidates.add(@"/run/user/$uid_str/openssh_agent");
+            candidates.add(@"/run/user/$uid_str/ssh-agent.socket");
+            candidates.add(@"/run/user/$uid_str/keyring/ssh");
+
+            string? user = Environment.get_variable("USER");
+            if (user == null || user.length == 0) {
+                user = Environment.get_variable("LOGNAME");
+            }
+            if (user != null && user.length > 0) {
+                scan_tmp_agent_sockets(@"/tmp/.private/$user", candidates);
+            }
+            scan_tmp_agent_sockets("/tmp", candidates);
+
+            // Evaluate candidates: prioritize socket that actually contains loaded keys (> 0)
+            string? fallback_socket = null;
+            var seen = new GenericSet<string>(str_hash, str_equal);
+            for (int i = 0; i < candidates.length; i++) {
+                string cand = candidates.get(i);
+                if (cand in seen) {
+                    continue;
+                }
+                seen.add(cand);
+
+                int keys = count_agent_keys(cand);
+                if (keys > 0) {
+                    Environment.set_variable("SSH_AUTH_SOCK", cand, true);
+                    return cand;
+                } else if (keys == 0 && fallback_socket == null) {
+                    fallback_socket = cand;
+                }
+            }
+
+            if (fallback_socket != null) {
+                Environment.set_variable("SSH_AUTH_SOCK", fallback_socket, true);
+                return fallback_socket;
             }
             return null;
         }
@@ -76,8 +126,118 @@ namespace VCommander {
             }
         }
 
+        public static int count_agent_keys(string sock_path) {
+            if (sock_path.length == 0 || !FileUtils.test(sock_path, FileTest.EXISTS)) {
+                return -1;
+            }
+            try {
+                var sock = new Socket(SocketFamily.UNIX, SocketType.STREAM, SocketProtocol.DEFAULT);
+                sock.set_timeout(1);
+                var addr = new UnixSocketAddress(sock_path);
+                sock.connect(addr);
+
+                uint8 req[5] = { 0, 0, 0, 1, 11 };
+                sock.send(req);
+
+                uint8 resp[9];
+                ssize_t n = sock.receive(resp);
+                sock.close();
+
+                if (n < 9) {
+                    return -1;
+                }
+                if (resp[4] != 12) {
+                    return -1;
+                }
+
+                uint32 count = ((uint32) resp[5] << 24) |
+                               ((uint32) resp[6] << 16) |
+                               ((uint32) resp[7] << 8)  |
+                               ((uint32) resp[8]);
+                return (int) count;
+            } catch (Error e) {
+                return -1;
+            }
+        }
+
+        private static void scan_proc_net_unix(GenericArray<string> list) {
+            try {
+                string contents;
+                FileUtils.get_contents("/proc/net/unix", out contents);
+                string[] lines = contents.split("\n");
+                foreach (string line in lines) {
+                    string trimmed = line.strip();
+                    if (trimmed.contains("agent.") || trimmed.contains("/ssh") || trimmed.contains("openssh")) {
+                        string[] parts = trimmed.split(" ");
+                        if (parts.length > 0) {
+                            string path = parts[parts.length - 1];
+                            if (path.has_prefix("/") && FileUtils.test(path, FileTest.EXISTS)) {
+                                list.add(path);
+                            }
+                        }
+                    }
+                }
+            } catch (Error e) {
+            }
+        }
+
+        private static void scan_tmp_agent_sockets(string base_dir, GenericArray<string> list) {
+            try {
+                if (!FileUtils.test(base_dir, FileTest.IS_DIR)) {
+                    return;
+                }
+                Dir dir = Dir.open(base_dir);
+                string? name = null;
+                while ((name = dir.read_name()) != null) {
+                    if (name.has_prefix("ssh-")) {
+                        string sub = Path.build_filename(base_dir, name);
+                        if (FileUtils.test(sub, FileTest.IS_DIR)) {
+                            try {
+                                Dir sub_dir = Dir.open(sub);
+                                string? agent_name = null;
+                                while ((agent_name = sub_dir.read_name()) != null) {
+                                    if (agent_name.has_prefix("agent.")) {
+                                        string sock = Path.build_filename(sub, agent_name);
+                                        if (FileUtils.test(sock, FileTest.EXISTS)) {
+                                            list.add(sock);
+                                        }
+                                    }
+                                }
+                            } catch (Error e) {
+                            }
+                        }
+                    }
+                }
+            } catch (Error e) {
+            }
+        }
+
+        private static void scan_proc_children_for_agent(int pid, GenericArray<string> list) {
+            try {
+                string children_file = @"/proc/$pid/task/$pid/children";
+                if (FileUtils.test(children_file, FileTest.EXISTS)) {
+                    string contents;
+                    FileUtils.get_contents(children_file, out contents);
+                    string[] pids = contents.strip().split(" ");
+                    foreach (string child_str in pids) {
+                        int cpid = int.parse(child_str);
+                        if (cpid > 0) {
+                            string? sock = read_proc_env(cpid, "SSH_AUTH_SOCK");
+                            if (sock != null && sock.length > 0) {
+                                list.add(sock);
+                            }
+                        }
+                    }
+                }
+            } catch (Error e) {
+            }
+        }
+
         private static bool agent_usable(string? sock) {
-            return sock != null && sock.length > 0 && FileUtils.test(sock, FileTest.EXISTS);
+            if (sock == null || sock.length == 0 || !FileUtils.test(sock, FileTest.EXISTS)) {
+                return false;
+            }
+            return count_agent_keys(sock) >= 0;
         }
 
         private static string? read_proc_env(int pid, string key) {
@@ -148,6 +308,8 @@ namespace VCommander {
 
             if (mount_contains(mountpoint)) {
                 return local_target(mountpoint, remote_path);
+            } else {
+                Posix.system("fusermount -u -z " + mountpoint + " 2>/dev/null");
             }
 
             string target = user.length > 0 ? @"$user@$host:/" : @"$host:/";
@@ -159,6 +321,8 @@ namespace VCommander {
             }
             argv.add("-o");
             argv.add("IdentityAgent=" + agent_sock);
+            argv.add("-o");
+            argv.add("StrictHostKeyChecking=accept-new");
             argv.add("-o");
             argv.add("BatchMode=yes");
             argv.add("-o");
@@ -178,6 +342,9 @@ namespace VCommander {
             try {
                 var proc = launcher.spawnv(args);
                 yield proc.wait_check_async(cancellable);
+                if (proc.get_exit_status() != 0) {
+                    return null;
+                }
             } catch (Error e) {
                 return null;
             }
@@ -198,7 +365,10 @@ namespace VCommander {
                 string mounts;
                 FileUtils.get_contents("/proc/mounts", out mounts);
                 string needle = " " + mountpoint + " ";
-                return mounts.contains(needle);
+                if (!mounts.contains(needle)) {
+                    return false;
+                }
+                return FileUtils.test(mountpoint, FileTest.IS_DIR);
             } catch (Error e) {
                 return false;
             }
