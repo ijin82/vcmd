@@ -473,9 +473,11 @@ row:selected .file-item-tagged {
 
             left_panel.view_mode_changed.connect((p) => {
                 update_super_view_layout();
+                update_window_title();
             });
             right_panel.view_mode_changed.connect((p) => {
                 update_super_view_layout();
+                update_window_title();
             });
 
             left_panel.toggle_hidden_requested.connect(() => {
@@ -1452,8 +1454,24 @@ row:selected .file-item-tagged {
                 ? active_panel.current_directory.get_parse_name()
                 : null;
             if (cur_path != null && cur_path.length > 0) {
-                title_label.label = @"[ $cur_path ] — Vala Commander";
-                title = @"[ $cur_path ] — Vala Commander";
+                string mode = "detailed";
+                if (active_panel != null && active_panel.is_showing_search_results()) {
+                    mode = "search results";
+                } else if (active_panel != null) {
+                    switch (active_panel.view_mode) {
+                        case PanelViewMode.BRIEF:
+                            mode = "short";
+                            break;
+                        case PanelViewMode.SUPER:
+                            mode = "super detailed";
+                            break;
+                        default:
+                            mode = "detailed";
+                            break;
+                    }
+                }
+                title_label.label = @"[ $cur_path ] — $mode — Vala Commander";
+                title = @"[ $cur_path ] — $mode — Vala Commander";
             } else {
                 title_label.label = "Vala Commander";
                 title = "Vala Commander";
