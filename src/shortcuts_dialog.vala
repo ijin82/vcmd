@@ -29,7 +29,7 @@ namespace VCommander {
             add_item(fn_section, "Move to Trash", "F8", "or Delete");
             add_item(fn_section, "Permanently Delete", "<Shift>F8", "or Shift+Delete");
             add_item(fn_section, "Quit Vala Commander", "F10", "or Ctrl+Q");
-            add_item(fn_section, "Search Files & Content", "<Alt>F7", "Stage 6");
+            add_item(fn_section, "Search Files & Content", "<Alt>F7", "Opens a Super Detailed results tab");
             dialog.add(fn_section);
 
             // 2. Navigation & Panels
@@ -38,7 +38,7 @@ namespace VCommander {
             add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
             add_item(nav_section, "Open With...", "<Control><Shift>o", "Choose custom application");
             add_item(nav_section, "Toggle Console Output Drawer", "<Control>o", "or Ctrl+~");
-            add_item(nav_section, "Go to Parent Directory", "BackSpace", "or Alt+Up");
+            add_item(nav_section, "Go to Parent Directory", "BackSpace", "or Alt+Up; also leaves search results");
             add_item(nav_section, "Jump to First Item", "Home", "or Left Arrow");
             add_item(nav_section, "Jump to Last Item", "End", "or Right Arrow");
             add_item(nav_section, "Focus Path Entry", "<Control>l");

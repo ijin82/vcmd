@@ -199,7 +199,7 @@ namespace VCommander {
             }
         }
 
-        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc") {
+        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc", bool defer_load = false) {
             File target_dir = dir;
             string vmode = view_mode_str;
             if (target_dir == null) {
@@ -213,7 +213,7 @@ namespace VCommander {
             }
             hidden = ConfigManager.get_instance().show_hidden;
 
-            var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order);
+            var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order, !defer_load);
             page_widget.hexpand = true;
             page_widget.vexpand = true;
             if (custom_title != null && custom_title.length > 0) {
@@ -494,6 +494,11 @@ namespace VCommander {
             if (page != null) {
                 page.go_up();
             }
+        }
+
+        public bool is_showing_search_results() {
+            var page = get_current_page();
+            return page != null && page.is_showing_search_results;
         }
 
         public void refresh() {

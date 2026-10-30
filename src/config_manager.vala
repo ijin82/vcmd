@@ -76,6 +76,11 @@ namespace VCommander {
         public int super_col_width_size { get; set; default = 100; }
         public string select_mask { get; set; default = "*"; }
         public bool select_mask_include_dirs { get; set; default = false; }
+        public string search_name { get; set; default = ""; }
+        public string search_content { get; set; default = ""; }
+        public bool search_case_sensitive { get; set; default = false; }
+        public bool search_include_hidden { get; set; default = false; }
+        public bool search_has_saved { get; set; default = false; }
         public int bookmarks_dialog_width { get; set; default = 640; }
         public int bookmarks_dialog_height { get; set; default = 580; }
         public int open_with_dialog_width { get; set; default = 560; }
@@ -330,6 +335,21 @@ namespace VCommander {
                 if (key_file.has_key("General", "SelectMaskIncludeDirs")) {
                     select_mask_include_dirs = key_file.get_boolean("General", "SelectMaskIncludeDirs");
                 }
+                if (key_file.has_group("Search")) {
+                    search_has_saved = true;
+                    if (key_file.has_key("Search", "Name")) {
+                        search_name = key_file.get_string("Search", "Name");
+                    }
+                    if (key_file.has_key("Search", "Content")) {
+                        search_content = key_file.get_string("Search", "Content");
+                    }
+                    if (key_file.has_key("Search", "CaseSensitive")) {
+                        search_case_sensitive = key_file.get_boolean("Search", "CaseSensitive");
+                    }
+                    if (key_file.has_key("Search", "IncludeHidden")) {
+                        search_include_hidden = key_file.get_boolean("Search", "IncludeHidden");
+                    }
+                }
                 if (key_file.has_key("Columns", "Order")) {
                     var order = key_file.get_string_list("Columns", "Order");
                     if (order.length > 0) {
@@ -558,6 +578,15 @@ namespace VCommander {
                 key_file.set_string("General", "EditorCommand", editor_command.length > 0 ? editor_command : detect_default_editor());
                 key_file.set_string("General", "SelectMask", select_mask.length > 0 ? select_mask : "*");
                 key_file.set_boolean("General", "SelectMaskIncludeDirs", select_mask_include_dirs);
+                if (search_has_saved) {
+                    if (key_file.has_key("Search", "StartPath")) {
+                        key_file.remove_key("Search", "StartPath");
+                    }
+                    key_file.set_string("Search", "Name", search_name);
+                    key_file.set_string("Search", "Content", search_content);
+                    key_file.set_boolean("Search", "CaseSensitive", search_case_sensitive);
+                    key_file.set_boolean("Search", "IncludeHidden", search_include_hidden);
+                }
 
                 // Columns
                 if (col_order != null && col_order.length > 0) {

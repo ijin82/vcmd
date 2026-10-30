@@ -27,6 +27,8 @@ SOURCES = \
 	src/preferences_dialog.vala \
 	src/bookmarks_dialog.vala \
 	src/open_with_dialog.vala \
+	src/file_search.vala \
+	src/search_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala

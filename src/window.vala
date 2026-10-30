@@ -1071,6 +1071,12 @@ row:selected .file-item-tagged {
                         return Gdk.EVENT_STOP;
                     }
 
+                    // Alt+F7: file search, even while the terminal has focus
+                    if (keyval == Gdk.Key.F7 && (state & Gdk.ModifierType.ALT_MASK) != 0) {
+                        show_file_search();
+                        return Gdk.EVENT_STOP;
+                    }
+
                     // All other keys pass straight to Vte.Terminal without being intercepted
                     return Gdk.EVENT_PROPAGATE;
                 }
@@ -1365,9 +1371,15 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // F7: Mkdir
+                // F7: Mkdir; Alt+F7: file search
                 if (keyval == Gdk.Key.F7) {
-                    on_f7_mkdir();
+                    if ((state & Gdk.ModifierType.ALT_MASK) != 0) {
+                        show_file_search();
+                    } else if ((state & Gdk.ModifierType.CONTROL_MASK) == 0) {
+                        on_f7_mkdir();
+                    } else {
+                        return Gdk.EVENT_PROPAGATE;
+                    }
                     return Gdk.EVENT_STOP;
                 }
 
@@ -1481,6 +1493,35 @@ row:selected .file-item-tagged {
 
             cmd_entry.grab_focus();
             cmd_entry.set_position(-1);
+        }
+
+        public void show_file_search() {
+            if (active_panel == null) {
+                return;
+            }
+            var page = active_panel.get_current_page();
+            if (page == null || page.current_directory == null) {
+                return;
+            }
+            bool hidden = page.show_hidden;
+            File start = page.current_directory;
+            var dialog = SearchDialog.show(this, start, hidden);
+            if (dialog == null) {
+                return;
+            }
+            dialog.ready.connect((root, items, summary) => {
+                if (active_panel == null) {
+                    return;
+                }
+                var panel = active_panel;
+                activate_panel(panel, false);
+                panel.open_new_tab(root, "super", hidden, "Search", "name", "asc", true);
+                var result_page = panel.get_current_page();
+                if (result_page != null) {
+                    result_page.present_search_results(root, items, summary);
+                }
+                activate_panel(panel, true);
+            });
         }
 
         public void toggle_active_panel() {
@@ -2267,11 +2308,13 @@ row:selected .file-item-tagged {
 
                 yield proc.wait_async(null);
 
-                // When tool finishes, refresh target panel preserving the selected item
-                if (target_panel.current_directory != null) {
-                    target_panel.load_directory(target_panel.current_directory, selected_name);
-                } else {
-                    target_panel.refresh();
+                // A viewer or editor must not replace an open search-results tab.
+                if (!target_panel.is_showing_search_results()) {
+                    if (target_panel.current_directory != null) {
+                        target_panel.load_directory(target_panel.current_directory, selected_name);
+                    } else {
+                        target_panel.refresh();
+                    }
                 }
 
                 // If opposite panel has the same directory, refresh it as well

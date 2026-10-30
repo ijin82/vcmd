@@ -64,12 +64,20 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 * Add current directory with custom title, remove bookmarks, and jump instantly with <kbd>Enter</kbd>.
 * Built using modern `Adw.Dialog` components with customizable dialog dimensions.
 
+### 🔎 File Search (<kbd>Alt</kbd> + <kbd>F7</kbd>)
+* Search the active tab's directory, or any chosen start folder, without blocking the interface.
+* Match file and folder names by mask (`*` and `?`). A word without wildcards matches anywhere in the name.
+* Optionally search text inside files. Directories are matched by name only.
+* Case sensitivity and hidden files can be toggled. The name, content, and those toggles are restored the next time the dialog opens. The start path always comes from the active tab.
+* Matches open in a new **Search** tab in Super Detailed view, with the relative path in the name column and the cursor on the first match.
+* <kbd>Backspace</kbd>, <kbd>Alt</kbd> + <kbd>↑</kbd>, or `..` leaves the results and opens the folder that was searched. Viewing or editing a match keeps the results tab.
+
 ### 🚀 "Open With..." Dialog (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>)
 * Search and launch any registered desktop application for the selected file with instant filtering.
 
 ### ⚙️ Preferences Window (<kbd>Ctrl</kbd> + <kbd>,</kbd>)
 * Built with native **Libadwaita Preferences** (`Adw.PreferencesWindow`).
-* **Appearance & Typography:** Choose custom monospace font families and font sizes with live updates across panels and terminal.
+* **Appearance & Typography:** Choose font family, size, weight, and style for file lists and the built-in terminal. Bold and italic faces from the font dialog are applied live.
 * **Layout & Visibility:** Toggle path toolbar, function key bar, and customize brief view column width.
 * **Dialog Sizes:** Customize default width and height for dialogs (Bookmarks, Shortcuts, Open With).
 * **Shell & Console:** Configure preferred shell interpreter (`/bin/bash`, `/bin/zsh`, `/usr/bin/fish`) and terminal scrollback history limit.
@@ -82,7 +90,7 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 | :--- | :--- |
 | <kbd>Tab</kbd> | Switch active pane (Left ⇄ Right) |
 | <kbd>Enter</kbd> | Open directory / launch file with default app |
-| <kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>↑</kbd> | Navigate up to parent directory |
+| <kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>↑</kbd> | Navigate up to parent directory; leave search results |
 | <kbd>Left Arrow</kbd> | Jump to start / top item (<kbd>Home</kbd>) |
 | <kbd>Right Arrow</kbd> | Jump to end / last item (<kbd>End</kbd>) |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Calculate directory or file size |
@@ -112,6 +120,7 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 | <kbd>F5</kbd> | Copy selected / tagged items |
 | <kbd>F6</kbd> | Move / rename selected / tagged items |
 | <kbd>F7</kbd> | Create new directory |
+| <kbd>Alt</kbd> + <kbd>F7</kbd> | Search files by name and content |
 | <kbd>F8</kbd> | Delete selected / tagged items |
 | <kbd>F10</kbd> / <kbd>Ctrl</kbd> + <kbd>Q</kbd> | Quit application |
 | *Type characters* | Start typing shell command in bottom CLI |

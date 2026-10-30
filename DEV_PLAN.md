@@ -13,7 +13,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 3** | File Operations & Unified Error Handling (F5, F6, F7, F8) | **Completed (100%)** | Centralized `FileOperationService` (`GLib.IOError` handler), F7 mkdir, F8 recursive delete, F5 copy, F6 move/rename with conflict resolution, bottom F1-F10 bar. |
 | **Stage 4** | File Viewing & Editing (F3, F4) | **Completed (100%)** | Configurable external editor/viewer execution (gnome-text-editor, gvim, code, terminal fallback). |
 | **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) & Modern Dialogs | **Completed (100%)** | Midnight Commander-style directory bookmark popup, modern `Adw.Dialog` migration, customizable dialog dimensions. |
-| **Stage 6** | Search Engine (`Alt+F7`) | **Pending** | Background recursive directory search by filename mask and file contents. |
+| **Stage 6** | Search Engine (`Alt+F7`) | **Completed (100%)** | Async recursive search by name mask and file contents. Results open in a Super Detailed tab. The last query is stored in config; the start path comes from the active tab. |
 | **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Pending** | GVfs SFTP connection prompt and integration. |
 
 ---
@@ -87,14 +87,14 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
   - Active tab indices for both panels.
   - View modes (Brief, Detailed, Super Detailed) and hidden file visibility.
   - Brief column width setting.
-  - Custom panel font family and font size.
+  - Custom panel and terminal font family, size, weight, and style.
   - Dialog sizes (Bookmarks, Shortcuts, Open With).
   - Safe fallback to `$HOME` if saved tab directories are unmounted or removed.
 - [x] Libadwaita Preferences Window (`Ctrl+,`):
   - Path toolbar visibility toggle.
   - Function key bar visibility toggle.
   - Brief view column width spinner.
-  - Panel font picker and size spinner with live CSS update.
+  - Panel and terminal font pickers (family, size, weight, style) with live update.
   - Dialog sizes section (Bookmarks, Shortcuts, Open With dimensions).
   - Shell interpreter and terminal history scrollback limit.
 
@@ -159,14 +159,19 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [ ] Stage 6: File Search Engine (`Alt+F7`)
-- [ ] Search Dialog (`Alt+F7`):
-  - Root directory selector (defaults to active panel directory).
-  - Filename pattern / wildcard mask (`*.vala`, `*test*`).
-  - Optional case sensitivity toggle.
-  - Optional search within file contents (text grep).
-- [ ] Background non-blocking scanning thread (`GLib.ThreadPool`).
-- [ ] Results list with instant jump/navigate to selected search result in active pane.
+### [x] Stage 6: File Search Engine (`Alt+F7`)
+- [x] Search dialog (`Alt+F7`), including while the terminal drawer has focus:
+  - Start directory, prefilled from the active tab. A folder picker is available.
+  - Filename pattern (`*` and `?`). A plain word matches anywhere in the name.
+  - Optional text search inside files. Directories match by name only.
+  - Case sensitivity and hidden-file toggles.
+  - Live progress, Stop / Escape to cancel, and a stay-open dialog when nothing matches.
+  - Name, content, case, and hidden-file options are saved under `[Search]` in `~/.config/vcmd/config` and restored on the next open. The start path always comes from the active tab.
+- [x] Non-blocking scan via `GFileEnumerator` async APIs (`FileSearchEngine`). Symlink directories are not followed. Unreadable directories are skipped. Binary files and files larger than 32 MB are skipped for content search. Results stop at 5000 matches.
+- [x] Results open as a new **Search** tab in Super Detailed view. The name column shows the path relative to the search root. The cursor lands on the first match.
+  - `..`, Backspace, or Alt+Up leaves the results and opens the search root.
+  - Enter on a directory opens that directory. Enter, F3, and F4 open a file without replacing the results list.
+  - Closing the viewer or editor does not reload the search tab.
 
 ---
 

@@ -78,6 +78,8 @@ namespace VCommander {
         public string sort_column_id { get; private set; default = "name"; }
         public string sort_order_str { get; private set; default = "asc"; }
         private bool initializing_sort = true;
+        private bool showing_search_results = false;
+        public bool is_showing_search_results { get { return showing_search_results; } }
 
         public signal void page_activated();
         public signal void error_occurred(string title, string message);
@@ -88,7 +90,7 @@ namespace VCommander {
         public signal void view_mode_changed();
         public signal void toggle_hidden_requested();
 
-        public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc") {
+        public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc", bool start_load = true) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
 
             this.view_mode = PanelViewMode.parse(view_mode_str);
@@ -102,8 +104,64 @@ namespace VCommander {
             build_status_bar();
             setup_focus_and_click_handlers();
 
-            load_directory(initial_dir);
+            if (start_load) {
+                load_directory(initial_dir);
+            } else {
+                current_directory = initial_dir;
+                path_entry.text = initial_dir.get_parse_name();
+            }
             initializing_sort = false;
+        }
+
+        public void present_search_results(File root, GenericArray<FileItem> items, string summary) {
+            if (load_cancellable != null) {
+                load_cancellable.cancel();
+                load_cancellable = null;
+            }
+            showing_search_results = true;
+            current_directory = root;
+            path_entry.text = root.get_parse_name();
+            if (custom_title == null || custom_title.length == 0) {
+                custom_title = "Search";
+            }
+
+            var array = new Object[items.length + 1];
+            array[0] = new FileItem.for_parent(root);
+            for (int i = 0; i < items.length; i++) {
+                array[i + 1] = items[i];
+            }
+            store.splice(0, store.get_n_items(), array);
+            path_entry.tooltip_text = "Search results. Backspace or .. returns to this folder";
+
+            if (view_mode != PanelViewMode.SUPER) {
+                switch_view_mode(PanelViewMode.SUPER);
+            }
+            current_dir_stats = summary;
+            update_status_bar();
+            directory_changed(root);
+
+            uint cursor = sort_model.get_n_items() > 1 ? 1 : 0;
+            if (sort_model.get_n_items() > 0) {
+                selection_model.selected = cursor;
+                scroll_to_selected();
+            }
+            focus_search_cursor();
+        }
+
+        private void focus_search_cursor() {
+            grab_focus_to_list();
+            Idle.add(() => {
+                if (!showing_search_results) {
+                    return Source.REMOVE;
+                }
+                uint cursor = sort_model.get_n_items() > 1 ? 1 : 0;
+                if (sort_model.get_n_items() > 0) {
+                    selection_model.selected = cursor;
+                    scroll_to_selected();
+                }
+                grab_focus_to_list();
+                return Source.REMOVE;
+            });
         }
 
         private void build_header() {
@@ -1849,6 +1907,10 @@ namespace VCommander {
         }
 
         public void go_up() {
+            if (showing_search_results && current_directory != null) {
+                load_directory(current_directory);
+                return;
+            }
             var parent = current_directory.get_parent();
             if (parent != null) {
                 string prev_folder_name = current_directory.get_basename();
@@ -1867,6 +1929,10 @@ namespace VCommander {
         }
 
         public void refresh() {
+            if (showing_search_results) {
+                update_status_bar();
+                return;
+            }
             if (current_directory != null) {
                 load_directory(current_directory);
             }
@@ -1919,6 +1985,13 @@ namespace VCommander {
         }
 
         public void load_directory(File dir, string? target_select_name = null) {
+            if (showing_search_results) {
+                showing_search_results = false;
+                if (custom_title == "Search") {
+                    custom_title = null;
+                }
+                path_entry.tooltip_text = "Current path (Press Enter to navigate, Ctrl+L to focus)";
+            }
             hide_filter();
 
             if (load_cancellable != null) {
