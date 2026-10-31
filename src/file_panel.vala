@@ -47,15 +47,22 @@ namespace VCommander {
             tab_view.notify["selected-page"].connect(on_tab_selection_changed);
 
             // Open initial tabs:
-            // 1. If path does not exist, do not open tab.
-            // 2. If all paths do not exist (or no paths), open home directory.
+            // 1. If path is a remote host, do not reconnect on startup; open home directory instead.
+            // 2. If path does not exist, do not open tab.
+            // 3. If all paths do not exist (or no paths), open home directory.
             for (int i = 0; i < initial_dirs.length; i++) {
-                var f = File.new_for_commandline_arg(initial_dirs[i]);
-                if (f.query_exists()) {
-                    string? title = null;
+                File f;
+                string? title = null;
+                if (RemoteMount.is_remote_path(initial_dirs[i])) {
+                    f = File.new_for_path(Environment.get_home_dir());
+                } else {
+                    f = File.new_for_commandline_arg(initial_dirs[i]);
                     if (initial_titles != null && i < initial_titles.length && initial_titles[i].length > 0) {
                         title = initial_titles[i];
                     }
+                }
+
+                if (f.query_exists()) {
                     string scol = "name";
                     if (sort_cols != null && i < sort_cols.length && sort_cols[i] != null && sort_cols[i].length > 0) {
                         scol = sort_cols[i];

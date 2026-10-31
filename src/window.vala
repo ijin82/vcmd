@@ -8,6 +8,7 @@ namespace VCommander {
         private int terminal_child_pid = 0;
         private Gtk.ScrolledWindow console_scrolled;
         private bool terminal_alive = false;
+        private ulong terminal_child_exited_id = 0;
         private string? last_terminal_dir = null;
         private Gtk.Box command_bar;
         private Adw.ToastOverlay toast_overlay;
@@ -643,6 +644,14 @@ row:selected .file-item-tagged {
             });
             header.append(sync_btn);
 
+            var restart_btn = new Gtk.Button.from_icon_name("system-shutdown-symbolic");
+            restart_btn.tooltip_text = "Kill hung terminal and restart";
+            restart_btn.add_css_class("flat");
+            restart_btn.clicked.connect(() => {
+                kill_and_restart_terminal();
+            });
+            header.append(restart_btn);
+
             var clear_btn = new Gtk.Button.from_icon_name("edit-clear-symbolic");
             clear_btn.tooltip_text = "Clear terminal";
             clear_btn.add_css_class("flat");
@@ -782,8 +791,9 @@ row:selected .file-item-tagged {
                 vte_terminal.set_audible_bell(false);
                 console_scrolled.set_child(vte_terminal);
 
-                vte_terminal.child_exited.connect((status) => {
+                terminal_child_exited_id = vte_terminal.child_exited.connect((status) => {
                     terminal_alive = false;
+                    terminal_child_pid = 0;
                     if (console_drawer.visible) {
                         set_console_visible(false);
                     }
@@ -829,6 +839,96 @@ row:selected .file-item-tagged {
             );
             terminal_alive = true;
             last_terminal_dir = cwd;
+        }
+
+        private void kill_terminal_processes() {
+            int pid = terminal_child_pid;
+            if (pid <= 1 || pid == (int) Posix.getpid()) {
+                return;
+            }
+
+            // 1. Terminate foreground process group if different from shell/vcmd
+            if (vte_terminal != null) {
+                var pty = vte_terminal.get_pty();
+                if (pty != null) {
+                    int fd = pty.get_fd();
+                    if (fd >= 0) {
+                        long fg_pgrp = (long) Posix.tcgetpgrp(fd);
+                        if (fg_pgrp > 1 && fg_pgrp != (long) Posix.getpgrp() && fg_pgrp != (long) Posix.getpid()) {
+                            Posix.kill((Posix.pid_t) (-fg_pgrp), Posix.Signal.KILL);
+                            Posix.kill((Posix.pid_t) fg_pgrp, Posix.Signal.KILL);
+                        }
+                    }
+                }
+            }
+
+            // 2. Terminate all child and session processes in /proc
+            kill_session_processes(pid);
+
+            // 3. Terminate the shell process group and the shell itself
+            Posix.kill((Posix.pid_t) (-pid), Posix.Signal.KILL);
+            Posix.kill((Posix.pid_t) pid, Posix.Signal.KILL);
+        }
+
+        private void kill_session_processes(int session_leader_pid) {
+            try {
+                var dir = Dir.open("/proc", 0);
+                string? name = null;
+                while ((name = dir.read_name()) != null) {
+                    int p = int.parse(name);
+                    if (p <= 1 || p == (int) Posix.getpid() || p == session_leader_pid) {
+                        continue;
+                    }
+
+                    string stat_content;
+                    if (FileUtils.get_contents(@"/proc/$name/stat", out stat_content)) {
+                        int close_paren = stat_content.last_index_of(")");
+                        if (close_paren > 0 && close_paren + 2 < stat_content.length) {
+                            string rest = stat_content.substring(close_paren + 2);
+                            string[] fields = rest.split(" ");
+                            if (fields.length >= 4) {
+                                int ppid = int.parse(fields[1]);
+                                int sid = int.parse(fields[3]);
+                                if (sid == session_leader_pid || ppid == session_leader_pid) {
+                                    Posix.kill((Posix.pid_t) p, Posix.Signal.KILL);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Error e) {
+                // Ignore /proc read errors for transient processes
+            }
+        }
+
+        public void kill_and_restart_terminal() {
+            kill_terminal_processes();
+            terminal_child_pid = 0;
+            terminal_alive = false;
+
+            if (vte_terminal != null) {
+                if (terminal_child_exited_id != 0) {
+                    vte_terminal.disconnect(terminal_child_exited_id);
+                    terminal_child_exited_id = 0;
+                }
+                console_scrolled.set_child(null);
+                vte_terminal = null;
+            }
+
+            string? cwd = null;
+            if (active_panel != null && active_panel.current_directory != null) {
+                cwd = active_panel.current_directory.get_path();
+            }
+
+            spawn_terminal(cwd);
+            show_command_toast("Terminal restarted");
+
+            GLib.Idle.add(() => {
+                if (vte_terminal != null && console_drawer.visible) {
+                    vte_terminal.grab_focus();
+                }
+                return GLib.Source.REMOVE;
+            });
         }
 
         public void apply_terminal_font() {

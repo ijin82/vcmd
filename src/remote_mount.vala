@@ -23,6 +23,30 @@ namespace VCommander {
             return @"$scheme://$auth$clean_host$port_part$clean_dir";
         }
 
+        public static bool is_remote_path(string path) {
+            if (path.length == 0) {
+                return false;
+            }
+            if (path.contains("://") && !path.has_prefix("file://")) {
+                return true;
+            }
+            var f = File.new_for_commandline_arg(path);
+            string? scheme = f.get_uri_scheme();
+            if (scheme != null && scheme != "file") {
+                return true;
+            }
+            string ssh_mount_root = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "ssh");
+            if (path.has_prefix(ssh_mount_root)) {
+                return true;
+            }
+            string uid_str = ((uint) Posix.getuid()).to_string();
+            string gvfs_mount_root = @"/run/user/$uid_str/gvfs";
+            if (path.has_prefix(gvfs_mount_root)) {
+                return true;
+            }
+            return false;
+        }
+
         public static string? discover_agent(int terminal_pid) {
             var candidates = new GenericArray<string>();
 
