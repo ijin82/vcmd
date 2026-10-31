@@ -54,7 +54,12 @@ install-lite:
 uninstall:
 	./install.sh uninstall
 
+package:
+	./package-release.sh
+
+release: package
+
 clean:
 	rm -f $(TARGET) src/*.c src/*.vala.c
 
-.PHONY: all build run install install-lite uninstall clean
+.PHONY: all build run install install-lite uninstall clean package release

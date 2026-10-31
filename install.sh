@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
 APP_NAME="vcmd"
 APP_TITLE="vCommander"
 APP_ID="org.vcmd.ValaCommander"
@@ -8,6 +11,7 @@ BIN_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/.local/share/applications"
 DESKTOP_FILE="${DESKTOP_DIR}/${APP_NAME}.desktop"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
+DATA_DIR="${HOME}/.local/share/vcmd"
 
 copy_files() {
     if [ ! -f "${APP_NAME}" ]; then
@@ -96,8 +100,10 @@ EOF
 }
 
 install_app() {
-    echo "==> Building ${APP_NAME}..."
-    make build
+    if [ ! -f "${APP_NAME}" ]; then
+        echo "==> Building ${APP_NAME}..."
+        make build
+    fi
     copy_files
 }
 
@@ -114,6 +120,11 @@ uninstall_app() {
     fi
     if [ -f "${DESKTOP_DIR}/${APP_ID}.desktop" ]; then
         rm -f "${DESKTOP_DIR}/${APP_ID}.desktop"
+    fi
+
+    if [ -d "${DATA_DIR}" ]; then
+        rm -rf "${DATA_DIR}"
+        echo "  Removed ${DATA_DIR}"
     fi
 
     if [ -f "${ICON_DIR}/${APP_NAME}.svg" ]; then
