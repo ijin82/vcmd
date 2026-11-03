@@ -217,20 +217,22 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [ ] Stage 9: Non-Blocking Background Operations & Minimized Progress [Complexity: Moderate]
-- [ ] Minimizable Progress Dialog:
-  - In `OperationProgressDialog`, add a "Run in Background" / "Minimize" button (`view-paged-symbolic` or `window-minimize-symbolic`).
+### [x] Stage 9: Non-Blocking Background Operations & Minimized Progress [Complexity: Moderate]
+- [x] Minimizable Progress Dialog:
+  - In `OperationProgressDialog`, add a "Run in Background" / "Minimize" button (`window-minimize-symbolic` and dialog button).
   - Clicking Minimize closes the modal `Adw.Dialog` without interrupting or cancelling the active copy/move operations.
-- [ ] Toolbar Progress Indicator Button & Popover:
-  - When background operations are active, an operation indicator button appears in the main window header bar (e.g. `folder-download-symbolic` + "Copying: 45%").
+- [x] Toolbar Progress Indicator Button & Popover:
+  - When background operations are active, an operation indicator button appears in the main window header bar (e.g. `folder-download-symbolic` + "45%").
   - Clicking the indicator button opens a Popover listing all active background tasks:
-    - Current operation type (Copy / Move / Sync).
+    - Current operation type (Copy / Move / Sync / Trash / Delete / Symlink).
     - Current source and target item names.
     - Mini progress bar and transfer speed (e.g. "34.5 MB/s • 1.2 GB / 2.8 GB").
-    - Action buttons: "Open / Restore Dialog" (brings back the full modal progress window) and "Cancel" button.
+    - Action buttons: "Restore" button (`view-fullscreen-symbolic`) and "Cancel" button (`process-stop-symbolic`).
   - Automatically hides the indicator button and presents an `Adw.Toast` notification when all background transfers finish.
-- [ ] Conflict & Error Handling while Minimized:
-  - If a file collision (Overwrite / Skip) or I/O error occurs while minimized, present the resolution dialog or flash the indicator button with an attention badge until resolved.
+- [x] Conflict, Error Handling & Close Protection while Minimized:
+  - If an I/O error occurs while minimized, present the error alert dialog directly on the main window.
+  - Safe application quit prompt protects against accidental exit while background operations are copying.
+
 
 ---
 

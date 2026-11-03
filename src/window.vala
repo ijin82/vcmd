@@ -20,6 +20,10 @@ namespace VCommander {
         private Gtk.Label title_label;
         private Gtk.MenuButton drives_button;
         private DrivesPopover drives_popover;
+        private Gtk.MenuButton operations_button;
+        private Gtk.Label operations_label;
+        private OperationsPopover operations_popover;
+        private GenericArray<OperationProgressDialog> background_tasks;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
         private Gtk.Label fn_f5_label;
@@ -467,6 +471,33 @@ row:selected .file-item-tagged {
                 }
             });
             header_bar.pack_end(drives_button);
+
+            background_tasks = new GenericArray<OperationProgressDialog>();
+            operations_popover = new OperationsPopover();
+            operations_popover.restore_requested.connect((task) => {
+                restore_operation(task);
+            });
+            operations_popover.cancel_requested.connect((task) => {
+                cancel_operation(task);
+            });
+
+            operations_button = new Gtk.MenuButton();
+            operations_button.visible = false;
+            operations_button.always_show_arrow = false;
+            operations_button.focusable = false;
+            operations_button.tooltip_text = "Background Operations";
+            operations_button.add_css_class("operations-button");
+            operations_button.set_popover(operations_popover);
+
+            var op_btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            var op_icon = new Gtk.Image.from_icon_name("folder-download-symbolic");
+            op_icon.pixel_size = 16;
+            op_btn_box.append(op_icon);
+            operations_label = new Gtk.Label("");
+            op_btn_box.append(operations_label);
+            operations_button.set_child(op_btn_box);
+
+            header_bar.pack_end(operations_button);
 
             root_box.append(header_bar);
 
@@ -2067,6 +2098,115 @@ row:selected .file-item-tagged {
             dialog.present(this);
         }
 
+        private void attach_progress_dialog(OperationProgressDialog dlg) {
+            dlg.minimized.connect(() => {
+                on_operation_minimized(dlg);
+            });
+            dlg.restored.connect(() => {
+                on_operation_restored(dlg);
+            });
+            dlg.progress_updated.connect(() => {
+                on_operation_progress_updated(dlg);
+            });
+            dlg.task_completed.connect(() => {
+                on_operation_completed(dlg);
+            });
+            dlg.present(this);
+        }
+
+        private void on_operation_minimized(OperationProgressDialog dlg) {
+            bool found = false;
+            for (int i = 0; i < background_tasks.length; i++) {
+                if (background_tasks[i] == dlg) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                background_tasks.add(dlg);
+            }
+            operations_popover.add_task(dlg);
+            update_operations_button();
+        }
+
+        private void on_operation_restored(OperationProgressDialog dlg) {
+            for (int i = 0; i < background_tasks.length; i++) {
+                if (background_tasks[i] == dlg) {
+                    background_tasks.remove_index(i);
+                    break;
+                }
+            }
+            operations_popover.remove_task(dlg);
+            update_operations_button();
+        }
+
+        private void on_operation_completed(OperationProgressDialog dlg) {
+            bool was_background = false;
+            for (int i = 0; i < background_tasks.length; i++) {
+                if (background_tasks[i] == dlg) {
+                    background_tasks.remove_index(i);
+                    was_background = true;
+                    break;
+                }
+            }
+            if (was_background) {
+                operations_popover.remove_task(dlg);
+                update_operations_button();
+
+                if (dlg.cancellable.is_cancelled()) {
+                    show_command_toast(@"Cancelled: $(dlg.op_title)");
+                } else {
+                    show_command_toast(@"Completed: $(dlg.op_title)");
+                }
+            }
+        }
+
+        private void on_operation_progress_updated(OperationProgressDialog dlg) {
+            update_operations_button();
+        }
+
+        private void restore_operation(OperationProgressDialog dlg) {
+            operations_popover.popdown();
+            dlg.restore(this);
+        }
+
+        private void cancel_operation(OperationProgressDialog dlg) {
+            dlg.cancellable.cancel();
+        }
+
+        private void update_operations_button() {
+            if (background_tasks.length == 0) {
+                operations_button.visible = false;
+                operations_popover.popdown();
+                return;
+            }
+
+            operations_button.visible = true;
+
+            if (background_tasks.length == 1) {
+                var task = background_tasks[0];
+                int pct = (int) (task.current_fraction * 100);
+                if (task.is_synchronizing) {
+                    operations_label.label = "Syncing...";
+                    operations_button.tooltip_text = @"$(task.op_title): Synchronizing write buffers\nClick to view background operations";
+                } else if (pct > 0) {
+                    operations_label.label = @"$pct%";
+                    operations_button.tooltip_text = @"$(task.op_title) ($pct%)\nClick to view background operations";
+                } else {
+                    operations_label.label = "Working...";
+                    operations_button.tooltip_text = @"$(task.op_title)\nClick to view background operations";
+                }
+            } else {
+                int total_pct = 0;
+                for (int i = 0; i < background_tasks.length; i++) {
+                    total_pct += (int) (background_tasks[i].current_fraction * 100);
+                }
+                int avg_pct = total_pct / background_tasks.length;
+                operations_label.label = @"$(background_tasks.length) ops ($avg_pct%)";
+                operations_button.tooltip_text = @"$(background_tasks.length) background operations running ($avg_pct%)\nClick to view background operations";
+            }
+        }
+
         private FilePanel get_opposite_panel() {
             return (active_panel == left_panel) ? right_panel : left_panel;
         }
@@ -2436,7 +2576,7 @@ row:selected .file-item-tagged {
             var cancellable = new Cancellable();
             string op_title = permanent ? @"Permanently deleting $(items.length) items" : @"Moving $(items.length) items to Trash";
             var dlg = new OperationProgressDialog(op_title, cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             try {
                 for (int i = 0; i < items.length; i++) {
@@ -2870,7 +3010,7 @@ row:selected .file-item-tagged {
         private async void do_copy_file(File source, File dest, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(source.get_basename())", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -2908,7 +3048,7 @@ row:selected .file-item-tagged {
         private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -3132,7 +3272,7 @@ row:selected .file-item-tagged {
         private async void do_symlink_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Creating $(items.length) symbolic links", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             try {
                 for (int i = 0; i < items.length; i++) {
@@ -3398,7 +3538,7 @@ row:selected .file-item-tagged {
         private async void do_move_file(File source, File dest, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(source.get_basename())", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -3435,7 +3575,7 @@ row:selected .file-item-tagged {
         private async void do_move_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             var tracker = new CopyProgressTracker();
             try {
@@ -3626,7 +3766,7 @@ row:selected .file-item-tagged {
         private async void do_restore_single_item(FilePanel panel, FileItem item, string orig_path, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Restoring $(item.display_name)", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             try {
                 dlg.update_progress(item.display_name, 0, 1);
@@ -3650,7 +3790,7 @@ row:selected .file-item-tagged {
         private async void do_restore_multiple_items(FilePanel panel, GenericArray<FileItem> items) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Restoring $(items.length) items from Trash", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             try {
                 for (int i = 0; i < items.length; i++) {
@@ -3708,7 +3848,7 @@ row:selected .file-item-tagged {
         private async void do_empty_trash(FilePanel panel) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog("Emptying Trash...", cancellable);
-            dlg.present(this);
+            attach_progress_dialog(dlg);
 
             try {
                 yield FileOperationService.empty_trash(cancellable);
@@ -3797,6 +3937,30 @@ row:selected .file-item-tagged {
         }
 
         private bool on_close_requested() {
+            if (background_tasks != null && background_tasks.length > 0) {
+                var alert = new Adw.AlertDialog(
+                    "Operations in Progress",
+                    @"There $(background_tasks.length == 1 ? "is 1 background operation" : @"are $(background_tasks.length) background operations") running. Quitting will cancel these operations."
+                );
+                alert.add_response("cancel", "Cancel");
+                alert.add_response("quit", "Quit Anyway");
+                alert.set_default_response("cancel");
+                alert.set_close_response("cancel");
+                alert.set_response_appearance("quit", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                alert.choose.begin(this, null, (obj, res) => {
+                    string resp = alert.choose.end(res);
+                    if (resp == "quit") {
+                        for (int i = 0; i < background_tasks.length; i++) {
+                            background_tasks[i].cancellable.cancel();
+                        }
+                        background_tasks.remove_range(0, background_tasks.length);
+                        save_state();
+                        this.destroy();
+                    }
+                });
+                return true;
+            }
             save_state();
             return false;
         }

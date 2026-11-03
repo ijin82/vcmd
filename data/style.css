@@ -201,3 +201,21 @@ row:selected .file-item-tagged {
     font-weight: 500;
 }
 
+/* Background Operations Button & Popover */
+.operations-button {
+    font-weight: bold;
+    color: @accent_color;
+}
+
+.operation-row {
+    padding: 8px 10px;
+    background-color: alpha(@window_fg_color, 0.04);
+    border-radius: 8px;
+    border: 1px solid alpha(@borders, 0.2);
+}
+
+.operation-row:hover {
+    background-color: alpha(@window_fg_color, 0.07);
+}
+
+

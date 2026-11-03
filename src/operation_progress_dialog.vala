@@ -5,9 +5,19 @@ namespace VCommander {
         private Gtk.Label details_label;
         private Gtk.ProgressBar progress_bar;
         private Gtk.Button cancel_button;
-        private Cancellable cancellable;
-        private bool is_finished = false;
-        private bool is_synchronizing = false;
+        public Cancellable cancellable { get; private set; }
+        public string op_title { get; private set; }
+        public bool is_finished { get; private set; default = false; }
+        public bool is_minimized { get; private set; default = false; }
+        public bool is_synchronizing { get; private set; default = false; }
+
+        public string current_item_name { get; private set; default = ""; }
+        public double current_fraction { get; private set; default = 0.0; }
+        public string current_details { get; private set; default = ""; }
+        public string current_speed_str { get; private set; default = ""; }
+        public string current_eta_str { get; private set; default = ""; }
+
+        private bool task_completed_emitted = false;
 
         private int64 last_update_time = 0;
         private uint pending_timeout_id = 0;
@@ -20,12 +30,15 @@ namespace VCommander {
 
         private int64 last_speed_time = 0;
         private int64 last_speed_bytes = 0;
-        private string current_speed_str = "";
-        private string current_eta_str = "";
 
         public signal void cancelled();
+        public signal void minimized();
+        public signal void restored();
+        public signal void progress_updated();
+        public signal void task_completed();
 
         public OperationProgressDialog(string op_title, Cancellable cancellable) {
+            this.op_title = op_title;
             this.cancellable = cancellable;
 
             set_title(op_title);
@@ -38,6 +51,15 @@ namespace VCommander {
             header_bar.show_title = true;
             header_bar.show_start_title_buttons = false;
             header_bar.show_end_title_buttons = false;
+
+            var minimize_header_btn = new Gtk.Button.from_icon_name("window-minimize-symbolic");
+            minimize_header_btn.tooltip_text = "Run in Background";
+            minimize_header_btn.add_css_class("flat");
+            minimize_header_btn.clicked.connect(() => {
+                minimize();
+            });
+            header_bar.pack_end(minimize_header_btn);
+
             toolbar_view.add_top_bar(header_bar);
 
             var main_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 12);
@@ -59,8 +81,14 @@ namespace VCommander {
             details_label.xalign = 0.0f;
             details_label.add_css_class("caption");
 
-            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
             btn_box.halign = Gtk.Align.END;
+
+            var minimize_button = new Gtk.Button.with_label("Run in Background");
+            minimize_button.clicked.connect(() => {
+                minimize();
+            });
+            btn_box.append(minimize_button);
 
             cancel_button = new Gtk.Button.with_label("Cancel");
             cancel_button.clicked.connect(() => {
@@ -86,11 +114,15 @@ namespace VCommander {
             speed_timer_id = Timeout.add_seconds(1, on_speed_tick);
 
             closed.connect(() => {
+                if (is_minimized) {
+                    return;
+                }
                 cleanup_timers();
                 if (!is_finished) {
                     is_finished = true;
                     cancellable.cancel();
                     cancelled();
+                    notify_task_completed();
                 }
             });
         }
@@ -169,10 +201,14 @@ namespace VCommander {
 
         public void set_synchronizing() {
             is_synchronizing = true;
-            item_label.label = "Synchronizing to storage device...";
-            details_label.label = "Flushing cached write buffers to disk, please wait...";
+            current_item_name = "Synchronizing to storage device...";
+            current_details = "Flushing cached write buffers to disk, please wait...";
+            current_fraction = 1.0;
+            item_label.label = current_item_name;
+            details_label.label = current_details;
             progress_bar.fraction = 1.0;
             progress_bar.text = "Syncing...";
+            progress_updated();
             if (sync_pulse_timer_id == 0) {
                 sync_pulse_timer_id = Timeout.add(200, () => {
                     if (!is_synchronizing || is_finished) {
@@ -223,11 +259,13 @@ namespace VCommander {
         private void apply_progress(string current_filename, int64 current_bytes, int64 total_bytes) {
             if (is_synchronizing) return;
 
+            current_item_name = current_filename;
             item_label.label = current_filename;
             if (total_bytes > 0) {
                 double frac = (double) current_bytes / (double) total_bytes;
                 if (frac > 1.0) frac = 1.0;
                 if (frac < 0.0) frac = 0.0;
+                current_fraction = frac;
                 progress_bar.fraction = frac;
                 progress_bar.text = @"$((int) (frac * 100))%";
 
@@ -239,39 +277,70 @@ namespace VCommander {
                 if (current_eta_str.length > 0) {
                     extra += @" • ETA: $current_eta_str";
                 }
-                details_label.label = size_info + extra;
+                current_details = size_info + extra;
+                details_label.label = current_details;
 
                 if (current_bytes >= total_bytes) {
                     set_synchronizing();
                 }
             } else {
+                current_fraction = 0.0;
                 progress_bar.pulse();
                 string details = current_bytes > 0 ? GLib.format_size(current_bytes) : "";
                 if (current_speed_str.length > 0) {
                     details += @" • $current_speed_str";
                 }
+                current_details = details;
                 details_label.label = details;
             }
+            progress_updated();
         }
 
         public void update_items_progress(string current_filename, int current_item, int total_items) {
             if (is_synchronizing) return;
 
+            current_item_name = current_filename;
             item_label.label = current_filename;
             if (total_items > 0) {
                 double frac = (double) current_item / (double) total_items;
                 if (frac > 1.0) frac = 1.0;
                 if (frac < 0.0) frac = 0.0;
+                current_fraction = frac;
                 progress_bar.fraction = frac;
                 progress_bar.text = @"$((int) (frac * 100))%";
-                details_label.label = @"$current_item of $total_items items";
+                current_details = @"$current_item of $total_items items";
+                details_label.label = current_details;
+                progress_updated();
             }
+        }
+
+        public void minimize() {
+            if (is_finished || is_minimized) return;
+            is_minimized = true;
+            minimized();
+            force_close();
+        }
+
+        public void restore(Gtk.Window parent) {
+            if (is_finished || !is_minimized) return;
+            is_minimized = false;
+            present(parent);
+            restored();
         }
 
         public void finish() {
             cleanup_timers();
             is_finished = true;
-            force_close();
+            if (!is_minimized) {
+                force_close();
+            }
+            notify_task_completed();
+        }
+
+        private void notify_task_completed() {
+            if (task_completed_emitted) return;
+            task_completed_emitted = true;
+            task_completed();
         }
     }
 }
