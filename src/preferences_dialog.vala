@@ -388,6 +388,26 @@ namespace VCommander {
             });
             dialog_sizes_group.add(ow_height_row);
 
+            var cr_width_row = new Adw.SpinRow.with_range(400, 1920, 20);
+            cr_width_row.title = "Check &amp; Repair dialog width (px)";
+            cr_width_row.subtitle = "Content width for Filesystem Check &amp; Repair dialog";
+            cr_width_row.value = config.repair_dialog_width;
+            cr_width_row.notify["value"].connect(() => {
+                config.repair_dialog_width = (int) cr_width_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(cr_width_row);
+
+            var cr_height_row = new Adw.SpinRow.with_range(300, 1440, 20);
+            cr_height_row.title = "Check &amp; Repair dialog height (px)";
+            cr_height_row.subtitle = "Content height for Filesystem Check &amp; Repair dialog";
+            cr_height_row.value = config.repair_dialog_height;
+            cr_height_row.notify["value"].connect(() => {
+                config.repair_dialog_height = (int) cr_height_row.value;
+                config.save();
+            });
+            dialog_sizes_group.add(cr_height_row);
+
             page.add(dialog_sizes_group);
 
             dialog.add(page);

@@ -84,6 +84,8 @@ namespace VCommander {
         public int bookmarks_dialog_height { get; set; default = 580; }
         public int open_with_dialog_width { get; set; default = 560; }
         public int open_with_dialog_height { get; set; default = 520; }
+        public int repair_dialog_width { get; set; default = 620; }
+        public int repair_dialog_height { get; set; default = 580; }
         public int console_height { get; set; default = 400; }
         public int console_history_limit { get; set; default = 2000; }
         public string terminal_font_name { get; set; default = "Monospace"; }
@@ -502,6 +504,21 @@ namespace VCommander {
                     }
                 }
 
+                if (key_file.has_group("Repair")) {
+                    if (key_file.has_key("Repair", "DialogWidth")) {
+                        int rw = key_file.get_integer("Repair", "DialogWidth");
+                        if (rw >= 400 && rw <= 3840) {
+                            repair_dialog_width = rw;
+                        }
+                    }
+                    if (key_file.has_key("Repair", "DialogHeight")) {
+                        int rh = key_file.get_integer("Repair", "DialogHeight");
+                        if (rh >= 300 && rh <= 2160) {
+                            repair_dialog_height = rh;
+                        }
+                    }
+                }
+
                 if (key_file.has_group("Console")) {
                     if (key_file.has_key("Console", "Height")) {
                         int ch = key_file.get_integer("Console", "Height");
@@ -651,6 +668,10 @@ namespace VCommander {
                 // Open With Dialog
                 key_file.set_integer("OpenWith", "DialogWidth", open_with_dialog_width);
                 key_file.set_integer("OpenWith", "DialogHeight", open_with_dialog_height);
+
+                // Filesystem Check & Repair Dialog
+                key_file.set_integer("Repair", "DialogWidth", repair_dialog_width);
+                key_file.set_integer("Repair", "DialogHeight", repair_dialog_height);
 
                 // Console
                 key_file.set_integer("Console", "Height", console_height);

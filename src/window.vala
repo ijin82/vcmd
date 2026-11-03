@@ -313,6 +313,14 @@ row:selected .file-item-tagged {
                 font_css_provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10
             );
+
+            var settings = Gtk.Settings.get_for_display(Gdk.Display.get_default());
+            if (settings != null) {
+                settings.gtk_error_bell = false;
+                settings.gtk_enable_event_sounds = false;
+                settings.gtk_enable_input_feedback_sounds = false;
+            }
+
             apply_app_theme();
             apply_font_styles();
         }
@@ -3522,6 +3530,7 @@ row:selected .file-item-tagged {
             apply_font_styles();
             apply_terminal_font();
             apply_terminal_theme();
+            FilesystemRepairDialog.apply_active_console_theme();
         }
 
         public override void unmap() {

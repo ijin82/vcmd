@@ -22,7 +22,16 @@ namespace VCommander {
                 this.add_prefix(img);
             }
 
-            if (item.category == LocationCategory.DEVICE && item.id != "root") {
+            if (item.is_encrypted) {
+                var lock_icon = new Gtk.Image.from_icon_name("channel-secure-symbolic");
+                lock_icon.pixel_size = 16;
+                lock_icon.valign = Gtk.Align.CENTER;
+                lock_icon.add_css_class("dim-label");
+                lock_icon.tooltip_text = item.is_mounted ? "Encrypted Volume (LUKS) — Unlocked" : "Encrypted Volume (LUKS) — Locked";
+                this.add_suffix(lock_icon);
+            }
+
+            if (item.category == LocationCategory.DEVICE && item.id != "root" && (!item.is_encrypted || item.is_mounted)) {
                 var repair_btn = new Gtk.Button.from_icon_name("system-run-symbolic");
                 repair_btn.valign = Gtk.Align.CENTER;
                 repair_btn.add_css_class("flat");
@@ -35,13 +44,19 @@ namespace VCommander {
                 this.add_suffix(repair_btn);
             }
 
-            if (item.can_eject || item.can_unmount) {
+            if (item.can_eject || item.can_unmount || (item.is_encrypted && item.is_mounted)) {
                 var eject_btn = new Gtk.Button.from_icon_name("media-eject-symbolic");
                 eject_btn.valign = Gtk.Align.CENTER;
                 eject_btn.add_css_class("flat");
                 eject_btn.add_css_class("circular");
                 eject_btn.focusable = false;
-                eject_btn.tooltip_text = (item.category == LocationCategory.NETWORK) ? "Disconnect" : "Eject / Unmount [e]";
+                if (item.is_encrypted) {
+                    eject_btn.tooltip_text = "Unmount & Lock Encrypted Volume [e]";
+                } else if (item.category == LocationCategory.NETWORK) {
+                    eject_btn.tooltip_text = "Disconnect";
+                } else {
+                    eject_btn.tooltip_text = "Eject / Unmount [e]";
+                }
                 eject_btn.clicked.connect(() => {
                     eject_clicked(item);
                 });
@@ -111,14 +126,14 @@ namespace VCommander {
                 }
                 if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.e || keyval == Gdk.Key.E) {
                     var sel = list_box.get_selected_row() as LocationRow;
-                    if (sel != null && (sel.item.can_eject || sel.item.can_unmount)) {
+                    if (sel != null && (sel.item.can_eject || sel.item.can_unmount || (sel.item.is_encrypted && sel.item.is_mounted))) {
                         handle_eject(sel.item);
                         return Gdk.EVENT_STOP;
                     }
                 }
                 if (keyval == Gdk.Key.r || keyval == Gdk.Key.R) {
                     var sel = list_box.get_selected_row() as LocationRow;
-                    if (sel != null && sel.item.category == LocationCategory.DEVICE && sel.item.id != "root") {
+                    if (sel != null && sel.item.category == LocationCategory.DEVICE && sel.item.id != "root" && (!sel.item.is_encrypted || sel.item.is_mounted)) {
                         handle_repair(sel.item);
                         return Gdk.EVENT_STOP;
                     }
@@ -224,7 +239,14 @@ namespace VCommander {
             VolumeService.get_instance().unmount_or_eject.begin(item, window, (obj, res) => {
                 bool ok = VolumeService.get_instance().unmount_or_eject.end(res);
                 if (ok) {
-                    string action_msg = (item.category == LocationCategory.NETWORK) ? "Disconnected: " : "Safely removed: ";
+                    string action_msg;
+                    if (item.is_encrypted) {
+                        action_msg = "Locked & Safely removed: ";
+                    } else if (item.category == LocationCategory.NETWORK) {
+                        action_msg = "Disconnected: ";
+                    } else {
+                        action_msg = "Safely removed: ";
+                    }
                     window.show_command_toast(action_msg + item.name);
                     if (item.file != null) {
                         window.handle_mount_removed(item.file);
@@ -269,7 +291,14 @@ namespace VCommander {
                             window.show_command_toast("Failed to mount: " + item.name);
                         }
                     } catch (Error e) {
-                        window.prompt_filesystem_repair(item, e.message);
+                        if (e.code == IOError.FAILED_HANDLED || e.code == IOError.CANCELLED) {
+                            return;
+                        }
+                        if (item.is_encrypted) {
+                            window.show_command_toast("Failed to unlock: " + e.message);
+                        } else {
+                            window.prompt_filesystem_repair(item, e.message);
+                        }
                     }
                 });
             }

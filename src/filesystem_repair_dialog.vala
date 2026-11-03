@@ -29,6 +29,7 @@ namespace VCommander {
         private Gtk.Button terminal_button;
         private Gtk.Button open_button;
         private Adw.Banner error_banner;
+        private Gtk.CssProvider? console_css_provider = null;
 
         public static void show(MainWindow window, LocationItem item, string? initial_error = null) {
             if (active != null) {
@@ -37,6 +38,12 @@ namespace VCommander {
             }
             var dlg = new FilesystemRepairDialog(window, item, initial_error);
             dlg.dialog.present(window);
+        }
+
+        public static void apply_active_console_theme() {
+            if (active != null) {
+                active.apply_console_theme();
+            }
         }
 
         private FilesystemRepairDialog(MainWindow window, LocationItem item, string? initial_error = null) {
@@ -50,12 +57,20 @@ namespace VCommander {
                 udisks_block_path = VolumeService.get_udisks_block_path(device_node);
             }
 
+            var config = ConfigManager.get_instance();
+            int init_w = (config.repair_dialog_width >= 400) ? config.repair_dialog_width : 620;
+            int init_h = (config.repair_dialog_height >= 300) ? config.repair_dialog_height : 580;
+
             dialog = new Adw.Dialog();
             dialog.title = @"Check & Repair: $(item.name)";
-            dialog.content_width = 580;
-            dialog.content_height = 560;
+            dialog.content_width = init_w;
+            dialog.content_height = init_h;
 
             dialog.closed.connect(() => {
+                if (console_css_provider != null) {
+                    Gtk.StyleContext.remove_provider_for_display(Gdk.Display.get_default(), console_css_provider);
+                    console_css_provider = null;
+                }
                 active = null;
             });
 
@@ -127,17 +142,21 @@ namespace VCommander {
             log_view.editable = false;
             log_view.cursor_visible = false;
             log_view.wrap_mode = Gtk.WrapMode.WORD_CHAR;
-            log_view.margin_start = 10;
-            log_view.margin_end = 10;
-            log_view.margin_top = 8;
-            log_view.margin_bottom = 8;
+            log_view.margin_start = 12;
+            log_view.margin_end = 12;
+            log_view.margin_top = 10;
+            log_view.margin_bottom = 10;
+            log_view.add_css_class("repair-console-view");
 
             log_scroll = new Gtk.ScrolledWindow();
             log_scroll.set_child(log_view);
-            log_scroll.min_content_height = 150;
-            log_scroll.max_content_height = 200;
+            log_scroll.min_content_height = 195;
+            log_scroll.max_content_height = 270;
             log_scroll.add_css_class("card");
+            log_scroll.add_css_class("repair-console-scroll");
             content_box.append(log_scroll);
+
+            apply_console_theme();
 
             // Status Indicator Box
             var status_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 10);
@@ -443,6 +462,85 @@ namespace VCommander {
             } finally {
                 set_busy(false);
             }
+        }
+
+        public void apply_console_theme() {
+            var config = ConfigManager.get_instance();
+            string theme = config.terminal_color_theme.strip();
+
+            string bg = "#1e1e1e";
+            string fg = "#f0f0f0";
+            string sel_bg = "#3a3d41";
+            string sel_fg = "#ffffff";
+            string border = "rgba(255, 255, 255, 0.15)";
+
+            if (theme == "dracula" || theme == "solarized-dark") {
+                bg = "#282a36";
+                fg = "#f8f8f2";
+                sel_bg = "#44475a";
+                sel_fg = "#ffffff";
+                border = "rgba(98, 114, 164, 0.4)";
+            } else if (theme == "tango" || theme == "solarized-light") {
+                bg = "#300a24";
+                fg = "#eeeeec";
+                sel_bg = "#eeeeec";
+                sel_fg = "#300a24";
+                border = "rgba(238, 238, 236, 0.2)";
+            } else if (theme == "green-on-black") {
+                bg = "#000000";
+                fg = "#20c20e";
+                sel_bg = "#20c20e";
+                sel_fg = "#000000";
+                border = "rgba(32, 194, 14, 0.4)";
+            } else if (theme == "ansi-1987") {
+                bg = "#000000";
+                fg = "#50aa4b";
+                sel_bg = "#aaaaaa";
+                sel_fg = "#000000";
+                border = "rgba(80, 170, 75, 0.4)";
+            }
+
+            string font_family = (config.terminal_font_name.length > 0) ? config.terminal_font_name.replace("\"", "").replace("'", "") : "monospace";
+            int font_size = (config.terminal_font_size > 0) ? config.terminal_font_size : 11;
+            int font_weight = (config.terminal_font_weight > 0) ? config.terminal_font_weight : 400;
+            string font_style = (config.terminal_font_style.length > 0) ? config.terminal_font_style : "normal";
+
+            string css = """
+                .repair-console-scroll,
+                .repair-console-scroll.card {
+                    background-color: %s;
+                    border: 1px solid %s;
+                    border-radius: 8px;
+                }
+                .repair-console-scroll viewport {
+                    background-color: %s;
+                }
+                .repair-console-view,
+                .repair-console-view text {
+                    background-color: %s;
+                    color: %s;
+                    font-family: "%s", monospace;
+                    font-size: %dpt;
+                    font-weight: %d;
+                    font-style: %s;
+                }
+                .repair-console-view text selection,
+                .repair-console-view text:selected {
+                    background-color: %s;
+                    color: %s;
+                }
+            """.printf(bg, border, bg, bg, fg, font_family, font_size, font_weight, font_style, sel_bg, sel_fg);
+
+            if (console_css_provider != null) {
+                Gtk.StyleContext.remove_provider_for_display(Gdk.Display.get_default(), console_css_provider);
+            }
+            console_css_provider = new Gtk.CssProvider();
+            console_css_provider.load_from_string(css);
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                console_css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 25
+            );
         }
     }
 }
