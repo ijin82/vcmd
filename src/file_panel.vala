@@ -557,6 +557,35 @@ namespace VCommander {
             }
         }
 
+        public void update_grid_tile_size() {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pw.update_grid_tile_size();
+            }
+        }
+
+        public void zoom_in_grid() {
+            var page = get_current_page();
+            if (page != null) {
+                page.zoom_in();
+            }
+        }
+
+        public void zoom_out_grid() {
+            var page = get_current_page();
+            if (page != null) {
+                page.zoom_out();
+            }
+        }
+
+        public void zoom_reset_grid() {
+            var page = get_current_page();
+            if (page != null) {
+                page.zoom_reset();
+            }
+        }
+
         public void update_columns_layout(FilePanelPage? exclude_page = null) {
             for (int i = 0; i < tab_view.n_pages; i++) {
                 var p = tab_view.get_nth_page(i);

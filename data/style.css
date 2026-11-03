@@ -172,6 +172,20 @@ row:selected .file-item-tagged {
     font-weight: bold;
 }
 
+.thumbnail-grid-view {
+    padding: 6px;
+}
+
+.thumbnail-img-box {
+    border-radius: 6px;
+    background-color: alpha(currentColor, 0.05);
+}
+
+.thumbnail-img-box.file-item-tagged {
+    outline: 2px solid #f6d32d;
+    outline-offset: 1px;
+}
+
 /* Built-in Console Drawer */
 .console-drawer {
     border-top: 1px solid alpha(@borders, 0.4);

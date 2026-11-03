@@ -235,6 +235,20 @@ row:selected .file-item-tagged {
     color: #f8e45c;
     font-weight: bold;
 }
+
+.thumbnail-grid-view {
+    padding: 6px;
+}
+
+.thumbnail-img-box {
+    border-radius: 6px;
+    background-color: alpha(currentColor, 0.05);
+}
+
+.thumbnail-img-box.file-item-tagged {
+    outline: 2px solid #f6d32d;
+    outline-offset: 1px;
+}
 """;
 
         private const string SOLARIZED_DARK_CSS = """
@@ -1569,28 +1583,45 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Ctrl++ or Ctrl+= : increase brief view column width
+                // Ctrl++ or Ctrl+= : increase brief view column width or grid zoom
                 if ((keyval == Gdk.Key.plus || keyval == Gdk.Key.equal || keyval == Gdk.Key.KP_Add) && 
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    var config = ConfigManager.get_instance();
-                    if (config.brief_column_width < 800) {
-                        config.brief_column_width = int.min(800, config.brief_column_width + 10);
-                        config.save();
-                        apply_preferences();
+                    if (active_panel != null && active_panel.view_mode == PanelViewMode.GRID) {
+                        active_panel.zoom_in_grid();
+                    } else {
+                        var config = ConfigManager.get_instance();
+                        if (config.brief_column_width < 800) {
+                            config.brief_column_width = int.min(800, config.brief_column_width + 10);
+                            config.save();
+                            apply_preferences();
+                        }
                     }
                     return Gdk.EVENT_STOP;
                 }
 
-                // Ctrl+- : decrease brief view column width
+                // Ctrl+- : decrease brief view column width or grid zoom
                 if ((keyval == Gdk.Key.minus || keyval == Gdk.Key.KP_Subtract) && 
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    var config = ConfigManager.get_instance();
-                    if (config.brief_column_width > 100) {
-                        config.brief_column_width = int.max(100, config.brief_column_width - 10);
-                        config.save();
-                        apply_preferences();
+                    if (active_panel != null && active_panel.view_mode == PanelViewMode.GRID) {
+                        active_panel.zoom_out_grid();
+                    } else {
+                        var config = ConfigManager.get_instance();
+                        if (config.brief_column_width > 100) {
+                            config.brief_column_width = int.max(100, config.brief_column_width - 10);
+                            config.save();
+                            apply_preferences();
+                        }
                     }
                     return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+0 : reset grid zoom
+                if ((keyval == Gdk.Key.@0 || keyval == Gdk.Key.KP_0) && 
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                    if (active_panel != null && active_panel.view_mode == PanelViewMode.GRID) {
+                        active_panel.zoom_reset_grid();
+                        return Gdk.EVENT_STOP;
+                    }
                 }
 
                 // Alt+Up: Go to parent directory (same as Backspace or clicking "..")
@@ -1781,6 +1812,9 @@ row:selected .file-item-tagged {
                             break;
                         case PanelViewMode.SUPER:
                             mode = "super detailed";
+                            break;
+                        case PanelViewMode.GRID:
+                            mode = "thumbnails";
                             break;
                         default:
                             mode = "detailed";
@@ -4149,6 +4183,8 @@ row:selected .file-item-tagged {
             }
             left_panel.update_brief_column_width();
             right_panel.update_brief_column_width();
+            left_panel.update_grid_tile_size();
+            right_panel.update_grid_tile_size();
             apply_app_theme();
             apply_font_styles();
             apply_terminal_font();

@@ -238,27 +238,26 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [ ] Stage 10: Icon / Thumbnail Grid View & Live Background Thumbnail Engine [Complexity: High]
-- [ ] Thumbnail Grid View Mode (`Gtk.GridView`):
+### [x] Stage 10: Icon / Thumbnail Grid View & Live Background Thumbnail Engine [Complexity: High]
+- [x] Thumbnail Grid View Mode (`Gtk.GridView`):
   - New view mode alongside Detailed, Brief, and Super Detailed.
   - Vertical layout tile: large square image/preview area (30–300px) above, item name below (centered, wrapped).
   - Zoom scaling:
     - Step size: 30px (steps: 30, 60, 90, 120, 150, 180, 210, 240, 270, 300px). Default: 120px.
     - Zoom shortcuts: `Ctrl++` (zoom in), `Ctrl+-` (zoom out), `Ctrl+0` (reset to default 120px), and `Ctrl + Mouse Scroll`.
     - Persist zoom size and view mode per-tab or globally in `~/.config/vcmd/config`.
-- [ ] Thumbnail Engine (`ThumbnailService`):
-  - Cache location: `~/.config/vcmd/thumbnails/` (or configurable XDG cache).
-  - Cache file format & naming: PNG/JPEG thumbnails scaled to max 300x300, named using hash of `canonical_path + mtime + file_size`.
+- [x] Thumbnail Engine (`ThumbnailService`):
+  - Cache location: `~/.config/vcmd/thumbnails/`.
+  - Cache file format & naming: PNG thumbnails scaled to max 300x300, named using SHA-256 hash of `canonical_path + mtime + file_size`.
   - Atomic Generation & Crash Recovery:
-    - Worker generates thumbnails to temporary files: `.tmp.<hash>`.
-    - On success, atomically renames `.tmp.<hash>` to `<hash>.png`.
-    - On application startup or directory scan, any dangling `.tmp.*` files are safely detected as interrupted work and cleaned up or re-queued.
+    - Worker generates thumbnails to temporary files: `.tmp.<hash>.png`.
+    - On success, atomically renames `.tmp.<hash>.png` to `<hash>.png`.
+    - On application startup or directory scan, any dangling `.tmp.*` files are safely detected as interrupted work and cleaned up.
   - Supported Formats:
-    - Native image formats: JPG, JPEG, PNG, GIF, SVG.
+    - Native image formats: JPG, JPEG, PNG, GIF, SVG, WEBP, BMP, ICO, TIFF.
     - Fallback: Non-image files show standard system MIME / icon at the current tile size.
-    - External tool support: Preference toggle to enable ImageMagick (`magick` / `convert`) and video thumbnailing (`ffmpegthumbnailer` / `ffmpeg`) when installed on the system.
     - Suppress non-critical thumbnail generation errors without interrupting directory browsing.
-- [ ] Non-Blocking Live Streaming ("Дотекание"):
+- [x] Non-Blocking Live Streaming ("Дотекание"):
   - Generation occurs in a background worker pool (`GLib.ThreadPool`).
   - As each thumbnail is finished, dispatches an idle signal to the GTK main loop (`GLib.Idle.add`).
   - Binds the newly loaded texture/paintable directly to the `FileItem` without reloading or re-sorting the `GListStore`.

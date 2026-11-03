@@ -14,6 +14,7 @@ namespace VCommander {
             base.startup();
 
             AppLogger.init();
+            ThumbnailService.init();
 
             // Disable all audio bells, error beeps, and event sounds application-wide
             var settings = Gtk.Settings.get_default();

@@ -22,6 +22,8 @@ namespace VCommander {
         public bool is_calculating_size { get; set; default = false; }
         public int64 custom_size { get; set; default = -1; }
         public bool is_tagged { get; set; default = false; }
+        public Gdk.Paintable? thumbnail_paintable { get; set; default = null; }
+        public bool is_thumbnail_requested { get; set; default = false; }
 
         public string formatted_deletion_date {
             owned get {

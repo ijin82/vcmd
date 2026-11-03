@@ -50,10 +50,12 @@ namespace VCommander {
             add_item(nav_section, "Swap Panels", "<Control>u", "Exchange active tabs between panels");
             add_item(nav_section, "Quick Filter by Substring", "<Control>s");
             add_item(nav_section, "Calculate Folder / File Size", "<Control>space", "or Space on folder");
-            add_item(nav_section, "Cycle View Mode", "<Alt>t", "Brief -> Detailed -> Super Detailed");
+            add_item(nav_section, "Cycle View Mode", "<Alt>t", "Brief -> Detailed -> Super Detailed -> Grid");
             add_item(nav_section, "Toggle Hidden Files", "<Control>h");
-            add_item(nav_section, "Increase Brief Column Width", "<Control>plus");
-            add_item(nav_section, "Decrease Brief Column Width", "<Control>minus");
+            add_item(nav_section, "Zoom In (Grid) / Widen (Brief)", "<Control>plus", "Ctrl++ or Ctrl+=");
+            add_item(nav_section, "Zoom Out (Grid) / Narrow (Brief)", "<Control>minus", "Ctrl+-");
+            add_item(nav_section, "Reset Grid Zoom (120px)", "<Control>0");
+            add_item(nav_section, "Zoom Thumbnails with Mouse", "<Control>Scroll", "Ctrl + Mouse Wheel Up/Down");
             dialog.add(nav_section);
 
             // 3. Selection & Tagging

@@ -10,6 +10,7 @@ VALAFLAGS = \
 	--pkg vte-2.91-gtk4 \
 	--pkg gio-2.0 \
 	--pkg gio-unix-2.0 \
+	--pkg gdk-pixbuf-2.0 \
 	--pkg posix \
 	--target-glib=2.70 \
 	-X -lm \
@@ -19,6 +20,7 @@ SOURCES = \
 	src/config_manager.vala \
 	src/key_utils.vala \
 	src/app_logger.vala \
+	src/thumbnail_service.vala \
 	src/file_item.vala \
 	src/volume_service.vala \
 	src/drives_popover.vala \
