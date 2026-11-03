@@ -18,12 +18,15 @@ VALAFLAGS = \
 SOURCES = \
 	src/config_manager.vala \
 	src/key_utils.vala \
+	src/app_logger.vala \
 	src/file_item.vala \
 	src/volume_service.vala \
 	src/drives_popover.vala \
 	src/file_panel_page.vala \
 	src/file_panel.vala \
 	src/file_operation_service.vala \
+	src/device_detector.vala \
+	src/drive_queue_manager.vala \
 	src/operation_progress_dialog.vala \
 	src/operations_popover.vala \
 	src/shortcuts_dialog.vala \

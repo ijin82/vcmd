@@ -38,6 +38,7 @@ namespace VCommander {
             var nav_section = new Adw.ShortcutsSection("Navigation & Panes");
             add_item(nav_section, "Switch Active Pane", "Tab");
             add_item(nav_section, "Drives & Locations", "<Control>F1", "USB drives, Places ('e' Eject, 'r' Repair)");
+            add_item(nav_section, "Background Operations & Queue", "<Control>b", "View active operations and disk queues");
             add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
             add_item(nav_section, "Open With...", "<Control><Shift>o", "Choose custom application");
             add_item(nav_section, "Toggle Console Output Drawer", "<Control>o", "or Ctrl+~");
@@ -95,6 +96,7 @@ namespace VCommander {
             // 7. Application & Settings
             var app_section = new Adw.ShortcutsSection("Application & Settings");
             add_item(app_section, "Preferences Dialog", "<Control>comma");
+            add_item(app_section, "View Application Log", "", "Button on the left of Header Bar");
             add_item(app_section, "Toggle Header Bar", "<Control><Shift>h");
             add_item(app_section, "Reset Splitter to 50/50", "Return", "Double click pane divider handle");
             add_item(app_section, "Quit Vala Commander", "<Control>q", "or F10");

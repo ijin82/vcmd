@@ -10,6 +10,8 @@ namespace VCommander {
         public bool is_finished { get; private set; default = false; }
         public bool is_minimized { get; private set; default = false; }
         public bool is_synchronizing { get; private set; default = false; }
+        public bool is_queued { get; private set; default = false; }
+        public string queue_waiting_disk { get; private set; default = ""; }
 
         public string current_item_name { get; private set; default = ""; }
         public double current_fraction { get; private set; default = 0.0; }
@@ -18,6 +20,7 @@ namespace VCommander {
         public string current_eta_str { get; private set; default = ""; }
 
         private bool task_completed_emitted = false;
+        private int stall_seconds = 0;
 
         private int64 last_update_time = 0;
         private uint pending_timeout_id = 0;
@@ -162,21 +165,43 @@ namespace VCommander {
             int64 bytes_diff = pending_current_bytes - last_speed_bytes;
             if (bytes_diff < 0) bytes_diff = 0;
 
-            double bytes_per_sec = ((double) bytes_diff * 1000000.0) / (double) elapsed_us;
-            current_speed_str = format_speed((int64) bytes_per_sec);
+            if (bytes_diff > 0) {
+                if (stall_seconds >= 3) {
+                    AppLogger.info("FileOperation", @"Transfer resumed: $(GLib.format_size(pending_current_bytes)) of $(GLib.format_size(pending_total_bytes))");
+                }
+                stall_seconds = 0;
+                double bytes_per_sec = ((double) bytes_diff * 1000000.0) / (double) elapsed_us;
+                current_speed_str = format_speed((int64) bytes_per_sec);
 
-            if (bytes_per_sec > 1024 && pending_total_bytes > pending_current_bytes) {
-                int64 remaining_bytes = pending_total_bytes - pending_current_bytes;
-                int remaining_sec = (int) (remaining_bytes / bytes_per_sec);
-                current_eta_str = format_eta(remaining_sec);
+                if (bytes_per_sec > 1024 && pending_total_bytes > pending_current_bytes) {
+                    int64 remaining_bytes = pending_total_bytes - pending_current_bytes;
+                    int remaining_sec = (int) (remaining_bytes / bytes_per_sec);
+                    current_eta_str = format_eta(remaining_sec);
+                } else {
+                    current_eta_str = "";
+                }
             } else {
-                current_eta_str = "";
+                stall_seconds++;
+                if (stall_seconds >= 3 && pending_current_bytes > 0) {
+                    current_speed_str = "writing to disk (slow, but working...)";
+                    current_eta_str = "";
+                    if (stall_seconds == 3) {
+                        int pct = pending_total_bytes > 0 ? (int) (((double) pending_current_bytes / (double) pending_total_bytes) * 100) : 0;
+                        AppLogger.warn("FileOperation", @"Transfer I/O delayed at $(GLib.format_size(pending_current_bytes)) ($pct%): waiting on storage writeback buffer flush...");
+                    }
+                } else if (pending_current_bytes == 0) {
+                    current_speed_str = "preparing...";
+                    current_eta_str = "";
+                } else {
+                    current_speed_str = "waiting for disk...";
+                    current_eta_str = "";
+                }
             }
 
             last_speed_time = now;
             last_speed_bytes = pending_current_bytes;
 
-            if (!is_synchronizing) {
+            if (!is_synchronizing && !is_queued) {
                 apply_progress(pending_filename, pending_current_bytes, pending_total_bytes);
             }
             return Source.CONTINUE;
@@ -197,6 +222,32 @@ namespace VCommander {
             } else {
                 return "%02d:%02d".printf(m, s);
             }
+        }
+
+        public void set_queued(string disk_name) {
+            is_queued = true;
+            queue_waiting_disk = disk_name;
+            current_item_name = @"⏳ In Queue: Waiting for active operation on $disk_name to finish...";
+            current_details = "Operation will start automatically when disk becomes available.";
+            current_fraction = 0.0;
+            item_label.label = current_item_name;
+            details_label.label = current_details;
+            progress_bar.fraction = 0.0;
+            progress_bar.text = "Queued";
+            progress_updated();
+        }
+
+        public void set_dequeued() {
+            is_queued = false;
+            queue_waiting_disk = "";
+            current_item_name = "Preparing operation...";
+            current_details = "";
+            current_fraction = 0.0;
+            item_label.label = current_item_name;
+            details_label.label = current_details;
+            progress_bar.fraction = 0.0;
+            progress_bar.text = "0%";
+            progress_updated();
         }
 
         public void set_synchronizing() {
@@ -222,7 +273,7 @@ namespace VCommander {
         }
 
         public void update_progress(string current_filename, int64 current_bytes, int64 total_bytes) {
-            if (is_synchronizing) return;
+            if (is_synchronizing || is_queued) return;
 
             pending_filename = current_filename;
             pending_current_bytes = current_bytes;
@@ -257,7 +308,7 @@ namespace VCommander {
         }
 
         private void apply_progress(string current_filename, int64 current_bytes, int64 total_bytes) {
-            if (is_synchronizing) return;
+            if (is_synchronizing || is_queued) return;
 
             current_item_name = current_filename;
             item_label.label = current_filename;
@@ -267,7 +318,11 @@ namespace VCommander {
                 if (frac < 0.0) frac = 0.0;
                 current_fraction = frac;
                 progress_bar.fraction = frac;
-                progress_bar.text = @"$((int) (frac * 100))%";
+                if (stall_seconds >= 3) {
+                    progress_bar.text = @"$((int) (frac * 100))% (writing...)";
+                } else {
+                    progress_bar.text = @"$((int) (frac * 100))%";
+                }
 
                 string size_info = @"$(GLib.format_size(current_bytes)) of $(GLib.format_size(total_bytes))";
                 string extra = "";

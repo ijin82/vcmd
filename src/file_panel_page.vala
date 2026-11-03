@@ -1958,6 +1958,8 @@ namespace VCommander {
                 if (pos + 1 < total) {
                     selection_model.selected = pos + 1;
                 }
+                grab_focus_to_list();
+                scroll_to_selected();
             }
         }
 

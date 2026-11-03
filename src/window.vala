@@ -437,6 +437,14 @@ row:selected .file-item-tagged {
             title_label.ellipsize = Pango.EllipsizeMode.START;
             header_bar.title_widget = title_label;
 
+            var log_button = new Gtk.Button.from_icon_name("text-x-generic-symbolic");
+            log_button.tooltip_text = "View Application Log";
+            log_button.focusable = false;
+            log_button.clicked.connect(() => {
+                open_application_log();
+            });
+            header_bar.pack_start(log_button);
+
             var preferences_button = new Gtk.Button.from_icon_name("emblem-system-symbolic");
             preferences_button.tooltip_text = "Preferences (Ctrl+,)";
             preferences_button.clicked.connect(() => {
@@ -488,6 +496,15 @@ row:selected .file-item-tagged {
             operations_button.tooltip_text = "Background Operations";
             operations_button.add_css_class("operations-button");
             operations_button.set_popover(operations_popover);
+            operations_button.notify["active"].connect(() => {
+                if (!operations_button.active) {
+                    if (console_drawer.visible && vte_terminal != null) {
+                        vte_terminal.grab_focus();
+                    } else if (active_panel != null) {
+                        active_panel.grab_focus_to_list();
+                    }
+                }
+            });
 
             var op_btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
             var op_icon = new Gtk.Image.from_icon_name("folder-download-symbolic");
@@ -1469,6 +1486,17 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // Ctrl+B: Background Operations & Queue
+                if ((latin_key == Gdk.Key.b || keyval == Gdk.Key.b || keyval == Gdk.Key.B) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (cmd_entry.has_focus && cmd_entry.text.length > 0) {
+                        return Gdk.EVENT_PROPAGATE;
+                    }
+                    toggle_operations_menu();
+                    return Gdk.EVENT_STOP;
+                }
+
                 // Ctrl+Shift+O: Open selected file with...
                 if (latin_key == Gdk.Key.o &&
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
@@ -2039,6 +2067,18 @@ row:selected .file-item-tagged {
             }
         }
 
+        public void toggle_operations_menu() {
+            if (operations_button != null && operations_button.visible) {
+                if (operations_button.active) {
+                    operations_button.popdown();
+                } else {
+                    operations_button.popup();
+                }
+            } else {
+                show_command_toast("No background operations running");
+            }
+        }
+
         private bool on_command_entry_key_pressed(uint keyval, uint keycode, Gdk.ModifierType state) {
             if (keyval == Gdk.Key.Escape) {
                 cmd_entry.text = "";
@@ -2095,6 +2135,34 @@ row:selected .file-item-tagged {
                     active_panel.grab_focus_to_list();
                 }
             });
+            safe_present_alert.begin(dialog);
+        }
+
+        private async void wait_for_dialogs_to_clear() {
+            int attempts = 0;
+            while (get_visible_dialog() != null && attempts < 25) {
+                Timeout.add(20, wait_for_dialogs_to_clear.callback);
+                yield;
+                attempts++;
+            }
+            if (get_visible_dialog() != null) {
+                var stuck_dlg = get_visible_dialog();
+                if (stuck_dlg is Adw.AlertDialog) {
+                    AppLogger.warn("DialogManager", @"Stuck dialog detected ($(stuck_dlg.get_type().name())), forcing close");
+                    stuck_dlg.force_close();
+                }
+            }
+        }
+
+        private async void safe_present_dialog(OperationProgressDialog dlg) {
+            yield wait_for_dialogs_to_clear();
+            if (!dlg.is_finished && !dlg.is_minimized) {
+                dlg.present(this);
+            }
+        }
+
+        private async void safe_present_alert(Adw.AlertDialog dialog) {
+            yield wait_for_dialogs_to_clear();
             dialog.present(this);
         }
 
@@ -2111,7 +2179,7 @@ row:selected .file-item-tagged {
             dlg.task_completed.connect(() => {
                 on_operation_completed(dlg);
             });
-            dlg.present(this);
+            safe_present_dialog.begin(dlg);
         }
 
         private void on_operation_minimized(OperationProgressDialog dlg) {
@@ -2183,8 +2251,27 @@ row:selected .file-item-tagged {
 
             operations_button.visible = true;
 
-            if (background_tasks.length == 1) {
-                var task = background_tasks[0];
+            int active_count = 0;
+            int queued_count = 0;
+            int total_pct = 0;
+            OperationProgressDialog? first_active = null;
+
+            for (int i = 0; i < background_tasks.length; i++) {
+                var t = background_tasks[i];
+                if (t.is_queued) {
+                    queued_count++;
+                } else {
+                    active_count++;
+                    if (first_active == null) first_active = t;
+                    total_pct += (int) (t.current_fraction * 100);
+                }
+            }
+
+            if (active_count == 0 && queued_count > 0) {
+                operations_label.label = @"Queued ($queued_count)";
+                operations_button.tooltip_text = @"$queued_count operation(s) waiting in queue\nClick to view background operations";
+            } else if (active_count == 1 && queued_count == 0) {
+                var task = first_active;
                 int pct = (int) (task.current_fraction * 100);
                 if (task.is_synchronizing) {
                     operations_label.label = "Syncing...";
@@ -2196,14 +2283,15 @@ row:selected .file-item-tagged {
                     operations_label.label = "Working...";
                     operations_button.tooltip_text = @"$(task.op_title)\nClick to view background operations";
                 }
+            } else if (active_count == 1 && queued_count > 0) {
+                int pct = (int) (first_active.current_fraction * 100);
+                operations_label.label = @"$pct% ($queued_count queued)";
+                operations_button.tooltip_text = @"$(first_active.op_title) ($pct%)\n$queued_count operation(s) waiting in queue\nClick to view background operations";
             } else {
-                int total_pct = 0;
-                for (int i = 0; i < background_tasks.length; i++) {
-                    total_pct += (int) (background_tasks[i].current_fraction * 100);
-                }
-                int avg_pct = total_pct / background_tasks.length;
-                operations_label.label = @"$(background_tasks.length) ops ($avg_pct%)";
-                operations_button.tooltip_text = @"$(background_tasks.length) background operations running ($avg_pct%)\nClick to view background operations";
+                int avg_pct = (active_count > 0) ? (total_pct / active_count) : 0;
+                string q_str = (queued_count > 0) ? @" • $queued_count queued" : "";
+                operations_label.label = @"$active_count ops ($avg_pct%)$q_str";
+                operations_button.tooltip_text = @"$active_count active ($avg_pct%), $queued_count queued\nClick to view background operations";
             }
         }
 
@@ -2549,12 +2637,15 @@ row:selected .file-item-tagged {
         }
 
         private async void do_delete_item(FilePanel panel, File target, bool permanent, string? select_above_name) {
+            string op_name = permanent ? "Permanent delete" : "Trash";
+            AppLogger.info("FileOperation", @"$op_name requested: '$(target.get_path() ?? target.get_uri())'");
             try {
                 if (permanent) {
                     yield FileOperationService.delete_recursive(target);
                 } else {
                     yield FileOperationService.trash_file(target);
                 }
+                AppLogger.info("FileOperation", @"$op_name completed: '$(target.get_path() ?? target.get_uri())'");
                 if (panel.current_directory != null) {
                     panel.load_directory(panel.current_directory, select_above_name);
                 } else {
@@ -2567,6 +2658,7 @@ row:selected .file-item-tagged {
                 }
                 panel.grab_focus_to_list();
             } catch (Error e) {
+                AppLogger.error("FileOperation", @"$op_name failed: '$(target.get_path() ?? target.get_uri())'", e.message);
                 show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
                 panel.grab_focus_to_list();
             }
@@ -2578,6 +2670,8 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(op_title, cancellable);
             attach_progress_dialog(dlg);
 
+            string op_name = permanent ? "Multi-delete" : "Multi-trash";
+            AppLogger.info("FileOperation", @"$op_name requested: $(items.length) items");
             try {
                 for (int i = 0; i < items.length; i++) {
                     if (cancellable.is_cancelled()) break;
@@ -2591,6 +2685,7 @@ row:selected .file-item-tagged {
                 }
                 dlg.finish();
                 if (!cancellable.is_cancelled()) {
+                    AppLogger.info("FileOperation", @"$op_name completed: $(items.length) items");
                     panel.clear_tags();
                 }
                 if (panel.current_directory != null) {
@@ -2606,7 +2701,10 @@ row:selected .file-item-tagged {
                 panel.grab_focus_to_list();
             } catch (Error e) {
                 dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("FileOperation", @"$op_name cancelled: $(items.length) items");
+                } else {
+                    AppLogger.error("FileOperation", @"$op_name failed: $(items.length) items", e.message);
                     show_error_dialog("Delete Error", FileOperationService.format_error(e, permanent ? "delete" : "trash"));
                 }
                 if (panel.current_directory != null) {
@@ -2676,6 +2774,20 @@ row:selected .file-item-tagged {
             }
 
             launch_external_file_tool(cmd, path, "File Viewer", target_panel, item.name);
+        }
+
+        public void open_application_log() {
+            string log_path = AppLogger.get_log_file_path();
+            if (!FileUtils.test(log_path, FileTest.EXISTS)) {
+                AppLogger.info("System", "Application log initialized.");
+            }
+
+            var config = ConfigManager.get_instance();
+            string cmd = (config.editor_command != null && config.editor_command.length > 0)
+                ? config.editor_command
+                : ConfigManager.detect_default_editor();
+
+            launch_external_file_tool(cmd, log_path, "Application Log", active_panel, null);
         }
 
         private void on_f4_edit() {
@@ -2984,6 +3096,7 @@ row:selected .file-item-tagged {
             }
 
             if (dest_target.query_exists()) {
+                yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
                     @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
@@ -3012,8 +3125,12 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Copying $(source.get_basename())", cancellable);
             attach_progress_dialog(dlg);
 
+            var disks = DriveQueueManager.get_required_disks(source, dest);
             var tracker = new CopyProgressTracker();
+            AppLogger.info("FileOperation", @"Copy requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 // Calculate total size first for progress bar
                 int64 total_size = yield FileOperationService.calculate_total_size(source, cancellable);
                 tracker.total_bytes = total_size;
@@ -3029,16 +3146,17 @@ row:selected .file-item-tagged {
                     },
                     tracker
                 );
-
-                dlg.finish();
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
+                AppLogger.info("FileOperation", @"Copy completed successfully: '$(source.get_basename())'");
             } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("FileOperation", @"Copy cancelled: '$(source.get_basename())'");
+                } else {
+                    AppLogger.error("FileOperation", @"Copy failed: '$(source.get_basename())'", e.message);
                     show_error_dialog("Copy Error", FileOperationService.format_error(e, "copy"));
                 }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
@@ -3050,8 +3168,12 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
             attach_progress_dialog(dlg);
 
+            var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
             var tracker = new CopyProgressTracker();
+            AppLogger.info("FileOperation", @"Multi-copy requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 dlg.update_progress(@"Calculating size of $(items.length) items...", 0, 0);
                 int64 total_size = 0;
                 for (int i = 0; i < items.length; i++) {
@@ -3081,18 +3203,22 @@ row:selected .file-item-tagged {
                     );
                 }
 
-                dlg.finish();
-                if (!cancellable.is_cancelled() && active_panel != null) {
-                    active_panel.clear_tags();
+                if (!cancellable.is_cancelled()) {
+                    AppLogger.info("FileOperation", @"Multi-copy completed successfully: $(items.length) items");
+                    if (active_panel != null) {
+                        active_panel.clear_tags();
+                    }
                 }
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
             } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("FileOperation", @"Multi-copy cancelled: $(items.length) items");
+                } else {
+                    AppLogger.error("FileOperation", @"Multi-copy failed: $(items.length) items", e.message);
                     show_error_dialog("Copy Error", FileOperationService.format_error(e, "copy"));
                 }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
@@ -3224,6 +3350,7 @@ row:selected .file-item-tagged {
             string target_path = (item.file.get_path() != null) ? item.file.get_path() : item.file.get_uri();
 
             if (dest_exists) {
+                yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
                     @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
@@ -3479,6 +3606,7 @@ row:selected .file-item-tagged {
             var dest_target = parent_dir.get_child(new_name);
 
             if (dest_target.query_exists()) {
+                yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
                     @"A file or folder named '$new_name' already exists. Do you want to overwrite it?"
@@ -3512,6 +3640,7 @@ row:selected .file-item-tagged {
             }
 
             if (dest_target.query_exists()) {
+                yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
                     @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
@@ -3540,8 +3669,12 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Moving $(source.get_basename())", cancellable);
             attach_progress_dialog(dlg);
 
+            var disks = DriveQueueManager.get_required_disks(source, dest);
             var tracker = new CopyProgressTracker();
+            AppLogger.info("FileOperation", @"Move requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 int64 total_size = yield FileOperationService.calculate_total_size(source, cancellable);
                 tracker.total_bytes = total_size;
                 dlg.update_progress(source.get_basename(), 0, total_size);
@@ -3556,16 +3689,17 @@ row:selected .file-item-tagged {
                     },
                     tracker
                 );
-
-                dlg.finish();
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
+                AppLogger.info("FileOperation", @"Move completed successfully: '$(source.get_basename())'");
             } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("FileOperation", @"Move cancelled: '$(source.get_basename())'");
+                } else {
+                    AppLogger.error("FileOperation", @"Move failed: '$(source.get_basename())'", e.message);
                     show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
                 }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
@@ -3577,8 +3711,12 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
             attach_progress_dialog(dlg);
 
+            var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
             var tracker = new CopyProgressTracker();
+            AppLogger.info("FileOperation", @"Multi-move requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 dlg.update_progress(@"Calculating size of $(items.length) items...", 0, 0);
                 int64 total_size = 0;
                 for (int i = 0; i < items.length; i++) {
@@ -3608,18 +3746,22 @@ row:selected .file-item-tagged {
                     );
                 }
 
-                dlg.finish();
-                if (!cancellable.is_cancelled() && active_panel != null) {
-                    active_panel.clear_tags();
+                if (!cancellable.is_cancelled()) {
+                    AppLogger.info("FileOperation", @"Multi-move completed successfully: $(items.length) items");
+                    if (active_panel != null) {
+                        active_panel.clear_tags();
+                    }
                 }
-                left_panel.refresh();
-                right_panel.refresh();
-                if (active_panel != null) active_panel.grab_focus_to_list();
             } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("FileOperation", @"Multi-move cancelled: $(items.length) items");
+                } else {
+                    AppLogger.error("FileOperation", @"Multi-move failed: $(items.length) items", e.message);
                     show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
                 }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
@@ -3740,6 +3882,7 @@ row:selected .file-item-tagged {
         private async void prompt_execute_restore_single(FilePanel panel, FileItem item, string orig_path) {
             var dest_file = File.new_for_path(orig_path);
             if (dest_file.query_exists()) {
+                yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
                     @"A file or folder already exists at:\n$orig_path\n\nDo you want to overwrite it?"
@@ -3768,21 +3911,28 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Restoring $(item.display_name)", cancellable);
             attach_progress_dialog(dlg);
 
+            var dest_file = File.new_for_path(orig_path);
+            var disks = DriveQueueManager.get_required_disks(item.file, dest_file);
+            AppLogger.info("Trash", @"Restore requested: '$(item.display_name)' -> '$orig_path'");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 dlg.update_progress(item.display_name, 0, 1);
                 yield FileOperationService.restore_trash_file(item.file, orig_path, overwrite, cancellable);
+                AppLogger.info("Trash", @"Restore completed successfully: '$(item.display_name)'");
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("Trash", @"Restore cancelled: '$(item.display_name)'");
+                } else {
+                    AppLogger.error("Trash", @"Restore failed: '$(item.display_name)'", e.message);
+                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
                 dlg.finish();
-
                 panel.refresh();
                 var opp = (panel == left_panel) ? right_panel : left_panel;
                 opp.refresh();
-                panel.grab_focus_to_list();
-            } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
-                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
-                }
-                panel.refresh();
                 panel.grab_focus_to_list();
             }
         }
@@ -3792,7 +3942,15 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Restoring $(items.length) items from Trash", cancellable);
             attach_progress_dialog(dlg);
 
+            string first_dest_path = (items.length > 0 && items[0].trash_orig_path != null && items[0].trash_orig_path.length > 0)
+                ? items[0].trash_orig_path
+                : Environment.get_home_dir();
+            var dest_file = File.new_for_path(first_dest_path);
+            var disks = DriveQueueManager.get_required_disks(items.length > 0 ? items[0].file : null, dest_file);
+            AppLogger.info("Trash", @"Multi-restore requested: $(items.length) items");
             try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
                 for (int i = 0; i < items.length; i++) {
                     if (cancellable.is_cancelled()) break;
                     var it = items[i];
@@ -3806,20 +3964,23 @@ row:selected .file-item-tagged {
                     yield FileOperationService.restore_trash_file(it.file, orig_path, true, cancellable);
                 }
 
-                dlg.finish();
                 if (!cancellable.is_cancelled()) {
+                    AppLogger.info("Trash", @"Multi-restore completed successfully: $(items.length) items");
                     panel.clear_tags();
                 }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("Trash", @"Multi-restore cancelled: $(items.length) items");
+                } else {
+                    AppLogger.error("Trash", @"Multi-restore failed: $(items.length) items", e.message);
+                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
                 panel.refresh();
                 var opp = (panel == left_panel) ? right_panel : left_panel;
                 opp.refresh();
-                panel.grab_focus_to_list();
-            } catch (Error e) {
-                dlg.finish();
-                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
-                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
-                }
-                panel.refresh();
                 panel.grab_focus_to_list();
             }
         }

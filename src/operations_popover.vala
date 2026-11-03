@@ -108,7 +108,12 @@ namespace VCommander {
         }
 
         public void update_ui() {
-            if (task.is_synchronizing) {
+            if (task.is_queued) {
+                item_label.label = task.current_item_name;
+                progress_bar.fraction = 0.0;
+                progress_bar.text = "Queued";
+                details_label.label = task.current_details;
+            } else if (task.is_synchronizing) {
                 item_label.label = "Synchronizing to storage device...";
                 progress_bar.fraction = 1.0;
                 progress_bar.text = "Syncing...";
