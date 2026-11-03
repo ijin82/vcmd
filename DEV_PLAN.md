@@ -14,7 +14,10 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 4** | File Viewing & Editing (F3, F4) | **Completed (100%)** | Configurable external editor/viewer execution (gnome-text-editor, gvim, code, terminal fallback). |
 | **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) & Modern Dialogs | **Completed (100%)** | Midnight Commander-style directory bookmark popup, modern `Adw.Dialog` migration, customizable dialog dimensions. |
 | **Stage 6** | Search Engine (`Alt+F7`) | **Completed (100%)** | Async recursive search by name mask and file contents. Results open in a Super Detailed tab. The last query is stored in config; the start path comes from the active tab. |
-| **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Completed (100%)** | F2 connect dialog for SFTP, FTP, and SMB. Bookmarks store the URI without a password. |
+| **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Completed (100%)** | F2 connect dialog for SFTP, FTP, and SMB. Bookmarks store the URI without a password. Drives & Locations menu (`Ctrl+F1`). |
+| **Stage 8** | Trash Management & File Recovery (`trash:///`) | **Planned (Complexity: Low)** | Contextual Trash banner, Empty Trash confirmation, Restore Selected files (`trash::orig-path`), permanent delete (F8). |
+| **Stage 9** | Non-Blocking Background Operations & Minimized Progress | **Planned (Complexity: Moderate)** | Minimizable copy/move dialogs into a toolbar progress indicator button/popover, allowing non-blocking workflow during heavy transfers. |
+| **Stage 10** | Icon / Thumbnail Grid View & Live Background Thumbnail Engine | **Planned (Complexity: High)** | Single/dual-pane image & video thumbnail grid view (30–300px), Ctrl++/Ctrl+-/scroll zoom, atomic background worker pool (`~/.config/vcmd/thumbnails/`), crash recovery, streaming live updates without UI jumps. |
 
 ---
 
@@ -191,3 +194,71 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
   - Sections for Devices & Drives (with safe eject `⏏`), Network & Remote (with disconnect `⏏`), Standard Places (Home, Root, Trash), and Quick Action to Connect to Server (`F2`).
   - Full keyboard navigation with arrows, Enter, Delete/E to eject, and Escape to dismiss.
   - Automatic fallback to `$HOME` if an open directory is unmounted or safely removed.
+
+---
+
+## Detailed Status by Stage
+
+### [ ] Stage 8: Trash Management & File Recovery (`trash:///`) [Complexity: Low]
+- [ ] Contextual Trash Banner:
+  - When the active tab enters `trash:///`, show an action banner directly above the file list:
+    - Display trash status: e.g. "Trash contains N items".
+    - `Empty Trash` button with destructive styling (`destructive-action`) and confirmation dialog.
+    - `Restore Selected` button (`suggested-action`), enabled when one or more files are selected or tagged.
+- [ ] Trash File Operations:
+  - Reading `trash::orig-path` and `trash::deletion-date` from GIO attributes (`G_FILE_ATTRIBUTE_TRASH_ORIG_PATH`, `G_FILE_ATTRIBUTE_TRASH_DELETION_DATE`).
+  - Restore Action: Moves the selected file(s) from `trash:///...` back to their original destination path, recreating any parent directories that were deleted in the meantime.
+  - Permanent Delete (`F8` in `trash:///`): Executes permanent deletion (`g_file_delete_async`) instead of re-trashing, with explicit confirmation dialog ("Permanently delete N selected items?").
+  - Double-click / Enter on trashed item: Shows dialog offering to either "Restore File" or "Cancel".
+- [ ] Columns in Detailed View for `trash:///`:
+  - Show "Original Path" and "Date Deleted" columns when browsing `trash:///`.
+
+---
+
+## Detailed Status by Stage
+
+### [ ] Stage 9: Non-Blocking Background Operations & Minimized Progress [Complexity: Moderate]
+- [ ] Minimizable Progress Dialog:
+  - In `OperationProgressDialog`, add a "Run in Background" / "Minimize" button (`view-paged-symbolic` or `window-minimize-symbolic`).
+  - Clicking Minimize closes the modal `Adw.Dialog` without interrupting or cancelling the active copy/move operations.
+- [ ] Toolbar Progress Indicator Button & Popover:
+  - When background operations are active, an operation indicator button appears in the main window header bar (e.g. `folder-download-symbolic` + "Copying: 45%").
+  - Clicking the indicator button opens a Popover listing all active background tasks:
+    - Current operation type (Copy / Move / Sync).
+    - Current source and target item names.
+    - Mini progress bar and transfer speed (e.g. "34.5 MB/s • 1.2 GB / 2.8 GB").
+    - Action buttons: "Open / Restore Dialog" (brings back the full modal progress window) and "Cancel" button.
+  - Automatically hides the indicator button and presents an `Adw.Toast` notification when all background transfers finish.
+- [ ] Conflict & Error Handling while Minimized:
+  - If a file collision (Overwrite / Skip) or I/O error occurs while minimized, present the resolution dialog or flash the indicator button with an attention badge until resolved.
+
+---
+
+## Detailed Status by Stage
+
+### [ ] Stage 10: Icon / Thumbnail Grid View & Live Background Thumbnail Engine [Complexity: High]
+- [ ] Thumbnail Grid View Mode (`Gtk.GridView`):
+  - New view mode alongside Detailed, Brief, and Super Detailed.
+  - Vertical layout tile: large square image/preview area (30–300px) above, item name below (centered, wrapped).
+  - Zoom scaling:
+    - Step size: 30px (steps: 30, 60, 90, 120, 150, 180, 210, 240, 270, 300px). Default: 120px.
+    - Zoom shortcuts: `Ctrl++` (zoom in), `Ctrl+-` (zoom out), `Ctrl+0` (reset to default 120px), and `Ctrl + Mouse Scroll`.
+    - Persist zoom size and view mode per-tab or globally in `~/.config/vcmd/config`.
+- [ ] Thumbnail Engine (`ThumbnailService`):
+  - Cache location: `~/.config/vcmd/thumbnails/` (or configurable XDG cache).
+  - Cache file format & naming: PNG/JPEG thumbnails scaled to max 300x300, named using hash of `canonical_path + mtime + file_size`.
+  - Atomic Generation & Crash Recovery:
+    - Worker generates thumbnails to temporary files: `.tmp.<hash>`.
+    - On success, atomically renames `.tmp.<hash>` to `<hash>.png`.
+    - On application startup or directory scan, any dangling `.tmp.*` files are safely detected as interrupted work and cleaned up or re-queued.
+  - Supported Formats:
+    - Native image formats: JPG, JPEG, PNG, GIF, SVG.
+    - Fallback: Non-image files show standard system MIME / icon at the current tile size.
+    - External tool support: Preference toggle to enable ImageMagick (`magick` / `convert`) and video thumbnailing (`ffmpegthumbnailer` / `ffmpeg`) when installed on the system.
+    - Suppress non-critical thumbnail generation errors without interrupting directory browsing.
+- [ ] Non-Blocking Live Streaming ("Дотекание"):
+  - Generation occurs in a background worker pool (`GLib.ThreadPool`).
+  - As each thumbnail is finished, dispatches an idle signal to the GTK main loop (`GLib.Idle.add`).
+  - Binds the newly loaded texture/paintable directly to the `FileItem` without reloading or re-sorting the `GListStore`.
+  - Zero scroll jumping, zero UI jitter, smooth streaming of thumbnails directly into the active view as they become available.
+
