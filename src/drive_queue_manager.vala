@@ -19,6 +19,8 @@ namespace VCommander {
     public class DriveQueueManager : Object {
         private static DriveQueueManager? instance = null;
 
+        public signal void queue_changed();
+
         private HashTable<string, int> active_disks;
         private GenericArray<QueuedTask> queue;
         private GenericArray<QueuedTask> active_tasks;
@@ -131,15 +133,18 @@ namespace VCommander {
                 var task = new QueuedTask(dlg.op_title, disks, dlg, cancellable);
                 active_tasks.add(task);
                 AppLogger.info("DriveQueue", @"Acquired disk lock for '$(dlg.op_title)' on: $(format_disks_str(disks))");
+                queue_changed();
                 return;
             }
 
             // Busy disk detected: place in queue
             string friendly_name = DeviceDetector.format_device_name(busy);
             dlg.set_queued(friendly_name);
+            dlg.minimize();
 
             var task = new QueuedTask(dlg.op_title, disks, dlg, cancellable);
             queue.add(task);
+            queue_changed();
             AppLogger.info("DriveQueue", @"Disk '$busy' ($friendly_name) is busy. Operation '$(dlg.op_title)' placed in queue (#$(queue.length))");
 
             ulong cancel_id = 0;
@@ -152,6 +157,7 @@ namespace VCommander {
                             break;
                         }
                     }
+                    queue_changed();
                     AppLogger.info("DriveQueue", @"Operation '$(task.id)' cancelled while in queue");
                     if (task.resume_callback != null) {
                         var cb = task.resume_callback;
@@ -175,6 +181,7 @@ namespace VCommander {
             mark_disks_active(disks);
             active_tasks.add(task);
             dlg.set_dequeued();
+            queue_changed();
             AppLogger.info("DriveQueue", @"Operation '$(dlg.op_title)' dispatched from queue, acquired lock on: $(format_disks_str(disks))");
         }
 
@@ -189,7 +196,53 @@ namespace VCommander {
             }
 
             AppLogger.info("DriveQueue", @"Released disk lock for '$(dlg.op_title)' on: $(format_disks_str(disks))");
+            queue_changed();
             check_and_dispatch_next();
+        }
+
+        public int get_queue_position(OperationProgressDialog dlg) {
+            for (int i = 0; i < queue.length; i++) {
+                if (queue[i].dlg == dlg) {
+                    return i + 1;
+                }
+            }
+            return -1;
+        }
+
+        public bool move_queue_task_up(OperationProgressDialog dlg) {
+            for (int i = 1; i < queue.length; i++) {
+                if (queue[i].dlg == dlg) {
+                    var tmp = queue[i];
+                    queue[i] = queue[i - 1];
+                    queue[i - 1] = tmp;
+                    queue_changed();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool move_queue_task_down(OperationProgressDialog dlg) {
+            for (int i = 0; i < queue.length - 1; i++) {
+                if (queue[i].dlg == dlg) {
+                    var tmp = queue[i];
+                    queue[i] = queue[i + 1];
+                    queue[i + 1] = tmp;
+                    queue_changed();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public GenericArray<OperationProgressDialog> get_all_queued_dialogs() {
+            var list = new GenericArray<OperationProgressDialog>();
+            for (int i = 0; i < queue.length; i++) {
+                if (!queue[i].is_cancelled) {
+                    list.add(queue[i].dlg);
+                }
+            }
+            return list;
         }
 
         private string format_disks_str(GenericArray<string> disks) {
@@ -210,6 +263,7 @@ namespace VCommander {
                 if (busy == null) {
                     // All required disks are free for this candidate
                     queue.remove_index(i);
+                    queue_changed();
                     if (candidate.resume_callback != null) {
                         var cb = candidate.resume_callback;
                         candidate.resume_callback = null;

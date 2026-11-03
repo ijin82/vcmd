@@ -511,13 +511,19 @@ row:selected .file-item-tagged {
             operations_button.add_css_class("operations-button");
             operations_button.set_popover(operations_popover);
             operations_button.notify["active"].connect(() => {
-                if (!operations_button.active) {
+                if (operations_button.active) {
+                    operations_popover.refresh_order();
+                } else {
                     if (console_drawer.visible && vte_terminal != null) {
                         vte_terminal.grab_focus();
                     } else if (active_panel != null) {
                         active_panel.grab_focus_to_list();
                     }
                 }
+            });
+
+            DriveQueueManager.get_instance().queue_changed.connect(() => {
+                update_operations_button();
             });
 
             var op_btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
@@ -2102,7 +2108,11 @@ row:selected .file-item-tagged {
         }
 
         public void toggle_operations_menu() {
-            if (operations_button != null && operations_button.visible) {
+            int queued_mgr = DriveQueueManager.get_instance().queued_count;
+            if (operations_button != null && (operations_button.visible || background_tasks.length > 0 || queued_mgr > 0)) {
+                if (!operations_button.visible) {
+                    update_operations_button();
+                }
                 if (operations_button.active) {
                     operations_button.popdown();
                 } else {
@@ -2190,7 +2200,7 @@ row:selected .file-item-tagged {
 
         private async void safe_present_dialog(OperationProgressDialog dlg) {
             yield wait_for_dialogs_to_clear();
-            if (!dlg.is_finished && !dlg.is_minimized) {
+            if (!dlg.is_finished && !dlg.is_minimized && !dlg.is_queued) {
                 dlg.present(this);
             }
         }
@@ -2213,7 +2223,21 @@ row:selected .file-item-tagged {
             dlg.task_completed.connect(() => {
                 on_operation_completed(dlg);
             });
-            safe_present_dialog.begin(dlg);
+            if (!dlg.is_minimized && !dlg.is_queued) {
+                safe_present_dialog.begin(dlg);
+            }
+        }
+
+        private void register_operation(OperationProgressDialog dlg, GenericArray<string> disks) {
+            string? busy_disk = DriveQueueManager.get_instance().get_first_busy_disk(disks);
+            if (busy_disk != null) {
+                string friendly_name = DeviceDetector.format_device_name(busy_disk);
+                dlg.set_queued(friendly_name);
+                dlg.minimize();
+                on_operation_minimized(dlg);
+                show_command_toast(@"Queued: $(dlg.op_title) (waiting for $friendly_name)");
+            }
+            attach_progress_dialog(dlg);
         }
 
         private void on_operation_minimized(OperationProgressDialog dlg) {
@@ -2251,10 +2275,10 @@ row:selected .file-item-tagged {
                     break;
                 }
             }
-            if (was_background) {
-                operations_popover.remove_task(dlg);
-                update_operations_button();
+            operations_popover.remove_task(dlg);
+            update_operations_button();
 
+            if (was_background || dlg.is_minimized || dlg.is_queued) {
                 if (dlg.cancellable.is_cancelled()) {
                     show_command_toast(@"Cancelled: $(dlg.op_title)");
                 } else {
@@ -2277,7 +2301,8 @@ row:selected .file-item-tagged {
         }
 
         private void update_operations_button() {
-            if (background_tasks.length == 0) {
+            int queued_mgr = DriveQueueManager.get_instance().queued_count;
+            if (background_tasks.length == 0 && queued_mgr == 0) {
                 operations_button.visible = false;
                 operations_popover.popdown();
                 return;
@@ -2301,26 +2326,31 @@ row:selected .file-item-tagged {
                 }
             }
 
+            if (queued_mgr > queued_count) {
+                queued_count = queued_mgr;
+            }
+
             if (active_count == 0 && queued_count > 0) {
                 operations_label.label = @"Queued ($queued_count)";
                 operations_button.tooltip_text = @"$queued_count operation(s) waiting in queue\nClick to view background operations";
             } else if (active_count == 1 && queued_count == 0) {
                 var task = first_active;
-                int pct = (int) (task.current_fraction * 100);
-                if (task.is_synchronizing) {
+                int pct = (task != null) ? (int) (task.current_fraction * 100) : 0;
+                if (task != null && task.is_synchronizing) {
                     operations_label.label = "Syncing...";
                     operations_button.tooltip_text = @"$(task.op_title): Synchronizing write buffers\nClick to view background operations";
                 } else if (pct > 0) {
                     operations_label.label = @"$pct%";
-                    operations_button.tooltip_text = @"$(task.op_title) ($pct%)\nClick to view background operations";
+                    operations_button.tooltip_text = (task != null) ? @"$(task.op_title) ($pct%)\nClick to view background operations" : "Background operations";
                 } else {
                     operations_label.label = "Working...";
-                    operations_button.tooltip_text = @"$(task.op_title)\nClick to view background operations";
+                    operations_button.tooltip_text = (task != null) ? @"$(task.op_title)\nClick to view background operations" : "Background operations";
                 }
             } else if (active_count == 1 && queued_count > 0) {
-                int pct = (int) (first_active.current_fraction * 100);
+                int pct = (first_active != null) ? (int) (first_active.current_fraction * 100) : 0;
                 operations_label.label = @"$pct% ($queued_count queued)";
-                operations_button.tooltip_text = @"$(first_active.op_title) ($pct%)\n$queued_count operation(s) waiting in queue\nClick to view background operations";
+                string t_title = (first_active != null) ? first_active.op_title : "Active operation";
+                operations_button.tooltip_text = @"$t_title ($pct%)\n$queued_count operation(s) waiting in queue\nClick to view background operations";
             } else {
                 int avg_pct = (active_count > 0) ? (total_pct / active_count) : 0;
                 string q_str = (queued_count > 0) ? @" • $queued_count queued" : "";
@@ -3157,9 +3187,9 @@ row:selected .file-item-tagged {
         private async void do_copy_file(File source, File dest, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(source.get_basename())", cancellable);
-            attach_progress_dialog(dlg);
-
             var disks = DriveQueueManager.get_required_disks(source, dest);
+            register_operation(dlg, disks);
+
             var tracker = new CopyProgressTracker();
             AppLogger.info("FileOperation", @"Copy requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
@@ -3200,9 +3230,8 @@ row:selected .file-item-tagged {
         private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
-            attach_progress_dialog(dlg);
-
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
+            register_operation(dlg, disks);
             var tracker = new CopyProgressTracker();
             AppLogger.info("FileOperation", @"Multi-copy requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
@@ -3701,9 +3730,9 @@ row:selected .file-item-tagged {
         private async void do_move_file(File source, File dest, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(source.get_basename())", cancellable);
-            attach_progress_dialog(dlg);
-
             var disks = DriveQueueManager.get_required_disks(source, dest);
+            register_operation(dlg, disks);
+
             var tracker = new CopyProgressTracker();
             AppLogger.info("FileOperation", @"Move requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
@@ -3743,9 +3772,8 @@ row:selected .file-item-tagged {
         private async void do_move_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
-            attach_progress_dialog(dlg);
-
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
+            register_operation(dlg, disks);
             var tracker = new CopyProgressTracker();
             AppLogger.info("FileOperation", @"Multi-move requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
@@ -3943,10 +3971,9 @@ row:selected .file-item-tagged {
         private async void do_restore_single_item(FilePanel panel, FileItem item, string orig_path, bool overwrite) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Restoring $(item.display_name)", cancellable);
-            attach_progress_dialog(dlg);
-
             var dest_file = File.new_for_path(orig_path);
             var disks = DriveQueueManager.get_required_disks(item.file, dest_file);
+            register_operation(dlg, disks);
             AppLogger.info("Trash", @"Restore requested: '$(item.display_name)' -> '$orig_path'");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
@@ -3974,13 +4001,13 @@ row:selected .file-item-tagged {
         private async void do_restore_multiple_items(FilePanel panel, GenericArray<FileItem> items) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Restoring $(items.length) items from Trash", cancellable);
-            attach_progress_dialog(dlg);
 
             string first_dest_path = (items.length > 0 && items[0].trash_orig_path != null && items[0].trash_orig_path.length > 0)
                 ? items[0].trash_orig_path
                 : Environment.get_home_dir();
             var dest_file = File.new_for_path(first_dest_path);
             var disks = DriveQueueManager.get_required_disks(items.length > 0 ? items[0].file : null, dest_file);
+            register_operation(dlg, disks);
             AppLogger.info("Trash", @"Multi-restore requested: $(items.length) items");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
