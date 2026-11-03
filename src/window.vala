@@ -18,6 +18,8 @@ namespace VCommander {
 
         private Adw.HeaderBar header_bar;
         private Gtk.Label title_label;
+        private Gtk.MenuButton drives_button;
+        private DrivesPopover drives_popover;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
         private Gtk.Label fn_f5_label;
@@ -436,6 +438,27 @@ row:selected .file-item-tagged {
             });
             header_bar.pack_end(help_button);
 
+            drives_popover = new DrivesPopover(this);
+
+            drives_button = new Gtk.MenuButton();
+            drives_button.icon_name = "drive-harddisk-symbolic";
+            drives_button.always_show_arrow = false;
+            drives_button.focusable = false;
+            drives_button.tooltip_text = "Drives & Locations (Ctrl+F1)";
+            drives_button.set_popover(drives_popover);
+            drives_button.notify["active"].connect(() => {
+                if (drives_button.active) {
+                    drives_popover.populate_items(true);
+                } else {
+                    if (console_drawer.visible && vte_terminal != null) {
+                        vte_terminal.grab_focus();
+                    } else if (active_panel != null) {
+                        active_panel.grab_focus_to_list();
+                    }
+                }
+            });
+            header_bar.pack_end(drives_button);
+
             root_box.append(header_bar);
 
             // Dual Panes
@@ -703,7 +726,7 @@ row:selected .file-item-tagged {
             if (visible) {
                 string? cwd = null;
                 if (active_panel != null && active_panel.current_directory != null) {
-                    cwd = active_panel.current_directory.get_path();
+                    cwd = resolve_local_path_for_file(active_panel.current_directory);
                 }
                 if (!terminal_alive || vte_terminal == null) {
                     spawn_terminal(cwd);
@@ -728,6 +751,56 @@ row:selected .file-item-tagged {
             }
         }
 
+        public static string? resolve_local_path_for_file(File? file) {
+            if (file == null) return null;
+
+            string? local_path = file.get_path();
+            if (local_path != null && local_path.length > 0) {
+                return local_path;
+            }
+
+            // If file has no direct local path (e.g. GVfs mounts sftp://, dav://, smb://),
+            // check if GVfs FUSE daemon mapped it to /run/user/<UID>/gvfs
+            string uri = file.get_uri();
+            uint uid = (uint) Posix.getuid();
+            string gvfs_dir = @"/run/user/$uid/gvfs";
+            if (!FileUtils.test(gvfs_dir, FileTest.IS_DIR)) {
+                return null;
+            }
+
+            var vm = VolumeMonitor.get();
+            var mounts = vm.get_mounts();
+            foreach (var m in mounts) {
+                var root = m.get_root();
+                if (root == null) continue;
+                string root_uri = root.get_uri();
+
+                if (uri == root_uri || uri.has_prefix(root_uri + "/") || uri.has_prefix(root_uri)) {
+                    string rel_path = "";
+                    if (uri.length > root_uri.length) {
+                        rel_path = uri.substring(root_uri.length);
+                        if (rel_path.has_prefix("/")) rel_path = rel_path.substring(1);
+                    }
+
+                    try {
+                        var dir = Dir.open(gvfs_dir, 0);
+                        string? entry_name = null;
+                        while ((entry_name = dir.read_name()) != null) {
+                            string mount_base = Path.build_filename(gvfs_dir, entry_name);
+                            string cand_path = mount_base;
+                            if (rel_path.length > 0) {
+                                cand_path = Path.build_filename(mount_base, Uri.unescape_string(rel_path));
+                            }
+                            if (FileUtils.test(cand_path, FileTest.EXISTS)) {
+                                return cand_path;
+                            }
+                        }
+                    } catch (Error e) {}
+                }
+            }
+            return null;
+        }
+
         private void apply_console_paned_position() {
             int total_h = vertical_paned.get_height();
             if (total_h > 150) {
@@ -741,30 +814,47 @@ row:selected .file-item-tagged {
         }
 
         private bool is_terminal_at_prompt() {
-            if (vte_terminal == null || !terminal_alive) return false;
-            var pty = vte_terminal.get_pty();
-            if (pty == null) return false;
-            int fd = pty.get_fd();
-            if (fd < 0) return false;
-            long pgrp = (long) Posix.tcgetpgrp(fd);
-            if (pgrp <= 0) return false;
-            string comm_path = @"/proc/$pgrp/comm";
+            if (vte_terminal == null || !terminal_alive || terminal_child_pid <= 1) return false;
             try {
+                string stat_content;
+                FileUtils.get_contents(@"/proc/$terminal_child_pid/stat", out stat_content);
+                int idx = stat_content.last_index_of(")");
+                if (idx < 0) return true;
+                string rest = stat_content.substring(idx + 2);
+                string[] parts = rest.split(" ");
+                // in rest: [0]=state, [1]=ppid, [2]=pgrp, [3]=session, [4]=tty_nr, [5]=tpgid
+                if (parts.length < 6) return true;
+                int pgrp = int.parse(parts[2]);
+                int tpgid = int.parse(parts[5]);
+
+                if (tpgid <= 0 || tpgid == pgrp || tpgid == terminal_child_pid) {
+                    return true;
+                }
+
                 string comm;
-                FileUtils.get_contents(comm_path, out comm);
+                FileUtils.get_contents(@"/proc/$tpgid/comm", out comm);
                 string trimmed = comm.strip();
                 return (trimmed == "bash" || trimmed == "zsh" || trimmed == "sh" || trimmed == "fish");
             } catch (Error e) {
-                return false;
+                return true;
             }
         }
 
         private void sync_terminal_directory(string target_dir) {
-            if (vte_terminal == null || !terminal_alive) {
+            if (vte_terminal == null || !terminal_alive || terminal_child_pid <= 1) {
                 spawn_terminal(target_dir);
                 return;
             }
-            if (target_dir == last_terminal_dir) return;
+
+            string? shell_cwd = null;
+            try {
+                shell_cwd = FileUtils.read_link(@"/proc/$terminal_child_pid/cwd");
+            } catch (Error e) {}
+
+            if (shell_cwd != null && shell_cwd == target_dir) {
+                last_terminal_dir = target_dir;
+                return;
+            }
 
             if (is_terminal_at_prompt()) {
                 string escaped = target_dir.replace("'", "'\\''");
@@ -777,7 +867,7 @@ row:selected .file-item-tagged {
             string? cwd = working_dir;
             if (cwd == null || cwd.length == 0) {
                 if (active_panel != null && active_panel.current_directory != null) {
-                    cwd = active_panel.current_directory.get_path();
+                    cwd = resolve_local_path_for_file(active_panel.current_directory);
                 }
             }
             if (cwd == null || cwd.length == 0) {
@@ -1182,6 +1272,12 @@ row:selected .file-item-tagged {
                         return Gdk.EVENT_STOP;
                     }
 
+                    // Ctrl+F1: Drives & Locations
+                    if (keyval == Gdk.Key.F1 && (state & Gdk.ModifierType.CONTROL_MASK) != 0 && (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                        toggle_drives_menu();
+                        return Gdk.EVENT_STOP;
+                    }
+
                     if (keyval == Gdk.Key.F2 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
                         if (active_panel != null) {
                             ConnectDialog.show(this, active_panel);
@@ -1451,8 +1547,14 @@ row:selected .file-item-tagged {
                     }
                 }
 
+                // Ctrl+F1: Drives & Locations
+                if (keyval == Gdk.Key.F1 && (state & Gdk.ModifierType.CONTROL_MASK) != 0 && (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    toggle_drives_menu();
+                    return Gdk.EVENT_STOP;
+                }
+
                 // F1: show Shortcuts Dialog
-                if (keyval == Gdk.Key.F1) {
+                if (keyval == Gdk.Key.F1 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
                     ShortcutsDialog.show(this);
                     return Gdk.EVENT_STOP;
                 }
@@ -1570,6 +1672,12 @@ row:selected .file-item-tagged {
 
         private void on_panel_directory_changed(File new_dir) {
             update_window_title();
+            if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
+                string? p = resolve_local_path_for_file(active_panel.current_directory);
+                if (p != null) {
+                    sync_terminal_directory(p);
+                }
+            }
         }
 
         private void update_window_title() {
@@ -1684,6 +1792,12 @@ row:selected .file-item-tagged {
             right_panel.set_active(panel == right_panel);
             update_super_view_layout();
             update_window_title();
+            if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
+                string? p = resolve_local_path_for_file(active_panel.current_directory);
+                if (p != null) {
+                    sync_terminal_directory(p);
+                }
+            }
             if (focus_list) {
                 active_panel.grab_focus_to_list();
             }
@@ -1832,6 +1946,41 @@ row:selected .file-item-tagged {
             }
         }
 
+        public void handle_mount_removed(File unmounted_root) {
+            check_and_fallback_panel_dir(left_panel, unmounted_root);
+            check_and_fallback_panel_dir(right_panel, unmounted_root);
+        }
+
+        private void check_and_fallback_panel_dir(FilePanel panel, File unmounted_root) {
+            var home = File.new_for_path(Environment.get_home_dir());
+            for (int i = 0; i < panel.tab_view.n_pages; i++) {
+                var page = panel.tab_view.get_nth_page(i);
+                if (page != null && page.child is FilePanelPage) {
+                    var panel_page = (FilePanelPage) page.child;
+                    var cur = panel_page.current_directory;
+                    if (cur != null && (cur.equal(unmounted_root) || cur.has_prefix(unmounted_root))) {
+                        panel_page.load_directory(home);
+                    }
+                }
+            }
+        }
+
+        public void toggle_drives_menu() {
+            if (drives_button != null) {
+                if (drives_button.active) {
+                    drives_button.popdown();
+                } else {
+                    drives_button.popup();
+                }
+            }
+        }
+
+        public void show_drives_menu() {
+            if (drives_button != null && !drives_button.active) {
+                drives_button.popup();
+            }
+        }
+
         private bool on_command_entry_key_pressed(uint keyval, uint keycode, Gdk.ModifierType state) {
             if (keyval == Gdk.Key.Escape) {
                 cmd_entry.text = "";
@@ -1955,7 +2104,7 @@ row:selected .file-item-tagged {
 
             update_window_title();
             if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
-                string? path = active_panel.current_directory.get_path();
+                string? path = resolve_local_path_for_file(active_panel.current_directory);
                 if (path != null) {
                     sync_terminal_directory(path);
                 }
@@ -3151,13 +3300,39 @@ row:selected .file-item-tagged {
         }
 
         private async void do_move_file(File source, File dest, bool overwrite) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Moving $(source.get_basename())", cancellable);
+            dlg.present(this);
+
+            var tracker = new CopyProgressTracker();
             try {
-                yield FileOperationService.move_file_or_dir(source, dest, overwrite);
+                int64 total_size = yield FileOperationService.calculate_total_size(source, cancellable);
+                tracker.total_bytes = total_size;
+                dlg.update_progress(source.get_basename(), 0, total_size);
+
+                yield FileOperationService.move_file_or_dir(
+                    source,
+                    dest,
+                    overwrite,
+                    cancellable,
+                    (cur_filename, current_b, total_b) => {
+                        dlg.update_progress(cur_filename, current_b, total_b);
+                    },
+                    tracker
+                );
+
+                dlg.finish();
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
             } catch (Error e) {
-                show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Move Error", FileOperationService.format_error(e, "move"));
+                }
+                left_panel.refresh();
+                right_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
             }
         }
 
@@ -3166,14 +3341,35 @@ row:selected .file-item-tagged {
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
             dlg.present(this);
 
+            var tracker = new CopyProgressTracker();
             try {
+                dlg.update_progress(@"Calculating size of $(items.length) items...", 0, 0);
+                int64 total_size = 0;
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    if (items.length > 1) {
+                        dlg.update_progress(@"Calculating size ($(i + 1)/$(items.length)): $(items[i].display_name)", 0, 0);
+                    }
+                    total_size += yield FileOperationService.calculate_total_size(items[i].file, cancellable);
+                }
+                tracker.total_bytes = total_size;
+                dlg.update_progress(@"Starting move...", 0, total_size);
+
                 for (int i = 0; i < items.length; i++) {
                     if (cancellable.is_cancelled()) break;
                     var it = items[i];
                     var dest_child = dest_dir.get_child(it.name);
 
-                    dlg.update_progress(it.display_name, i + 1, items.length);
-                    yield FileOperationService.move_file_or_dir(it.file, dest_child, true, cancellable);
+                    yield FileOperationService.move_file_or_dir(
+                        it.file,
+                        dest_child,
+                        true,
+                        cancellable,
+                        (cur_filename, current_b, total_b) => {
+                            dlg.update_progress(cur_filename, current_b, total_b);
+                        },
+                        tracker
+                    );
                 }
 
                 dlg.finish();
@@ -3305,8 +3501,6 @@ row:selected .file-item-tagged {
 
         public void apply_preferences() {
             var config = ConfigManager.get_instance();
-            left_panel.set_path_toolbar_visible(config.show_path_toolbar);
-            right_panel.set_path_toolbar_visible(config.show_path_toolbar);
             if (fn_bar != null) {
                 fn_bar.visible = config.show_function_bar;
             }

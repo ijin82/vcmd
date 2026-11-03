@@ -45,16 +45,12 @@ namespace VCommander {
         private Gtk.Stack view_stack;
         private Gtk.CustomSorter custom_master_sorter;
 
-        private Gtk.Box header_box;
-        private Gtk.Entry path_entry;
         private Gtk.Box filter_box;
         private Gtk.Entry filter_entry;
         private string filter_text = "";
         private string current_dir_stats = "";
         private Gtk.Box status_box;
         private Gtk.Label status_label;
-        private Gtk.Button view_toggle_button;
-        private Gtk.ToggleButton hidden_toggle;
         private Cancellable? load_cancellable = null;
         private Cancellable? dir_calc_cancellable = null;
         private FileItem? calculating_item = null;
@@ -99,7 +95,6 @@ namespace VCommander {
             this.sort_order_str = (sort_order == "desc") ? "desc" : "asc";
             store = new ListStore(typeof(FileItem));
 
-            build_header();
             build_views();
             build_status_bar();
             setup_focus_and_click_handlers();
@@ -108,7 +103,6 @@ namespace VCommander {
                 load_directory(initial_dir);
             } else {
                 current_directory = initial_dir;
-                path_entry.text = initial_dir.get_parse_name();
             }
             initializing_sort = false;
         }
@@ -120,7 +114,6 @@ namespace VCommander {
             }
             showing_search_results = true;
             current_directory = root;
-            path_entry.text = root.get_parse_name();
             if (custom_title == null || custom_title.length == 0) {
                 custom_title = "Search";
             }
@@ -131,7 +124,6 @@ namespace VCommander {
                 array[i + 1] = items[i];
             }
             store.splice(0, store.get_n_items(), array);
-            path_entry.tooltip_text = "Search results. Backspace or .. returns to this folder";
 
             if (view_mode != PanelViewMode.SUPER) {
                 switch_view_mode(PanelViewMode.SUPER);
@@ -162,84 +154,6 @@ namespace VCommander {
                 grab_focus_to_list();
                 return Source.REMOVE;
             });
-        }
-
-        private void build_header() {
-            var config = ConfigManager.get_instance();
-            header_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
-            header_box.add_css_class("panel-header");
-            header_box.visible = config.show_path_toolbar;
-
-            var up_button = new Gtk.Button.from_icon_name("go-up-symbolic");
-            up_button.focusable = false;
-            up_button.tooltip_text = "Go to parent directory (Backspace)";
-            up_button.clicked.connect(() => {
-                go_up();
-            });
-            header_box.append(up_button);
-
-            path_entry = new Gtk.Entry();
-            path_entry.hexpand = true;
-            path_entry.tooltip_text = "Current path (Press Enter to navigate, Ctrl+L to focus)";
-            path_entry.activate.connect(() => {
-                var entered_path = path_entry.text.strip();
-                if (entered_path.length > 0) {
-                    File target;
-                    if (entered_path.has_prefix("/") || entered_path.contains("://")) {
-                        target = File.new_for_commandline_arg(entered_path);
-                    } else {
-                        target = current_directory.resolve_relative_path(entered_path);
-                    }
-                    load_directory(target);
-                }
-                grab_focus_to_list();
-            });
-
-            var entry_key_controller = new Gtk.EventControllerKey();
-            entry_key_controller.key_pressed.connect((keyval, keycode, state) => {
-                if (keyval == Gdk.Key.Escape) {
-                    if (current_directory != null) {
-                        path_entry.text = current_directory.get_parse_name();
-                    }
-                    grab_focus_to_list();
-                    return Gdk.EVENT_STOP;
-                }
-                return Gdk.EVENT_PROPAGATE;
-            });
-            path_entry.add_controller(entry_key_controller);
-
-            header_box.append(path_entry);
-
-            // Toggle view button (Alt+T)
-            view_toggle_button = new Gtk.Button();
-            update_view_toggle_button();
-            view_toggle_button.focusable = false;
-            view_toggle_button.clicked.connect(() => {
-                toggle_view_mode();
-            });
-            header_box.append(view_toggle_button);
-
-            var refresh_button = new Gtk.Button.from_icon_name("view-refresh-symbolic");
-            refresh_button.focusable = false;
-            refresh_button.tooltip_text = "Refresh directory";
-            refresh_button.clicked.connect(() => {
-                refresh();
-            });
-            header_box.append(refresh_button);
-
-            hidden_toggle = new Gtk.ToggleButton();
-            hidden_toggle.focusable = false;
-            hidden_toggle.icon_name = "view-more-symbolic";
-            hidden_toggle.tooltip_text = "Show hidden files (Ctrl+H)";
-            hidden_toggle.active = show_hidden;
-            hidden_toggle.toggled.connect(() => {
-                if (show_hidden != hidden_toggle.active) {
-                    toggle_hidden_requested();
-                }
-            });
-            header_box.append(hidden_toggle);
-
-            append(header_box);
         }
 
         private void update_brief_item_label(FileItem file_item, Gtk.Label label) {
@@ -1067,11 +981,6 @@ namespace VCommander {
                     toggle_hidden_requested();
                     return Gdk.EVENT_STOP;
                 }
-                if (latin_key == Gdk.Key.l && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
-                    path_entry.grab_focus();
-                    path_entry.select_region(0, -1);
-                    return Gdk.EVENT_STOP;
-                }
                 if ((latin_key == Gdk.Key.r || keyval == Gdk.Key.r || keyval == Gdk.Key.R) &&
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
                     (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
@@ -1154,9 +1063,7 @@ namespace VCommander {
             var click_gesture = new Gtk.GestureClick();
             click_gesture.pressed.connect(() => {
                 page_activated();
-                if (!path_entry.has_focus) {
-                    grab_focus_to_list();
-                }
+                grab_focus_to_list();
             });
             add_controller(click_gesture);
         }
@@ -1174,7 +1081,6 @@ namespace VCommander {
         public void switch_view_mode(PanelViewMode mode) {
             view_mode = mode;
             view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
-            update_view_toggle_button();
             if (custom_master_sorter != null) {
                 custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
             }
@@ -1210,24 +1116,6 @@ namespace VCommander {
             }
             if (super_column_view != null) {
                 super_column_view.sort_by_column(super_target_col, target_dir);
-            }
-        }
-
-        private void update_view_toggle_button() {
-            if (view_toggle_button == null) return;
-            switch (view_mode) {
-                case PanelViewMode.BRIEF:
-                    view_toggle_button.icon_name = "view-list-bullet-symbolic";
-                    view_toggle_button.tooltip_text = "Switch to Detailed View (Alt+T)";
-                    break;
-                case PanelViewMode.DETAILED:
-                    view_toggle_button.icon_name = "view-list-details-symbolic";
-                    view_toggle_button.tooltip_text = "Switch to Super Detailed View (Alt+T)";
-                    break;
-                case PanelViewMode.SUPER:
-                    view_toggle_button.icon_name = "view-list-compact-symbolic";
-                    view_toggle_button.tooltip_text = "Switch to Brief View (Alt+T)";
-                    break;
             }
         }
 
@@ -1411,10 +1299,6 @@ namespace VCommander {
 
         public void update_brief_column_width() {
             grid_view.factory = create_brief_factory();
-        }
-
-        public void set_path_toolbar_visible(bool visible) {
-            header_box.visible = visible;
         }
 
         public void set_active(bool active) {
@@ -1921,9 +1805,6 @@ namespace VCommander {
         public void apply_show_hidden(bool hidden) {
             if (this.show_hidden != hidden) {
                 this.show_hidden = hidden;
-                if (hidden_toggle != null && hidden_toggle.active != hidden) {
-                    hidden_toggle.active = hidden;
-                }
                 refresh();
             }
         }
@@ -1990,7 +1871,6 @@ namespace VCommander {
                 if (custom_title == "Search") {
                     custom_title = null;
                 }
-                path_entry.tooltip_text = "Current path (Press Enter to navigate, Ctrl+L to focus)";
             }
             hide_filter();
 
@@ -2025,7 +1905,6 @@ namespace VCommander {
             }
 
             current_directory = dir;
-            path_entry.text = dir.get_parse_name();
             directory_changed(dir);
 
             load_directory_async.begin(dir, cursor_select_name, preserved_tags, load_cancellable);
@@ -2048,7 +1927,6 @@ namespace VCommander {
                     if (!opened.equal(dir)) {
                         dir = opened;
                         current_directory = opened;
-                        path_entry.text = opened.get_parse_name();
                         directory_changed(opened);
                     }
                 } catch (IOError.CANCELLED e) {

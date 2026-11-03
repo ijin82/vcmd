@@ -19,6 +19,7 @@ namespace VCommander {
             // 1. Function Keys (F1..F10)
             var fn_section = new Adw.ShortcutsSection("Function Keys (F1..F10)");
             add_item(fn_section, "Help & Shortcuts", "F1");
+            add_item(fn_section, "Drives & Locations", "<Control>F1");
             add_item(fn_section, "Connect to Server", "F2", "SSH, SFTP, FTP, or SMB. Reopen later from bookmarks");
             add_item(fn_section, "View File", "F3");
             add_item(fn_section, "Edit File", "F4");
@@ -36,13 +37,13 @@ namespace VCommander {
             // 2. Navigation & Panels
             var nav_section = new Adw.ShortcutsSection("Navigation & Panes");
             add_item(nav_section, "Switch Active Pane", "Tab");
+            add_item(nav_section, "Drives & Locations", "<Control>F1", "USB drives, WebDAV, Places");
             add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
             add_item(nav_section, "Open With...", "<Control><Shift>o", "Choose custom application");
             add_item(nav_section, "Toggle Console Output Drawer", "<Control>o", "or Ctrl+~");
             add_item(nav_section, "Go to Parent Directory", "BackSpace", "or Alt+Up; also leaves search results");
             add_item(nav_section, "Jump to First Item", "Home", "or Left Arrow");
             add_item(nav_section, "Jump to Last Item", "End", "or Right Arrow");
-            add_item(nav_section, "Focus Path Entry", "<Control>l");
             add_item(nav_section, "Refresh Directory", "<Control>r");
             add_item(nav_section, "Sync Opposite Panel Directory", "<Alt>i", "or Esc then i");
             add_item(nav_section, "Swap Panels", "<Control>u", "Exchange active tabs between panels");

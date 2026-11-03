@@ -177,7 +177,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [x] Stage 7: Remote Connections (`F2`, GVfs)
+### [x] Stage 7: Remote Connections (`F2`, GVfs) & Connected Devices
 - [x] Connect to Server dialog (`F2`):
   - Protocol: SSH (`ssh://`), SFTP, FTP, or SMB. SSH uses the GVfs SFTP backend and the same key or password prompt.
   - Host, optional port, user, and directory.
@@ -185,3 +185,9 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 - [x] Mount through `GFile.mount_enclosing_volume` and `Gtk.MountOperation`. The system password dialog is used. An already loaded SSH key is picked up by GVfs for SFTP.
 - [x] Opening a bookmark or typing a `sftp://`, `ftp://`, or `smb://` path mounts before the directory is listed.
 - [x] Navigation and F5, F6, F7, F8 use the same GIO operations on the mounted location.
+- [x] Connected Devices & Remote Mounts (`Ctrl+F1` Left Panel / `Ctrl+F2` Right Panel):
+  - Centralized `VolumeService` using `GLib.VolumeMonitor` to detect USB drives, external disks, optical media, unmounted partitions, and network mounts (WebDAV, SFTP, SMB, GVfs).
+  - Drives button (`drive-harddisk-symbolic`) in each panel header with an `Adw` styled `DrivesPopover`.
+  - Sections for Devices & Drives (with safe eject `⏏`), Network & Remote (with disconnect `⏏`), Standard Places (Home, Root, Trash), and Quick Action to Connect to Server (`F2`).
+  - Full keyboard navigation with arrows, Enter, Delete/E to eject, and Escape to dismiss.
+  - Automatic fallback to `$HOME` if an open directory is unmounted or safely removed.

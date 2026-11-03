@@ -29,20 +29,7 @@ namespace VCommander {
             // Panels & Interface Group
             var panel_group = new Adw.PreferencesGroup();
             panel_group.title = "Panels &amp; Interface";
-            panel_group.description = "Options for file panels and navigation toolbar";
-
-            var toolbar_row = new Adw.SwitchRow();
-            toolbar_row.title = "Show path toolbar under tabs";
-            toolbar_row.subtitle = "Display path input bar with navigation and view toggle buttons in each panel";
-            toolbar_row.active = config.show_path_toolbar;
-
-            toolbar_row.notify["active"].connect(() => {
-                config.show_path_toolbar = toolbar_row.active;
-                config.save();
-                main_win.apply_preferences();
-            });
-
-            panel_group.add(toolbar_row);
+            panel_group.description = "Options for file panels and interface elements";
 
             var fn_bar_row = new Adw.SwitchRow();
             fn_bar_row.title = "Show bottom function key bar (F1..F10)";

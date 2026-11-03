@@ -19,6 +19,8 @@ SOURCES = \
 	src/config_manager.vala \
 	src/key_utils.vala \
 	src/file_item.vala \
+	src/volume_service.vala \
+	src/drives_popover.vala \
 	src/file_panel_page.vala \
 	src/file_panel.vala \
 	src/file_operation_service.vala \

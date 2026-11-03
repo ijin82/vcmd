@@ -530,14 +530,6 @@ namespace VCommander {
             }
         }
 
-        public void set_path_toolbar_visible(bool visible) {
-            for (int i = 0; i < tab_view.n_pages; i++) {
-                var p = tab_view.get_nth_page(i);
-                var pw = (FilePanelPage) p.child;
-                pw.set_path_toolbar_visible(visible);
-            }
-        }
-
         public void update_brief_column_width() {
             for (int i = 0; i < tab_view.n_pages; i++) {
                 var p = tab_view.get_nth_page(i);

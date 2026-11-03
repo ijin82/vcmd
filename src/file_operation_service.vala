@@ -190,23 +190,40 @@ namespace VCommander {
                     }
                 }
             } else {
-                FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
-                if (overwrite) {
-                    flags |= FileCopyFlags.OVERWRITE;
+                if (overwrite && dest.query_exists(cancellable)) {
+                    // Pre-delete destination file to avoid GIO creating temporary .goutputstream-XXXXXX files
+                    // and to free storage space immediately prior to copying large files.
+                    try {
+                        yield dest.delete_async(Priority.DEFAULT, cancellable);
+                    } catch (Error e) {
+                        yield delete_recursive(dest, cancellable);
+                    }
                 }
+
+                FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
 
                 int64 current_file_bytes_done = 0;
                 int64 file_start_copied = (tracker != null) ? tracker.copied_bytes : 0;
                 int64 total_bytes = (tracker != null) ? tracker.total_bytes : 0;
                 string filename = source.get_basename();
 
-                yield source.copy_async(dest, flags, Priority.DEFAULT, cancellable, (cur, total) => {
-                    current_file_bytes_done = cur;
-                    if (progress_cb != null) {
-                        int64 current_overall = file_start_copied + current_file_bytes_done;
-                        progress_cb(filename, current_overall, total_bytes);
-                    }
-                });
+                try {
+                    yield source.copy_async(dest, flags, Priority.DEFAULT, cancellable, (cur, total) => {
+                        current_file_bytes_done = cur;
+                        if (progress_cb != null) {
+                            int64 current_overall = file_start_copied + current_file_bytes_done;
+                            progress_cb(filename, current_overall, total_bytes);
+                        }
+                    });
+                } catch (Error e) {
+                    // Clean up incomplete destination file on cancellation or failure
+                    try {
+                        if (dest.query_exists(null)) {
+                            dest.delete(null);
+                        }
+                    } catch (Error ignored) {}
+                    throw e;
+                }
 
                 if (tracker != null) {
                     tracker.copied_bytes = file_start_copied + src_info.get_size();
@@ -222,19 +239,45 @@ namespace VCommander {
             File dest,
             bool overwrite,
             Cancellable? cancellable = null,
-            FileProgressCallback? progress_cb = null
+            OperationProgressCallback? progress_cb = null,
+            CopyProgressTracker? tracker = null
         ) throws Error {
-            FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
-            if (overwrite) {
-                flags |= FileCopyFlags.OVERWRITE;
+            if (overwrite && dest.query_exists(cancellable)) {
+                try {
+                    yield dest.delete_async(Priority.DEFAULT, cancellable);
+                } catch (Error e) {
+                    yield delete_recursive(dest, cancellable);
+                }
             }
 
+            FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
+
             try {
-                yield source.move_async(dest, flags, Priority.DEFAULT, cancellable, progress_cb);
+                int64 file_start = (tracker != null) ? tracker.copied_bytes : 0;
+                int64 total_b = (tracker != null) ? tracker.total_bytes : 0;
+                string filename = source.get_basename();
+
+                yield source.move_async(dest, flags, Priority.DEFAULT, cancellable, (cur, total) => {
+                    if (progress_cb != null) {
+                        progress_cb(filename, file_start + cur, total_b > 0 ? total_b : total);
+                    }
+                });
+
+                if (tracker != null) {
+                    try {
+                        var info = yield dest.query_info_async(
+                            FileAttribute.STANDARD_SIZE,
+                            FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                            Priority.DEFAULT,
+                            cancellable
+                        );
+                        tracker.copied_bytes = file_start + info.get_size();
+                    } catch (Error e) {}
+                }
             } catch (Error e) {
                 // If moving across filesystems or not supported directly, fall back to copy + delete
                 if (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || e.matches(IOError.quark(), IOError.WOULD_RECURSE)) {
-                    yield copy_file_or_dir(source, dest, overwrite, cancellable, null, null);
+                    yield copy_file_or_dir(source, dest, overwrite, cancellable, progress_cb, tracker);
                     yield delete_recursive(source, cancellable);
                 } else {
                     throw e;

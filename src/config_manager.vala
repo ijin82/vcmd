@@ -52,7 +52,6 @@ namespace VCommander {
         public bool right_brief_view { get; set; default = false; }
         public bool right_show_hidden { get; set; default = false; }
 
-        public bool show_path_toolbar { get; set; default = true; }
         public bool show_function_bar { get; set; default = true; }
         public bool show_hidden { get; set; default = false; }
         public int brief_column_width { get; set; default = 180; }
@@ -270,9 +269,6 @@ namespace VCommander {
                 }
 
                 // General settings
-                if (key_file.has_key("General", "ShowPathToolbar")) {
-                    show_path_toolbar = key_file.get_boolean("General", "ShowPathToolbar");
-                }
                 if (key_file.has_key("General", "ShowFunctionBar")) {
                     show_function_bar = key_file.get_boolean("General", "ShowFunctionBar");
                 }
@@ -564,7 +560,6 @@ namespace VCommander {
                 key_file.set_string("Window", "ActivePane", active_pane);
 
                 // General
-                key_file.set_boolean("General", "ShowPathToolbar", show_path_toolbar);
                 key_file.set_boolean("General", "ShowFunctionBar", show_function_bar);
                 key_file.set_boolean("General", "ShowHidden", show_hidden);
                 key_file.set_integer("General", "BriefColumnWidth", brief_column_width);
