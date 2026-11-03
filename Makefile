@@ -33,6 +33,7 @@ SOURCES = \
 	src/search_dialog.vala \
 	src/remote_mount.vala \
 	src/connect_dialog.vala \
+	src/filesystem_repair_dialog.vala \
 	src/window.vala \
 	src/application.vala \
 	src/main.vala

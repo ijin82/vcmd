@@ -215,19 +215,104 @@ namespace VCommander {
             return false;
         }
 
-        public async File? mount_volume(LocationItem item, Gtk.Window? parent) {
+        public static string? get_device_for_mount_path(string mount_path) {
+            try {
+                string contents;
+                FileUtils.get_contents("/proc/mounts", out contents);
+                var lines = contents.split("\n");
+                foreach (var line in lines) {
+                    if (line.strip().length == 0) continue;
+                    var parts = line.split(" ");
+                    if (parts.length >= 2) {
+                        string mp = parts[1].replace("\\040", " ");
+                        if (mp == mount_path) {
+                            return parts[0];
+                        }
+                    }
+                }
+            } catch (Error e) {
+                // ignore
+            }
+            return null;
+        }
+
+        public static string? get_mount_path_for_device(string device_node) {
+            try {
+                string contents;
+                FileUtils.get_contents("/proc/mounts", out contents);
+                var lines = contents.split("\n");
+                foreach (var line in lines) {
+                    if (line.strip().length == 0) continue;
+                    var parts = line.split(" ");
+                    if (parts.length >= 2 && parts[0] == device_node) {
+                        return parts[1].replace("\\040", " ");
+                    }
+                }
+            } catch (Error e) {
+                // ignore
+            }
+            return null;
+        }
+
+        public static string? get_fs_type_for_mount_path(string mount_path) {
+            try {
+                string contents;
+                FileUtils.get_contents("/proc/mounts", out contents);
+                var lines = contents.split("\n");
+                foreach (var line in lines) {
+                    if (line.strip().length == 0) continue;
+                    var parts = line.split(" ");
+                    if (parts.length >= 3) {
+                        string mp = parts[1].replace("\\040", " ");
+                        if (mp == mount_path) {
+                            return parts[2];
+                        }
+                    }
+                }
+            } catch (Error e) {
+                // ignore
+            }
+            return null;
+        }
+
+        public static string? resolve_device_node(LocationItem item) {
+            if (item.volume != null) {
+                string? dev = item.volume.get_identifier("unix-device");
+                if (dev != null && dev.length > 0) return dev;
+            }
+            if (item.mount != null) {
+                var vol = item.mount.get_volume();
+                if (vol != null) {
+                    string? dev = vol.get_identifier("unix-device");
+                    if (dev != null && dev.length > 0) return dev;
+                }
+                var root = item.mount.get_root();
+                if (root != null && root.get_path() != null) {
+                    string? dev = get_device_for_mount_path(root.get_path());
+                    if (dev != null) return dev;
+                }
+            }
+            if (item.file != null && item.file.get_path() != null) {
+                string? dev = get_device_for_mount_path(item.file.get_path());
+                if (dev != null) return dev;
+            }
+            return null;
+        }
+
+        public static string get_udisks_block_path(string device_node) {
+            string base_name = Path.get_basename(device_node);
+            return "/org/freedesktop/UDisks2/block_devices/" + base_name;
+        }
+
+        public async File? mount_volume(LocationItem item, Gtk.Window? parent) throws Error {
             if (item.volume == null) {
                 return item.file;
             }
             var mount_op = new Gtk.MountOperation(parent);
-            try {
-                yield item.volume.mount(MountMountFlags.NONE, mount_op, null);
-                var m = item.volume.get_mount();
-                if (m != null) {
-                    return m.get_root();
-                }
-            } catch (Error e) {
-                warning("Failed to mount volume %s: %s", item.name, e.message);
+            yield item.volume.mount(MountMountFlags.NONE, mount_op, null);
+            var m = item.volume.get_mount();
+            if (m != null) {
+                return m.get_root();
             }
             return null;
         }

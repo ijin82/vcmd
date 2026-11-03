@@ -4,6 +4,7 @@ namespace VCommander {
         public LocationItem item { get; private set; }
 
         public signal void eject_clicked(LocationItem item);
+        public signal void repair_clicked(LocationItem item);
 
         public LocationRow(LocationItem item) {
             Object();
@@ -21,13 +22,26 @@ namespace VCommander {
                 this.add_prefix(img);
             }
 
+            if (item.category == LocationCategory.DEVICE && item.id != "root") {
+                var repair_btn = new Gtk.Button.from_icon_name("system-run-symbolic");
+                repair_btn.valign = Gtk.Align.CENTER;
+                repair_btn.add_css_class("flat");
+                repair_btn.add_css_class("circular");
+                repair_btn.focusable = false;
+                repair_btn.tooltip_text = "Check & Repair Filesystem (fsck) [r]";
+                repair_btn.clicked.connect(() => {
+                    repair_clicked(item);
+                });
+                this.add_suffix(repair_btn);
+            }
+
             if (item.can_eject || item.can_unmount) {
                 var eject_btn = new Gtk.Button.from_icon_name("media-eject-symbolic");
                 eject_btn.valign = Gtk.Align.CENTER;
                 eject_btn.add_css_class("flat");
                 eject_btn.add_css_class("circular");
                 eject_btn.focusable = false;
-                eject_btn.tooltip_text = (item.category == LocationCategory.NETWORK) ? "Disconnect" : "Eject / Unmount";
+                eject_btn.tooltip_text = (item.category == LocationCategory.NETWORK) ? "Disconnect" : "Eject / Unmount [e]";
                 eject_btn.clicked.connect(() => {
                     eject_clicked(item);
                 });
@@ -99,6 +113,13 @@ namespace VCommander {
                     var sel = list_box.get_selected_row() as LocationRow;
                     if (sel != null && (sel.item.can_eject || sel.item.can_unmount)) {
                         handle_eject(sel.item);
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+                if (keyval == Gdk.Key.r || keyval == Gdk.Key.R) {
+                    var sel = list_box.get_selected_row() as LocationRow;
+                    if (sel != null && sel.item.category == LocationCategory.DEVICE && sel.item.id != "root") {
+                        handle_repair(sel.item);
                         return Gdk.EVENT_STOP;
                     }
                 }
@@ -176,6 +197,9 @@ namespace VCommander {
                 row.eject_clicked.connect((it) => {
                     handle_eject(it);
                 });
+                row.repair_clicked.connect((it) => {
+                    handle_repair(it);
+                });
                 list_box.append(row);
             }
 
@@ -211,6 +235,11 @@ namespace VCommander {
             });
         }
 
+        private void handle_repair(LocationItem item) {
+            popdown();
+            window.prompt_filesystem_repair(item);
+        }
+
         private void on_item_activated(LocationItem item) {
             popdown();
 
@@ -231,12 +260,16 @@ namespace VCommander {
 
             if (!item.is_mounted && item.volume != null) {
                 VolumeService.get_instance().mount_volume.begin(item, window, (obj, res) => {
-                    var mounted_root = VolumeService.get_instance().mount_volume.end(res);
-                    if (mounted_root != null && window.active_panel != null) {
-                        window.active_panel.load_directory(mounted_root);
-                        window.active_panel.grab_focus_to_list();
-                    } else {
-                        window.show_command_toast("Failed to mount: " + item.name);
+                    try {
+                        var mounted_root = VolumeService.get_instance().mount_volume.end(res);
+                        if (mounted_root != null && window.active_panel != null) {
+                            window.active_panel.load_directory(mounted_root);
+                            window.active_panel.grab_focus_to_list();
+                        } else {
+                            window.show_command_toast("Failed to mount: " + item.name);
+                        }
+                    } catch (Error e) {
+                        window.prompt_filesystem_repair(item, e.message);
                     }
                 });
             }

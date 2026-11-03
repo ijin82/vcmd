@@ -37,7 +37,7 @@ namespace VCommander {
             // 2. Navigation & Panels
             var nav_section = new Adw.ShortcutsSection("Navigation & Panes");
             add_item(nav_section, "Switch Active Pane", "Tab");
-            add_item(nav_section, "Drives & Locations", "<Control>F1", "USB drives, WebDAV, Places");
+            add_item(nav_section, "Drives & Locations", "<Control>F1", "USB drives, Places ('e' Eject, 'r' Repair)");
             add_item(nav_section, "Enter Directory / Open File", "Return", "or Double Click");
             add_item(nav_section, "Open With...", "<Control><Shift>o", "Choose custom application");
             add_item(nav_section, "Toggle Console Output Drawer", "<Control>o", "or Ctrl+~");

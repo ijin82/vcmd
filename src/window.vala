@@ -3499,6 +3499,18 @@ row:selected .file-item-tagged {
             PreferencesDialog.show(this, this);
         }
 
+        public void prompt_filesystem_repair(LocationItem item, string? initial_error = null) {
+            FilesystemRepairDialog.show(this, item, initial_error);
+        }
+
+        public void open_terminal_with_command(string command) {
+            set_console_visible(true);
+            if (vte_terminal != null) {
+                vte_terminal.feed_child((command + "\n").data);
+                vte_terminal.grab_focus();
+            }
+        }
+
         public void apply_preferences() {
             var config = ConfigManager.get_instance();
             if (fn_bar != null) {
