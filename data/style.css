@@ -190,3 +190,14 @@ row:selected .file-item-tagged {
     padding: 6px;
 }
 
+/* Contextual Trash Action Banner */
+.trash-banner {
+    padding: 6px 12px;
+    background-color: alpha(@headerbar_bg_color, 0.85);
+    border-bottom: 1px solid alpha(@borders, 0.35);
+}
+
+.trash-banner-title {
+    font-weight: 500;
+}
+

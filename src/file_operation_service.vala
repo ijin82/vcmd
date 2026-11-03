@@ -77,6 +77,12 @@ namespace VCommander {
         }
 
         public static async void delete_recursive(File file, Cancellable? cancellable = null) throws Error {
+            // Files in trash:/// cannot have individual sub-items modified; deleting the trash item deletes the entry
+            if (file.get_uri_scheme() == "trash") {
+                yield file.delete_async(Priority.DEFAULT, cancellable);
+                return;
+            }
+
             var info = yield file.query_info_async(
                 FileAttribute.STANDARD_TYPE,
                 FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
@@ -108,6 +114,76 @@ namespace VCommander {
             }
 
             yield file.delete_async(Priority.DEFAULT, cancellable);
+        }
+
+        public static async void restore_trash_file(
+            File trash_file,
+            string orig_path,
+            bool overwrite,
+            Cancellable? cancellable = null
+        ) throws Error {
+            var dest_file = File.new_for_path(orig_path);
+            var parent_dir = dest_file.get_parent();
+            if (parent_dir != null && !parent_dir.query_exists(cancellable)) {
+                parent_dir.make_directory_with_parents(cancellable);
+            }
+
+            if (overwrite && dest_file.query_exists(cancellable)) {
+                try {
+                    yield dest_file.delete_async(Priority.DEFAULT, cancellable);
+                } catch (Error e) {
+                    yield delete_recursive(dest_file, cancellable);
+                }
+            }
+
+            FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
+            if (overwrite) {
+                flags |= FileCopyFlags.OVERWRITE;
+            }
+
+            try {
+                yield trash_file.move_async(dest_file, flags, Priority.DEFAULT, cancellable, null);
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || e.matches(IOError.quark(), IOError.WOULD_RECURSE)) {
+                    yield copy_file_or_dir(trash_file, dest_file, overwrite, cancellable);
+                    yield trash_file.delete_async(Priority.DEFAULT, cancellable);
+                } else {
+                    throw e;
+                }
+            }
+        }
+
+        public static async void empty_trash(Cancellable? cancellable = null) throws Error {
+            var trash_root = File.new_for_uri("trash:///");
+            var enumerator = yield trash_root.enumerate_children_async(
+                FileAttribute.STANDARD_NAME,
+                FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                Priority.DEFAULT,
+                cancellable
+            );
+
+            while (true) {
+                if (cancellable != null && cancellable.is_cancelled()) {
+                    throw new IOError.CANCELLED("Operation cancelled");
+                }
+                var files = yield enumerator.next_files_async(25, Priority.DEFAULT, cancellable);
+                if (files == null || files.length() == 0) {
+                    break;
+                }
+                foreach (var child_info in files) {
+                    if (cancellable != null && cancellable.is_cancelled()) {
+                        throw new IOError.CANCELLED("Operation cancelled");
+                    }
+                    var child = trash_root.get_child(child_info.get_name());
+                    try {
+                        yield child.delete_async(Priority.DEFAULT, cancellable);
+                    } catch (Error e) {
+                        try {
+                            yield delete_recursive(child, cancellable);
+                        } catch (Error e2) {}
+                    }
+                }
+            }
         }
 
         public static async int64 calculate_total_size(File file, Cancellable? cancellable = null) {

@@ -61,6 +61,18 @@ namespace VCommander {
         private Gtk.ColumnViewColumn time_col;
         private Gtk.ColumnViewColumn dummy_col;
 
+        // Trash columns for Detailed View
+        private Gtk.ColumnViewColumn trash_orig_col;
+        private Gtk.ColumnViewColumn trash_date_col;
+        private bool currently_in_trash_columns = false;
+
+        // Contextual Trash Action Banner
+        private Gtk.Revealer trash_banner_revealer;
+        private Gtk.Box trash_banner_box;
+        private Gtk.Label trash_banner_label;
+        private Gtk.Button trash_empty_btn;
+        private Gtk.Button trash_restore_btn;
+
         // Super Detailed view columns (Name, Owner, Group, Permission, Size, Dummy)
         private Gtk.ColumnViewColumn super_name_col;
         private Gtk.ColumnViewColumn super_owner_col;
@@ -85,6 +97,13 @@ namespace VCommander {
         public signal void sort_changed();
         public signal void view_mode_changed();
         public signal void toggle_hidden_requested();
+        public signal void restore_requested();
+        public signal void empty_trash_requested();
+        public signal void restore_item_requested(FileItem item);
+
+        public bool is_trash_location() {
+            return current_directory != null && current_directory.get_uri_scheme() == "trash";
+        }
 
         public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc", bool start_load = true) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -96,6 +115,7 @@ namespace VCommander {
             store = new ListStore(typeof(FileItem));
 
             build_views();
+            build_trash_banner();
             build_status_bar();
             setup_focus_and_click_handlers();
 
@@ -377,6 +397,113 @@ namespace VCommander {
             dummy_col.id = "dummy";
             dummy_col.resizable = false;
             dummy_col.fixed_width = 1;
+
+            // Trash Original Path Column
+            var trash_orig_factory = new Gtk.SignalListItemFactory();
+            trash_orig_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.ellipsize = Pango.EllipsizeMode.START;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+
+            trash_orig_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.trash_orig_path ?? "";
+                label.tooltip_text = file_item.trash_orig_path;
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("trash_orig_tag_id", tag_handler_id);
+            });
+
+            trash_orig_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("trash_orig_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("trash_orig_tag_id", 0);
+                }
+            });
+
+            trash_orig_col = new Gtk.ColumnViewColumn("Original Path", trash_orig_factory);
+            trash_orig_col.id = "trash_orig";
+            trash_orig_col.expand = true;
+            trash_orig_col.resizable = true;
+            trash_orig_col.fixed_width = 250;
+            trash_orig_col.sorter = new Gtk.CustomSorter((a, b) => {
+                var item_a = (FileItem) a;
+                var item_b = (FileItem) b;
+                if (item_a.is_parent_dir) return -1;
+                if (item_b.is_parent_dir) return 1;
+                return (item_a.trash_orig_path ?? "").collate(item_b.trash_orig_path ?? "");
+            });
+
+            // Trash Date Deleted Column
+            var trash_date_factory = new Gtk.SignalListItemFactory();
+            trash_date_factory.setup.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var label = new Gtk.Label("");
+                label.xalign = 0.0f;
+                label.hexpand = true;
+                list_item.child = label;
+
+                var right_click = new Gtk.GestureClick();
+                right_click.button = 3;
+                right_click.pressed.connect(() => {
+                    on_item_right_clicked(list_item);
+                });
+                label.add_controller(right_click);
+            });
+
+            trash_date_factory.bind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                var label = (Gtk.Label) list_item.child;
+                label.label = file_item.formatted_deletion_date;
+
+                apply_tag_class(label, file_item.is_tagged);
+                ulong tag_handler_id = file_item.notify["is-tagged"].connect(() => {
+                    apply_tag_class(label, file_item.is_tagged);
+                });
+                list_item.set_data<ulong>("trash_date_tag_id", tag_handler_id);
+            });
+
+            trash_date_factory.unbind.connect((item) => {
+                var list_item = (Gtk.ListItem) item;
+                var file_item = (FileItem) list_item.item;
+                ulong tag_handler_id = list_item.get_data<ulong>("trash_date_tag_id");
+                if (tag_handler_id != 0 && file_item != null) {
+                    file_item.disconnect(tag_handler_id);
+                    list_item.set_data<ulong>("trash_date_tag_id", 0);
+                }
+            });
+
+            trash_date_col = new Gtk.ColumnViewColumn("Date Deleted", trash_date_factory);
+            trash_date_col.id = "trash_date";
+            trash_date_col.fixed_width = 160;
+            trash_date_col.resizable = true;
+            trash_date_col.sorter = new Gtk.CustomSorter((a, b) => {
+                var item_a = (FileItem) a;
+                var item_b = (FileItem) b;
+                if (item_a.is_parent_dir) return -1;
+                if (item_b.is_parent_dir) return 1;
+                return (item_a.trash_deletion_date ?? "").collate(item_b.trash_deletion_date ?? "");
+            });
 
             // Apply configured column order
             apply_columns_order(config.col_order);
@@ -794,6 +921,7 @@ namespace VCommander {
                 if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
                     saved_selected_pos = selection_model.selected;
                 }
+                update_trash_restore_button();
             });
 
             column_view.model = selection_model;
@@ -845,6 +973,103 @@ namespace VCommander {
 
             view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
             append(view_stack);
+        }
+
+        private void build_trash_banner() {
+            trash_banner_revealer = new Gtk.Revealer();
+            trash_banner_revealer.transition_type = Gtk.RevealerTransitionType.SLIDE_DOWN;
+            trash_banner_revealer.transition_duration = 200;
+            trash_banner_revealer.reveal_child = false;
+
+            trash_banner_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 10);
+            trash_banner_box.add_css_class("trash-banner");
+
+            var trash_icon = new Gtk.Image.from_icon_name("user-trash-symbolic");
+            trash_icon.pixel_size = 18;
+            trash_banner_box.append(trash_icon);
+
+            trash_banner_label = new Gtk.Label("Trash");
+            trash_banner_label.add_css_class("trash-banner-title");
+            trash_banner_label.xalign = 0.0f;
+            trash_banner_label.hexpand = true;
+            trash_banner_box.append(trash_banner_label);
+
+            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+
+            trash_restore_btn = new Gtk.Button.with_label("Restore Selected");
+            trash_restore_btn.icon_name = "edit-undo-symbolic";
+            trash_restore_btn.add_css_class("suggested-action");
+            trash_restore_btn.tooltip_text = "Restore selected or tagged items to their original locations";
+            trash_restore_btn.sensitive = false;
+            trash_restore_btn.clicked.connect(() => {
+                restore_requested();
+            });
+            btn_box.append(trash_restore_btn);
+
+            trash_empty_btn = new Gtk.Button.with_label("Empty Trash");
+            trash_empty_btn.icon_name = "user-trash-symbolic";
+            trash_empty_btn.add_css_class("destructive-action");
+            trash_empty_btn.tooltip_text = "Permanently delete all items from Trash";
+            trash_empty_btn.sensitive = false;
+            trash_empty_btn.clicked.connect(() => {
+                empty_trash_requested();
+            });
+            btn_box.append(trash_empty_btn);
+
+            trash_banner_box.append(btn_box);
+            trash_banner_revealer.child = trash_banner_box;
+
+            prepend(trash_banner_revealer);
+        }
+
+        public void update_trash_banner_state() {
+            if (trash_banner_revealer == null) return;
+            if (!is_trash_location()) {
+                trash_banner_revealer.reveal_child = false;
+                return;
+            }
+
+            trash_banner_revealer.reveal_child = true;
+
+            uint count = 0;
+            int64 bytes = 0;
+            uint n = store.get_n_items();
+            for (uint i = 0; i < n; i++) {
+                var it = (FileItem) store.get_item(i);
+                if (it != null && !it.is_parent_dir) {
+                    count++;
+                    bytes += it.size;
+                }
+            }
+
+            if (count == 0) {
+                trash_banner_label.label = "Trash is empty";
+                trash_empty_btn.sensitive = false;
+            } else {
+                trash_banner_label.label = @"Trash contains $count items ($(format_size(bytes)))";
+                trash_empty_btn.sensitive = true;
+            }
+
+            update_trash_restore_button();
+        }
+
+        public void update_trash_restore_button() {
+            if (!is_trash_location() || trash_restore_btn == null) return;
+
+            var tagged = get_tagged_items();
+            if (tagged.length > 0) {
+                trash_restore_btn.sensitive = true;
+                trash_restore_btn.label = @"Restore Selected ($(tagged.length))";
+            } else {
+                var sel = get_selected_item();
+                if (sel != null && !sel.is_parent_dir) {
+                    trash_restore_btn.sensitive = true;
+                    trash_restore_btn.label = "Restore Selected";
+                } else {
+                    trash_restore_btn.sensitive = false;
+                    trash_restore_btn.label = "Restore Selected";
+                }
+            }
         }
 
         private void build_filter_bar() {
@@ -1525,7 +1750,39 @@ namespace VCommander {
 
             return null;
         }
+        public void update_columns_for_current_location() {
+            bool in_trash = is_trash_location();
+            if (in_trash == currently_in_trash_columns) {
+                return;
+            }
+            currently_in_trash_columns = in_trash;
+
+            var config = ConfigManager.get_instance();
+            bool prev_updating = updating_columns;
+            updating_columns = true;
+
+            var cols_model = column_view.get_columns();
+            while (cols_model.get_n_items() > 0) {
+                column_view.remove_column((Gtk.ColumnViewColumn) cols_model.get_item(0));
+            }
+
+            if (in_trash) {
+                if (name_col != null) column_view.append_column(name_col);
+                if (trash_orig_col != null) column_view.append_column(trash_orig_col);
+                if (size_col != null) column_view.append_column(size_col);
+                if (trash_date_col != null) column_view.append_column(trash_date_col);
+                if (dummy_col != null) column_view.append_column(dummy_col);
+            } else {
+                updating_columns = false;
+                apply_columns_order(config.col_order);
+                updating_columns = true;
+            }
+
+            updating_columns = prev_updating;
+        }
+
         public void apply_columns_order(string[] order) {
+            if (currently_in_trash_columns) return;
             var cols_model = column_view.get_columns();
             uint n = cols_model.get_n_items();
 
@@ -1584,7 +1841,7 @@ namespace VCommander {
         }
 
         private void on_column_items_changed(uint pos, uint removed, uint added) {
-            if (updating_columns) return;
+            if (updating_columns || currently_in_trash_columns) return;
             var cols_model = column_view.get_columns();
             uint n = cols_model.get_n_items();
             if (n == 0) return;
@@ -1603,12 +1860,13 @@ namespace VCommander {
         }
 
         private void on_column_width_changed() {
-            if (updating_columns) return;
+            if (updating_columns || currently_in_trash_columns) return;
             save_columns_to_config();
             columns_layout_changed();
         }
 
         public void save_columns_to_config() {
+            if (currently_in_trash_columns) return;
             var config = ConfigManager.get_instance();
             var cols_model = column_view.get_columns();
             uint n = cols_model.get_n_items();
@@ -1749,6 +2007,7 @@ namespace VCommander {
         }
 
         public void update_status_bar() {
+            update_trash_restore_button();
             if (is_filter_active && filter_entry.text.length > 0) {
                 return;
             }
@@ -1783,6 +2042,8 @@ namespace VCommander {
 
             if (item.is_parent_dir) {
                 go_up();
+            } else if (is_trash_location()) {
+                restore_item_requested(item);
             } else if (item.is_dir) {
                 load_directory(item.file);
             } else {
@@ -1906,6 +2167,8 @@ namespace VCommander {
 
             current_directory = dir;
             directory_changed(dir);
+            update_columns_for_current_location();
+            update_trash_banner_state();
 
             load_directory_async.begin(dir, cursor_select_name, preserved_tags, load_cancellable);
         }
@@ -1955,7 +2218,7 @@ namespace VCommander {
 
             try {
                 var enumerator = yield dir.enumerate_children_async(
-                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode",
+                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode,trash::orig-path,trash::deletion-date",
                     FileQueryInfoFlags.NONE,
                     Priority.DEFAULT,
                     cancellable
@@ -2012,6 +2275,8 @@ namespace VCommander {
             } catch (Error e) {
             }
 
+            update_columns_for_current_location();
+            update_trash_banner_state();
             current_dir_stats = @"$(count_dirs) folders, $(count_files) files ($(format_size(total_bytes)))$(free_space_str)";
             update_status_bar();
 

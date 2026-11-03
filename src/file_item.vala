@@ -16,10 +16,25 @@ namespace VCommander {
         public string owner { get; construct set; default = ""; }
         public string group { get; construct set; default = ""; }
         public uint32 mode { get; construct set; default = 0; }
+        public string? trash_orig_path { get; construct set; default = null; }
+        public string? trash_deletion_date { get; construct set; default = null; }
 
         public bool is_calculating_size { get; set; default = false; }
         public int64 custom_size { get; set; default = -1; }
         public bool is_tagged { get; set; default = false; }
+
+        public string formatted_deletion_date {
+            owned get {
+                if (is_parent_dir || trash_deletion_date == null || trash_deletion_date.length == 0) {
+                    return "";
+                }
+                var dt = new DateTime.from_iso8601(trash_deletion_date, null);
+                if (dt != null) {
+                    return dt.format("%Y-%m-%d %H:%M");
+                }
+                return trash_deletion_date;
+            }
+        }
 
         public string formatted_size {
             owned get {
@@ -196,6 +211,12 @@ namespace VCommander {
                 item_mode = info.get_attribute_uint32("unix::mode");
             }
 
+            string? orig_path = info.get_attribute_byte_string("trash::orig-path");
+            if (orig_path == null || orig_path.length == 0) {
+                orig_path = info.get_attribute_as_string("trash::orig-path");
+            }
+            string? del_date = info.get_attribute_string("trash::deletion-date");
+
             Object(
                 file: file,
                 name: item_name,
@@ -211,7 +232,9 @@ namespace VCommander {
                 file_type: ftype,
                 owner: item_owner,
                 group: item_group,
-                mode: item_mode
+                mode: item_mode,
+                trash_orig_path: orig_path,
+                trash_deletion_date: del_date
             );
         }
 

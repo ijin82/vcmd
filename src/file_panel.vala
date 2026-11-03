@@ -15,6 +15,9 @@ namespace VCommander {
         public signal void tabs_state_changed(FilePanel panel);
         public signal void view_mode_changed(FilePanel panel);
         public signal void toggle_hidden_requested();
+        public signal void restore_requested(FilePanel panel);
+        public signal void empty_trash_requested(FilePanel panel);
+        public signal void restore_item_requested(FilePanel panel, FileItem item);
 
         public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -139,6 +142,13 @@ namespace VCommander {
             }
         }
 
+        public bool is_trash_location {
+            get {
+                var page = get_current_page();
+                return page != null ? page.is_trash_location() : false;
+            }
+        }
+
         public bool is_filter_active {
             get {
                 var page = get_current_page();
@@ -255,6 +265,15 @@ namespace VCommander {
             });
             page_widget.toggle_hidden_requested.connect(() => {
                 toggle_hidden_requested();
+            });
+            page_widget.restore_requested.connect(() => {
+                restore_requested(this);
+            });
+            page_widget.empty_trash_requested.connect(() => {
+                empty_trash_requested(this);
+            });
+            page_widget.restore_item_requested.connect((it) => {
+                restore_item_requested(this, it);
             });
 
             var page = tab_view.append(page_widget);

@@ -23,6 +23,7 @@ namespace VCommander {
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
         private Gtk.Label fn_f5_label;
+        private Gtk.Label fn_f6_label;
         private bool fn_shift_active = false;
         private GenericArray<string> command_history;
         private int history_index = -1;
@@ -519,6 +520,15 @@ row:selected .file-item-tagged {
             right_panel.toggle_hidden_requested.connect(() => {
                 toggle_show_hidden();
             });
+
+            left_panel.restore_requested.connect(on_panel_restore_requested);
+            right_panel.restore_requested.connect(on_panel_restore_requested);
+
+            left_panel.empty_trash_requested.connect(on_panel_empty_trash_requested);
+            right_panel.empty_trash_requested.connect(on_panel_empty_trash_requested);
+
+            left_panel.restore_item_requested.connect(on_panel_restore_item_requested);
+            right_panel.restore_item_requested.connect(on_panel_restore_item_requested);
 
             left_panel.columns_layout_changed.connect((origin) => {
                 var cur_page = origin.get_current_page();
@@ -1202,7 +1212,7 @@ row:selected .file-item-tagged {
             fn_bar.append(create_fn_item("F3", "View", out dummy));
             fn_bar.append(create_fn_item("F4", "Edit", out dummy));
             fn_bar.append(create_fn_item("F5", "Copy", out fn_f5_label));
-            fn_bar.append(create_fn_item("F6", "Move", out dummy));
+            fn_bar.append(create_fn_item("F6", "Move", out fn_f6_label));
             fn_bar.append(create_fn_item("F7", "Mkdir", out dummy));
             fn_bar.append(create_fn_item("F8", "Delete", out dummy));
             fn_bar.append(create_fn_item("F10", "Quit", out dummy));
@@ -1238,6 +1248,13 @@ row:selected .file-item-tagged {
             fn_shift_active = shift_pressed;
             if (fn_f5_label != null) {
                 fn_f5_label.label = shift_pressed ? "Symlink" : "Copy";
+            }
+        }
+
+        private void update_function_bar_trash_state() {
+            if (fn_f6_label != null) {
+                bool in_trash = (active_panel != null && active_panel.is_trash_location);
+                fn_f6_label.label = in_trash ? "Restore" : "Move";
             }
         }
 
@@ -1680,6 +1697,7 @@ row:selected .file-item-tagged {
 
         private void on_panel_directory_changed(File new_dir) {
             update_window_title();
+            update_function_bar_trash_state();
             if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
                 string? p = resolve_local_path_for_file(active_panel.current_directory);
                 if (p != null) {
@@ -1800,6 +1818,7 @@ row:selected .file-item-tagged {
             right_panel.set_active(panel == right_panel);
             update_super_view_layout();
             update_window_title();
+            update_function_bar_trash_state();
             if (console_drawer.visible && active_panel != null && active_panel.current_directory != null) {
                 string? p = resolve_local_path_for_file(active_panel.current_directory);
                 if (p != null) {
@@ -2189,6 +2208,10 @@ row:selected .file-item-tagged {
 
         private void on_f7_mkdir() {
             if (active_panel == null || active_panel.current_directory == null) return;
+            if (active_panel.is_trash_location) {
+                show_error_dialog("Create Folder", "Cannot create folders inside Trash.");
+                return;
+            }
             var current_dir = active_panel.current_directory;
 
             var dialog = new Adw.AlertDialog("Create New Folder", "Enter the name for the new folder:");
@@ -2273,6 +2296,28 @@ row:selected .file-item-tagged {
 
             var tagged_items = target_panel.get_tagged_items();
             if (tagged_items.length > 0) {
+                if (target_panel.is_trash_location) {
+                    var dialog = new Adw.AlertDialog(
+                        "Permanently Delete",
+                        @"Permanently delete $(tagged_items.length) selected items from Trash? This action cannot be undone."
+                    );
+                    dialog.add_response("cancel", "Cancel");
+                    dialog.add_response("delete", "Delete Permanently");
+                    dialog.set_default_response("cancel");
+                    dialog.set_close_response("cancel");
+                    dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                    dialog.choose.begin(this, null, (obj, res) => {
+                        string resp = dialog.choose.end(res);
+                        if (resp == "delete") {
+                            do_delete_multiple_items.begin(target_panel, tagged_items, true, select_above_name);
+                        } else {
+                            target_panel.grab_focus_to_list();
+                        }
+                    });
+                    return;
+                }
+
                 var dialog = new Adw.AlertDialog(
                     "Delete Items",
                     @"Delete $(tagged_items.length) selected items?"
@@ -2310,6 +2355,29 @@ row:selected .file-item-tagged {
             }
 
             string item_name = item.display_name;
+
+            if (target_panel.is_trash_location) {
+                var dialog = new Adw.AlertDialog(
+                    "Permanently Delete",
+                    @"Permanently delete '$item_name' from Trash? This action cannot be undone."
+                );
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("delete", "Delete Permanently");
+                dialog.set_default_response("cancel");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "delete") {
+                        do_delete_item.begin(target_panel, item.file, true, select_above_name);
+                    } else {
+                        target_panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
             string desc = item.is_dir ?
                 @"Delete folder '$item_name' and all its contents?" :
                 @"Delete file '$item_name'?";
@@ -2665,9 +2733,19 @@ row:selected .file-item-tagged {
         private void on_f5_copy() {
             if (active_panel == null) return;
 
+            if (active_panel.is_trash_location) {
+                show_error_dialog("Copy Error", "Cannot copy files from Trash. Please restore them first.");
+                return;
+            }
+
             var tagged_items = active_panel.get_tagged_items();
             var opp = get_opposite_panel();
             File? dest_dir = opp.current_directory;
+
+            if (dest_dir != null && dest_dir.get_uri_scheme() == "trash") {
+                show_error_dialog("Copy Error", "Cannot copy items into Trash. Use Delete (F8) to move items to Trash.");
+                return;
+            }
 
             if (tagged_items.length > 0) {
                 if (dest_dir == null) {
@@ -3093,9 +3171,19 @@ row:selected .file-item-tagged {
         private void on_f6_move() {
             if (active_panel == null) return;
 
+            if (active_panel.is_trash_location) {
+                prompt_restore_trash(active_panel);
+                return;
+            }
+
             var tagged_items = active_panel.get_tagged_items();
             var opp = get_opposite_panel();
             File? dest_dir = opp.current_directory;
+
+            if (dest_dir != null && dest_dir.get_uri_scheme() == "trash") {
+                show_error_dialog("Move Error", "Cannot move items into Trash this way. Use Delete (F8) to move items to Trash.");
+                return;
+            }
 
             if (tagged_items.length > 0) {
                 if (dest_dir == null) {
@@ -3432,6 +3520,216 @@ row:selected .file-item-tagged {
             }
 
             return dest_file;
+        }
+
+        // =========================================================================
+        // Trash Operations: Restore & Empty Trash
+        // =========================================================================
+
+        private void on_panel_restore_requested(FilePanel panel) {
+            prompt_restore_trash(panel);
+        }
+
+        private void prompt_restore_trash(FilePanel panel) {
+            var tagged = panel.get_tagged_items();
+            if (tagged.length > 0) {
+                var dialog = new Adw.AlertDialog(
+                    "Restore Items",
+                    @"Restore $(tagged.length) selected items from Trash to their original locations?"
+                );
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("restore", "Restore");
+                dialog.set_default_response("restore");
+                dialog.set_close_response("cancel");
+                dialog.set_response_appearance("restore", Adw.ResponseAppearance.SUGGESTED);
+
+                dialog.choose.begin(this, null, (obj, res) => {
+                    string resp = dialog.choose.end(res);
+                    if (resp == "restore") {
+                        do_restore_multiple_items.begin(panel, tagged);
+                    } else {
+                        panel.grab_focus_to_list();
+                    }
+                });
+                return;
+            }
+
+            var item = panel.get_selected_item();
+            if (item == null || item.is_parent_dir) {
+                show_error_dialog("Restore", "Please select a file or folder to restore.");
+                return;
+            }
+
+            on_panel_restore_item_requested(panel, item);
+        }
+
+        private void on_panel_restore_item_requested(FilePanel panel, FileItem item) {
+            string orig_path = item.trash_orig_path;
+            if (orig_path == null || orig_path.length == 0) {
+                orig_path = Path.build_filename(Environment.get_home_dir(), item.name);
+            }
+
+            string body = item.trash_orig_path != null
+                ? @"Restore '$(item.display_name)' to its original location?\n\n$orig_path"
+                : @"Restore '$(item.display_name)' from Trash to your Home folder?\n\n$orig_path";
+
+            var dialog = new Adw.AlertDialog("Restore from Trash", body);
+            dialog.add_response("cancel", "Cancel");
+
+            if (item.is_dir) {
+                dialog.add_response("open", "Open Folder");
+            }
+
+            dialog.add_response("restore", "Restore");
+            dialog.set_default_response("restore");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("restore", Adw.ResponseAppearance.SUGGESTED);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "restore") {
+                    prompt_execute_restore_single.begin(panel, item, orig_path);
+                } else if (resp == "open") {
+                    panel.load_directory(item.file);
+                } else {
+                    panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private async void prompt_execute_restore_single(FilePanel panel, FileItem item, string orig_path) {
+            var dest_file = File.new_for_path(orig_path);
+            if (dest_file.query_exists()) {
+                var conflict_dlg = new Adw.AlertDialog(
+                    "File Already Exists",
+                    @"A file or folder already exists at:\n$orig_path\n\nDo you want to overwrite it?"
+                );
+                conflict_dlg.add_response("cancel", "Cancel");
+                conflict_dlg.add_response("overwrite", "Overwrite");
+                conflict_dlg.set_default_response("cancel");
+                conflict_dlg.set_close_response("cancel");
+                conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                conflict_dlg.choose.begin(this, null, (obj, res) => {
+                    string resp = conflict_dlg.choose.end(res);
+                    if (resp == "overwrite") {
+                        do_restore_single_item.begin(panel, item, orig_path, true);
+                    } else {
+                        panel.grab_focus_to_list();
+                    }
+                });
+            } else {
+                yield do_restore_single_item(panel, item, orig_path, false);
+            }
+        }
+
+        private async void do_restore_single_item(FilePanel panel, FileItem item, string orig_path, bool overwrite) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Restoring $(item.display_name)", cancellable);
+            dlg.present(this);
+
+            try {
+                dlg.update_progress(item.display_name, 0, 1);
+                yield FileOperationService.restore_trash_file(item.file, orig_path, overwrite, cancellable);
+                dlg.finish();
+
+                panel.refresh();
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                opp.refresh();
+                panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
+                }
+                panel.refresh();
+                panel.grab_focus_to_list();
+            }
+        }
+
+        private async void do_restore_multiple_items(FilePanel panel, GenericArray<FileItem> items) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Restoring $(items.length) items from Trash", cancellable);
+            dlg.present(this);
+
+            try {
+                for (int i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) break;
+                    var it = items[i];
+                    dlg.update_progress(it.display_name, i + 1, items.length);
+
+                    string orig_path = it.trash_orig_path;
+                    if (orig_path == null || orig_path.length == 0) {
+                        orig_path = Path.build_filename(Environment.get_home_dir(), it.name);
+                    }
+
+                    yield FileOperationService.restore_trash_file(it.file, orig_path, true, cancellable);
+                }
+
+                dlg.finish();
+                if (!cancellable.is_cancelled()) {
+                    panel.clear_tags();
+                }
+                panel.refresh();
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                opp.refresh();
+                panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Restore Error", FileOperationService.format_error(e, "restore"));
+                }
+                panel.refresh();
+                panel.grab_focus_to_list();
+            }
+        }
+
+        private void on_panel_empty_trash_requested(FilePanel panel) {
+            var dialog = new Adw.AlertDialog(
+                "Empty Trash?",
+                "All items in the Trash will be permanently deleted. This action cannot be undone."
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("empty", "Empty Trash");
+            dialog.set_default_response("cancel");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("empty", Adw.ResponseAppearance.DESTRUCTIVE);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "empty") {
+                    do_empty_trash.begin(panel);
+                } else {
+                    panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private async void do_empty_trash(FilePanel panel) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog("Emptying Trash...", cancellable);
+            dlg.present(this);
+
+            try {
+                yield FileOperationService.empty_trash(cancellable);
+                dlg.finish();
+
+                panel.clear_tags();
+                panel.refresh();
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                if (opp.is_trash_location) {
+                    opp.clear_tags();
+                    opp.refresh();
+                }
+                panel.grab_focus_to_list();
+            } catch (Error e) {
+                dlg.finish();
+                if (!e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_error_dialog("Empty Trash Error", FileOperationService.format_error(e, "empty trash"));
+                }
+                panel.refresh();
+                panel.grab_focus_to_list();
+            }
         }
 
         public void save_state() {

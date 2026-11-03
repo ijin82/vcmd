@@ -15,7 +15,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 5** | Directory Bookmarks / Hotlist (`Ctrl+\`) & Modern Dialogs | **Completed (100%)** | Midnight Commander-style directory bookmark popup, modern `Adw.Dialog` migration, customizable dialog dimensions. |
 | **Stage 6** | Search Engine (`Alt+F7`) | **Completed (100%)** | Async recursive search by name mask and file contents. Results open in a Super Detailed tab. The last query is stored in config; the start path comes from the active tab. |
 | **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Completed (100%)** | F2 connect dialog for SFTP, FTP, and SMB. Bookmarks store the URI without a password. Drives & Locations menu (`Ctrl+F1`). |
-| **Stage 8** | Trash Management & File Recovery (`trash:///`) | **Planned (Complexity: Low)** | Contextual Trash banner, Empty Trash confirmation, Restore Selected files (`trash::orig-path`), permanent delete (F8). |
+| **Stage 8** | Trash Management & File Recovery (`trash:///`) | **Completed (100%)** | Contextual Trash banner, Empty Trash confirmation, Restore Selected files (`trash::orig-path`), permanent delete (F8). |
 | **Stage 9** | Non-Blocking Background Operations & Minimized Progress | **Planned (Complexity: Moderate)** | Minimizable copy/move dialogs into a toolbar progress indicator button/popover, allowing non-blocking workflow during heavy transfers. |
 | **Stage 10** | Icon / Thumbnail Grid View & Live Background Thumbnail Engine | **Planned (Complexity: High)** | Single/dual-pane image & video thumbnail grid view (30–300px), Ctrl++/Ctrl+-/scroll zoom, atomic background worker pool (`~/.config/vcmd/thumbnails/`), crash recovery, streaming live updates without UI jumps. |
 
@@ -199,18 +199,18 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 
 ## Detailed Status by Stage
 
-### [ ] Stage 8: Trash Management & File Recovery (`trash:///`) [Complexity: Low]
-- [ ] Contextual Trash Banner:
+### [x] Stage 8: Trash Management & File Recovery (`trash:///`) [Complexity: Low]
+- [x] Contextual Trash Banner:
   - When the active tab enters `trash:///`, show an action banner directly above the file list:
     - Display trash status: e.g. "Trash contains N items".
     - `Empty Trash` button with destructive styling (`destructive-action`) and confirmation dialog.
     - `Restore Selected` button (`suggested-action`), enabled when one or more files are selected or tagged.
-- [ ] Trash File Operations:
+- [x] Trash File Operations:
   - Reading `trash::orig-path` and `trash::deletion-date` from GIO attributes (`G_FILE_ATTRIBUTE_TRASH_ORIG_PATH`, `G_FILE_ATTRIBUTE_TRASH_DELETION_DATE`).
   - Restore Action: Moves the selected file(s) from `trash:///...` back to their original destination path, recreating any parent directories that were deleted in the meantime.
   - Permanent Delete (`F8` in `trash:///`): Executes permanent deletion (`g_file_delete_async`) instead of re-trashing, with explicit confirmation dialog ("Permanently delete N selected items?").
   - Double-click / Enter on trashed item: Shows dialog offering to either "Restore File" or "Cancel".
-- [ ] Columns in Detailed View for `trash:///`:
+- [x] Columns in Detailed View for `trash:///`:
   - Show "Original Path" and "Date Deleted" columns when browsing `trash:///`.
 
 ---
