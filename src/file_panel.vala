@@ -19,7 +19,7 @@ namespace VCommander {
         public signal void empty_trash_requested(FilePanel panel);
         public signal void restore_item_requested(FilePanel panel, FileItem item);
 
-        public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null) {
+        public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null, bool[]? initial_pinned = null) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
             add_css_class("file-panel");
 
@@ -30,6 +30,7 @@ namespace VCommander {
             tab_bar.autohide = false;
 
             var bar_click = new Gtk.GestureClick();
+            bar_click.set_button(0);
             bar_click.pressed.connect(() => {
                 if (!is_active) {
                     panel_activated(this);
@@ -43,11 +44,18 @@ namespace VCommander {
             tab_view.page_attached.connect(on_tab_page_attached);
             tab_view.close_page.connect(on_tab_close_page);
             tab_view.page_reordered.connect((p, pos) => {
+                sync_tab_bar_pins();
                 if (!initializing) {
                     tabs_state_changed(this);
                 }
             });
             tab_view.notify["selected-page"].connect(on_tab_selection_changed);
+            tab_view.indicator_activated.connect(on_tab_indicator_activated);
+
+            setup_tab_context_menu();
+            tab_bar.map.connect(() => {
+                sync_tab_bar_pins();
+            });
 
             // Open initial tabs:
             // 1. If path is a remote host, do not reconnect on startup; open home directory instead.
@@ -89,7 +97,8 @@ namespace VCommander {
                     if (view_modes != null && i < view_modes.length && view_modes[i] != null && view_modes[i].length > 0) {
                         vmode = view_modes[i];
                     }
-                    open_new_tab(f, vmode, hidden, title, scol, sord);
+                    bool is_p = (initial_pinned != null && i < initial_pinned.length) ? initial_pinned[i] : false;
+                    open_new_tab(f, vmode, hidden, title, scol, sord, false, is_p);
                 }
             }
 
@@ -99,7 +108,7 @@ namespace VCommander {
                 if (view_modes != null && view_modes.length > 0 && view_modes[0] != null && view_modes[0].length > 0) {
                     fallback_vmode = view_modes[0];
                 }
-                open_new_tab(home, fallback_vmode, hidden, null, "name", "asc");
+                open_new_tab(home, fallback_vmode, hidden, null, "name", "asc", false, false);
             }
 
             if (active_index >= 0 && active_index < tab_view.n_pages) {
@@ -241,7 +250,7 @@ namespace VCommander {
             }
         }
 
-        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc", bool defer_load = false) {
+        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc", bool defer_load = false, bool is_pinned = false) {
             File target_dir = dir;
             string vmode = view_mode_str;
             if (target_dir == null) {
@@ -258,6 +267,7 @@ namespace VCommander {
             var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order, !defer_load);
             page_widget.hexpand = true;
             page_widget.vexpand = true;
+            page_widget.is_pinned = is_pinned;
             if (custom_title != null && custom_title.length > 0) {
                 page_widget.custom_title = custom_title;
             }
@@ -316,11 +326,17 @@ namespace VCommander {
         }
 
         public void close_current_tab() {
+            var page = tab_view.selected_page;
+            if (page != null) {
+                var page_widget = page.child as FilePanelPage;
+                if (page_widget != null && page_widget.is_pinned) {
+                    return; // Protected: pinned tab cannot be closed
+                }
+            }
             if (tab_view.n_pages <= 1) {
                 // Protect last remaining tab from closing
                 return;
             }
-            var page = tab_view.selected_page;
             if (page != null) {
                 tab_view.close_page(page);
             }
@@ -345,8 +361,12 @@ namespace VCommander {
         }
 
         public void prompt_rename_current_tab(Gtk.Window parent_window) {
-            var selected_page = tab_view.selected_page;
-            if (selected_page == null) return;
+            prompt_rename_tab(tab_view.selected_page, parent_window);
+        }
+
+        public void prompt_rename_tab(Adw.TabPage? target_page, Gtk.Window parent_window) {
+            if (target_page == null) return;
+            var selected_page = target_page;
 
             var page_widget = (FilePanelPage) selected_page.child;
 
@@ -421,15 +441,19 @@ namespace VCommander {
         }
 
         private bool on_tab_close_page(Adw.TabPage page) {
+            var page_widget = page.child as FilePanelPage;
+            if (page_widget != null && page_widget.is_pinned) {
+                return true; // prevent closing pinned tab
+            }
             if (tab_view.n_pages <= 1) {
                 return true; // prevent closing last tab
             }
-            var page_widget = page.child as FilePanelPage;
             if (page_widget != null) {
                 page_widget.cleanup();
             }
             tab_view.close_page_finish(page, true);
             grab_focus_to_list();
+            sync_tab_bar_pins();
             if (!initializing) {
                 tabs_state_changed(this);
             }
@@ -505,6 +529,11 @@ namespace VCommander {
             } else {
                 page.title = "Tab";
             }
+
+            page.indicator_icon = new ThemedIcon("view-pin-symbolic");
+            page.indicator_activatable = true;
+            page.indicator_tooltip = page_widget.is_pinned ? "Pinned (click to unpin)" : "Pin tab";
+            sync_tab_bar_pins();
         }
 
         public void set_active(bool active) {
@@ -727,6 +756,206 @@ namespace VCommander {
             var selected = tab_view.selected_page;
             if (selected == null) return 0;
             return tab_view.get_page_position(selected);
+        }
+
+        private void on_tab_indicator_activated(Adw.TabPage page) {
+            var page_widget = page.child as FilePanelPage;
+            if (page_widget != null) {
+                toggle_tab_pinned(page_widget);
+            }
+        }
+
+        public void toggle_tab_pinned(FilePanelPage page_widget) {
+            page_widget.is_pinned = !page_widget.is_pinned;
+            update_tab_title(page_widget);
+            sync_tab_bar_pins();
+            if (!initializing) {
+                tabs_state_changed(this);
+            }
+        }
+
+        public void toggle_current_tab_pinned() {
+            var current = get_current_page();
+            if (current != null) {
+                toggle_tab_pinned(current);
+            }
+        }
+
+        public void close_other_tabs(Adw.TabPage? keep_page = null) {
+            var target = keep_page ?? tab_view.selected_page;
+            if (target == null) return;
+            var to_close = new GenericArray<Adw.TabPage>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                if (p != target) {
+                    var pw = p.child as FilePanelPage;
+                    if (pw != null && !pw.is_pinned) {
+                        to_close.add(p);
+                    }
+                }
+            }
+            for (uint i = 0; i < to_close.length; i++) {
+                tab_view.close_page(to_close.get(i));
+            }
+        }
+
+        private void find_adw_tab_widgets(Gtk.Widget widget, GenericArray<Gtk.Widget> list) {
+            if (widget.get_css_name() == "tab") {
+                list.add(widget);
+            }
+            var child = widget.get_first_child();
+            while (child != null) {
+                find_adw_tab_widgets(child, list);
+                child = child.get_next_sibling();
+            }
+        }
+
+        public void apply_tab_bar_pins() {
+            var tabs = new GenericArray<Gtk.Widget>();
+            find_adw_tab_widgets(tab_bar, tabs);
+
+            for (uint i = 0; i < tabs.length; i++) {
+                var tab_widget = tabs.get(i);
+                GLib.Value val = GLib.Value(typeof(Adw.TabPage));
+                tab_widget.get_property("page", ref val);
+                var page = (Adw.TabPage) val.get_object();
+                if (page == null) continue;
+
+                var page_widget = page.child as FilePanelPage;
+                if (page_widget == null) continue;
+
+                bool pinned = page_widget.is_pinned;
+
+                page.indicator_tooltip = pinned ? "Pinned (click to unpin)" : "Pin tab";
+
+                if (pinned) {
+                    tab_widget.add_css_class("pinned-tab");
+                } else {
+                    tab_widget.remove_css_class("pinned-tab");
+                }
+
+                var sub = tab_widget.get_first_child();
+                while (sub != null) {
+                    if (sub.has_css_class("tab-close-button")) {
+                        sub.set_visible(!pinned);
+                        sub.sensitive = !pinned;
+                    }
+                    sub = sub.get_next_sibling();
+                }
+            }
+        }
+
+        public void sync_tab_bar_pins() {
+            apply_tab_bar_pins();
+            GLib.Idle.add(() => {
+                apply_tab_bar_pins();
+                return GLib.Source.REMOVE;
+            });
+        }
+
+        public bool[] get_tab_pinned_states() {
+            var pinned = new GenericArray<bool>();
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                pinned.add(pw.is_pinned);
+            }
+            var result = new bool[pinned.length];
+            for (int i = 0; i < pinned.length; i++) {
+                result[i] = pinned[i];
+            }
+            return result;
+        }
+
+        private Adw.TabPage? menu_target_page = null;
+        private GLib.Menu tab_menu;
+
+        private void setup_tab_context_menu() {
+            var group = new SimpleActionGroup();
+
+            var act_pin = new SimpleAction("toggle_pin", null);
+            act_pin.activate.connect(() => {
+                var p = menu_target_page ?? tab_view.selected_page;
+                if (p != null) {
+                    var pw = p.child as FilePanelPage;
+                    if (pw != null) toggle_tab_pinned(pw);
+                }
+            });
+            group.add_action(act_pin);
+
+            var act_rename = new SimpleAction("rename_tab", null);
+            act_rename.activate.connect(() => {
+                var root = get_root() as Gtk.Window;
+                if (root != null) {
+                    prompt_rename_tab(menu_target_page ?? tab_view.selected_page, root);
+                }
+            });
+            group.add_action(act_rename);
+
+            var act_close = new SimpleAction("close_tab", null);
+            act_close.activate.connect(() => {
+                var p = menu_target_page ?? tab_view.selected_page;
+                if (p != null) {
+                    var pw = p.child as FilePanelPage;
+                    if (pw != null && !pw.is_pinned && tab_view.n_pages > 1) {
+                        tab_view.close_page(p);
+                    }
+                }
+            });
+            group.add_action(act_close);
+
+            var act_close_others = new SimpleAction("close_other_tabs", null);
+            act_close_others.activate.connect(() => {
+                var p = menu_target_page ?? tab_view.selected_page;
+                if (p != null) {
+                    close_other_tabs(p);
+                }
+            });
+            group.add_action(act_close_others);
+
+            var act_new = new SimpleAction("new_tab", null);
+            act_new.activate.connect(() => {
+                open_new_tab();
+            });
+            group.add_action(act_new);
+
+            insert_action_group("tabmenu", group);
+            tab_bar.insert_action_group("tabmenu", group);
+            tab_view.insert_action_group("tabmenu", group);
+
+            tab_menu = new GLib.Menu();
+            populate_tab_menu(null);
+            tab_view.set_menu_model(tab_menu);
+
+            tab_view.setup_menu.connect((page) => {
+                menu_target_page = page;
+                if (page != null && !is_active) {
+                    panel_activated(this);
+                }
+                populate_tab_menu(page);
+            });
+        }
+
+        private void populate_tab_menu(Adw.TabPage? page) {
+            tab_menu.remove_all();
+
+            var target_page = page ?? tab_view.selected_page;
+            var pw = target_page != null ? target_page.child as FilePanelPage : null;
+            bool is_pinned = (pw != null && pw.is_pinned);
+
+            tab_menu.append(is_pinned ? "Unpin Tab" : "Pin Tab", "tabmenu.toggle_pin");
+            tab_menu.append("Rename Tab…", "tabmenu.rename_tab");
+
+            var close_section = new GLib.Menu();
+            if (!is_pinned && tab_view.n_pages > 1) {
+                close_section.append("Close Tab", "tabmenu.close_tab");
+            }
+            close_section.append("Close Other Tabs", "tabmenu.close_other_tabs");
+            tab_menu.append_section(null, close_section);
+
+            var new_section = new GLib.Menu();
+            new_section.append("New Tab", "tabmenu.new_tab");
+            tab_menu.append_section(null, new_section);
         }
     }
 }

@@ -40,6 +40,34 @@ tabboxchild > tab {
     border-radius: 4px;
 }
 
+/* Tab pin indicator & close button rules */
+tab button.tab-indicator {
+    padding: 0 3px;
+    opacity: 0.35;
+    transition: opacity 150ms ease, color 150ms ease;
+}
+
+tab button.tab-indicator:hover {
+    opacity: 0.9;
+}
+
+tab.pinned-tab button.tab-indicator {
+    color: @accent_color;
+    opacity: 1.0;
+}
+
+tab.pinned-tab button.tab-indicator:hover {
+    color: alpha(@accent_color, 0.8);
+}
+
+tab.pinned-tab button.tab-close-button {
+    opacity: 0;
+    min-width: 0px;
+    min-height: 0px;
+    padding: 0px;
+    margin: 0px;
+}
+
 .panel-header {
     padding: 6px 8px;
     background-color: alpha(@headerbar_bg_color, 0.6);

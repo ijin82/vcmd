@@ -31,6 +31,7 @@ namespace VCommander {
         public bool is_grid_view { get { return view_mode == PanelViewMode.GRID; } }
         public bool is_active { get; private set; default = false; }
         public string? custom_title { get; set; default = null; }
+        public bool is_pinned { get; set; default = false; }
 
         private ListStore store;
         private Gtk.CustomFilter custom_filter;

@@ -236,6 +236,27 @@ namespace VCommander {
         }
 
         private void handle_eject(LocationItem item) {
+            File? target_root = item.file;
+            if (target_root == null && item.mount != null) {
+                target_root = item.mount.get_root();
+            }
+            if (target_root != null) {
+                window.handle_mount_removed(target_root);
+            }
+
+            // Evacuate any other mounts belonging to this same drive or volume as well
+            var all_mounts = VolumeMonitor.get().get_mounts();
+            foreach (var m in all_mounts) {
+                if ((item.drive != null && m.get_drive() == item.drive) ||
+                    (item.volume != null && m.get_volume() == item.volume) ||
+                    (item.mount != null && m == item.mount)) {
+                    var m_root = m.get_root();
+                    if (m_root != null) {
+                        window.handle_mount_removed(m_root);
+                    }
+                }
+            }
+
             VolumeService.get_instance().unmount_or_eject.begin(item, window, (obj, res) => {
                 bool ok = VolumeService.get_instance().unmount_or_eject.end(res);
                 if (ok) {
@@ -248,8 +269,8 @@ namespace VCommander {
                         action_msg = "Safely removed: ";
                     }
                     window.show_command_toast(action_msg + item.name);
-                    if (item.file != null) {
-                        window.handle_mount_removed(item.file);
+                    if (target_root != null) {
+                        window.handle_mount_removed(target_root);
                     }
                 } else {
                     window.show_command_toast("Could not eject: " + item.name);

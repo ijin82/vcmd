@@ -25,6 +25,10 @@ copy_files() {
     chmod 755 "${BIN_DIR}/${APP_NAME}"
 
     mkdir -p "${HOME}/.local/share/vcmd"
+    if [ -f "VERSION" ]; then
+        echo "==> Installing application version to ${HOME}/.local/share/vcmd..."
+        cp -f "VERSION" "${HOME}/.local/share/vcmd/VERSION"
+    fi
     if [ -f "data/style.css" ]; then
         echo "==> Installing application styles to ${HOME}/.local/share/vcmd..."
         cp -f "data/style.css" "${HOME}/.local/share/vcmd/style.css"

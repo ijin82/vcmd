@@ -7,13 +7,6 @@ namespace VCommander {
             if (uri != null && !uri.has_prefix("file://")) {
                 string scheme = file.get_uri_scheme();
                 if (scheme != null && scheme.length > 0) {
-                    try {
-                        var mount = file.find_enclosing_mount(null);
-                        if (mount != null) {
-                            return mount.get_root().get_uri();
-                        }
-                    } catch (Error e) {}
-
                     string[] parts = uri.split("/");
                     if (parts.length >= 3 && parts[2].length > 0) {
                         return @"$scheme://$(parts[2])";
@@ -34,23 +27,78 @@ namespace VCommander {
         }
 
         public static string get_path_disk_id(string path) {
-            string cur_path = path;
-            while (!FileUtils.test(cur_path, FileTest.EXISTS)) {
-                string parent = Path.get_dirname(cur_path);
-                if (parent == cur_path || parent.length == 0) break;
-                cur_path = parent;
+            string? majmin = find_mountinfo_majmin(path);
+            if (majmin != null) {
+                string disk = resolve_sysfs_disk_id(majmin);
+                if (disk.length > 0 && disk != "unknown") {
+                    return disk;
+                }
             }
 
-            Posix.Stat st;
-            if (Posix.stat(cur_path, out st) != 0) {
-                return "unknown";
+            // Fallback: in-memory stat only if mountinfo is not available
+            return fallback_stat_disk_id(path);
+        }
+
+        private static string unescape_mountinfo_path(string s) {
+            if (!s.contains("\\")) return s;
+            var sb = new StringBuilder();
+            int len = s.length;
+            for (int i = 0; i < len; i++) {
+                if (s[i] == '\\' && i + 3 < len &&
+                    s[i+1] >= '0' && s[i+1] <= '7' &&
+                    s[i+2] >= '0' && s[i+2] <= '7' &&
+                    s[i+3] >= '0' && s[i+3] <= '7') {
+                    int code = (s[i+1] - '0') * 64 + (s[i+2] - '0') * 8 + (s[i+3] - '0');
+                    sb.append_c((char) code);
+                    i += 3;
+                } else {
+                    sb.append_c(s[i]);
+                }
             }
+            return sb.str;
+        }
 
-            uint64 dev = (uint64) st.st_dev;
-            uint maj = (uint) (((dev >> 8) & 0xfff) | ((dev >> 32) & ~0xfff));
-            uint min = (uint) ((dev & 0xff) | ((dev >> 12) & ~0xff));
+        private static string? find_mountinfo_majmin(string target_path) {
+            try {
+                var file = File.new_for_path("/proc/self/mountinfo");
+                if (!file.query_exists()) return null;
 
-            string sys_block = @"/sys/dev/block/$maj:$min";
+                var dis = new DataInputStream(file.read());
+                string? line = null;
+                string? best_mount = null;
+                string? best_majmin = null;
+
+                while ((line = dis.read_line(null)) != null) {
+                    string[] parts = line.strip().split(" ");
+                    if (parts.length >= 5) {
+                        string majmin = parts[2];
+                        string mount_point = unescape_mountinfo_path(parts[4]);
+
+                        bool matches = false;
+                        if (target_path == mount_point) {
+                            matches = true;
+                        } else if (mount_point == "/") {
+                            matches = true;
+                        } else if (target_path.has_prefix(mount_point + "/")) {
+                            matches = true;
+                        }
+
+                        if (matches) {
+                            if (best_mount == null || mount_point.length > best_mount.length) {
+                                best_mount = mount_point;
+                                best_majmin = majmin;
+                            }
+                        }
+                    }
+                }
+                return best_majmin;
+            } catch (Error e) {
+                return null;
+            }
+        }
+
+        private static string resolve_sysfs_disk_id(string majmin) {
+            string sys_block = @"/sys/dev/block/$majmin";
             string? real_sys_path = null;
             try {
                 real_sys_path = FileUtils.read_link(sys_block);
@@ -59,7 +107,7 @@ namespace VCommander {
             }
 
             if (real_sys_path == null) {
-                return @"dev_$dev";
+                return @"dev_$majmin";
             }
 
             string full_sys_path = real_sys_path;
@@ -101,6 +149,27 @@ namespace VCommander {
             return extract_disk_name_from_sysfs(full_sys_path);
         }
 
+        private static string fallback_stat_disk_id(string path) {
+            string cur_path = path;
+            int depth = 0;
+            while (!FileUtils.test(cur_path, FileTest.EXISTS) && depth < 20) {
+                string parent = Path.get_dirname(cur_path);
+                if (parent == cur_path || parent.length == 0) break;
+                cur_path = parent;
+                depth++;
+            }
+
+            Posix.Stat st;
+            if (Posix.stat(cur_path, out st) != 0) {
+                return "unknown";
+            }
+
+            uint64 dev = (uint64) st.st_dev;
+            uint maj = (uint) (((dev >> 8) & 0xfff) | ((dev >> 32) & ~0xfff));
+            uint min = (uint) ((dev & 0xff) | ((dev >> 12) & ~0xff));
+            return resolve_sysfs_disk_id(@"$maj:$min");
+        }
+
         private static string extract_disk_name_from_sysfs(string sys_path) {
             string part_file = Path.build_filename(sys_path, "partition");
             if (FileUtils.test(part_file, FileTest.EXISTS)) {
@@ -120,7 +189,8 @@ namespace VCommander {
                 foreach (var m in mounts) {
                     var r = m.get_root();
                     string? p = r.get_path();
-                    if (p != null && FileUtils.test(p, FileTest.EXISTS)) {
+                    if (p != null) {
+                        // get_path_disk_id uses /proc/self/mountinfo in RAM (zero disk I/O)
                         if (get_path_disk_id(p) == disk_id) {
                             return @"$(m.get_name()) ($disk_id)";
                         }

@@ -26,6 +26,7 @@ namespace VCommander {
         private GenericArray<OperationProgressDialog> background_tasks;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
+        private Gtk.Label fn_f1_label;
         private Gtk.Label fn_f2_label;
         private Gtk.Label fn_f5_label;
         private Gtk.Label fn_f6_label;
@@ -453,9 +454,10 @@ row:selected .file-item-tagged {
 
             // Header Bar
             header_bar = new Adw.HeaderBar();
-            title_label = new Gtk.Label("Vala Commander");
+            title_label = new Gtk.Label(@"Vala Commander $(ConfigManager.get_version())");
             title_label.add_css_class("title");
             title_label.ellipsize = Pango.EllipsizeMode.START;
+            title_label.tooltip_text = @"Vala Commander $(ConfigManager.get_version())";
             header_bar.title_widget = title_label;
 
             var log_button = new Gtk.Button.from_icon_name("text-x-generic-symbolic");
@@ -533,6 +535,20 @@ row:selected .file-item-tagged {
                 update_operations_button();
             });
 
+            var vol_service = VolumeService.get_instance();
+            vol_service.mount_pre_unmount_detected.connect((m) => {
+                var root = m.get_root();
+                if (root != null) {
+                    handle_mount_removed(root);
+                }
+            });
+            vol_service.mount_removed_detected.connect((m) => {
+                var root = m.get_root();
+                if (root != null) {
+                    handle_mount_removed(root);
+                }
+            });
+
             var op_btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
             var op_icon = new Gtk.Image.from_icon_name("folder-download-symbolic");
             op_icon.pixel_size = 16;
@@ -551,8 +567,8 @@ row:selected .file-item-tagged {
             paned.vexpand = true;
             paned.wide_handle = true;
 
-            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.show_hidden, config.left_sort_cols, config.left_sort_orders, config.left_view_modes);
-            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.show_hidden, config.right_sort_cols, config.right_sort_orders, config.right_view_modes);
+            left_panel = new FilePanel(config.left_tabs, config.left_tab_titles, config.left_active_tab, config.left_brief_view, config.show_hidden, config.left_sort_cols, config.left_sort_orders, config.left_view_modes, config.left_pinned_tabs);
+            right_panel = new FilePanel(config.right_tabs, config.right_tab_titles, config.right_active_tab, config.right_brief_view, config.show_hidden, config.right_sort_cols, config.right_sort_orders, config.right_view_modes, config.right_pinned_tabs);
 
             left_panel.panel_activated.connect(on_panel_activated);
             right_panel.panel_activated.connect(on_panel_activated);
@@ -1294,7 +1310,7 @@ row:selected .file-item-tagged {
             fn_bar.visible = config.show_function_bar;
 
             Gtk.Label dummy;
-            fn_bar.append(create_fn_item("F1", "Help", out dummy, () => { ShortcutsDialog.show(this); }));
+            fn_bar.append(create_fn_item("F1", "Help", out fn_f1_label, () => { on_fn_f1_clicked(); }));
             fn_bar.append(create_fn_item("F2", "Connect", out fn_f2_label, () => { on_fn_f2_clicked(); }));
             fn_bar.append(create_fn_item("F3", "View", out dummy, () => { on_f3_view(); }));
             fn_bar.append(create_fn_item("F4", "Edit", out dummy, () => { on_f4_edit(); }));
@@ -1338,6 +1354,14 @@ row:selected .file-item-tagged {
             return item_box;
         }
 
+        private void on_fn_f1_clicked() {
+            if (fn_shift_active) {
+                show_about_dialog(this);
+            } else {
+                ShortcutsDialog.show(this);
+            }
+        }
+
         private void on_fn_f2_clicked() {
             if (fn_shift_active) {
                 on_pack_archive();
@@ -1367,6 +1391,9 @@ row:selected .file-item-tagged {
         private void update_function_bar_shift_state(bool shift_pressed) {
             if (fn_shift_active == shift_pressed) return;
             fn_shift_active = shift_pressed;
+            if (fn_f1_label != null) {
+                fn_f1_label.label = shift_pressed ? "About" : "Help";
+            }
             if (fn_f2_label != null) {
                 fn_f2_label.label = shift_pressed ? "Pack" : "Connect";
             }
@@ -1418,6 +1445,12 @@ row:selected .file-item-tagged {
                     // Ctrl+Shift+V: paste from clipboard
                     if (latin_key == Gdk.Key.v && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
                         if (vte_terminal != null) vte_terminal.paste_clipboard();
+                        return Gdk.EVENT_STOP;
+                    }
+
+                    // Shift+F1: About
+                    if (keyval == Gdk.Key.F1 && (state & Gdk.ModifierType.SHIFT_MASK) != 0 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                        show_about_dialog(this);
                         return Gdk.EVENT_STOP;
                     }
 
@@ -1637,6 +1670,14 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // Ctrl+Shift+P: toggle pin on current tab
+                if (latin_key == Gdk.Key.p && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
+                    if (active_panel != null) {
+                        active_panel.toggle_current_tab_pinned();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
                 // Alt+T: cycle view mode (Brief -> Detailed -> Super Detailed) for active panel
                 if (latin_key == Gdk.Key.t && (state & Gdk.ModifierType.ALT_MASK) != 0) {
                     if (active_panel != null) {
@@ -1722,6 +1763,12 @@ row:selected .file-item-tagged {
                     if (active_panel != null && active_panel.handle_right_arrow()) {
                         return Gdk.EVENT_STOP;
                     }
+                }
+
+                // Shift+F1: About Vala Commander
+                if (keyval == Gdk.Key.F1 && (state & Gdk.ModifierType.SHIFT_MASK) != 0 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    show_about_dialog(this);
+                    return Gdk.EVENT_STOP;
                 }
 
                 // Ctrl+F1: Drives & Locations
@@ -1866,6 +1913,7 @@ row:selected .file-item-tagged {
 
         private void update_window_title() {
             if (title_label == null) return;
+            string ver = ConfigManager.get_version();
             string? cur_path = null;
             if (active_panel != null && active_panel.current_directory != null) {
                 var dir = active_panel.current_directory;
@@ -1902,11 +1950,13 @@ row:selected .file-item-tagged {
                             break;
                     }
                 }
-                title_label.label = @"[ $cur_path ] — $mode — Vala Commander";
-                title = @"[ $cur_path ] — $mode — Vala Commander";
+                title_label.label = @"[ $cur_path ] — $mode — Vala Commander $ver";
+                title_label.tooltip_text = @"[ $cur_path ] — $mode — Vala Commander $ver";
+                title = @"[ $cur_path ] — $mode — Vala Commander $ver";
             } else {
-                title_label.label = "Vala Commander";
-                title = "Vala Commander";
+                title_label.label = @"Vala Commander $ver";
+                title_label.tooltip_text = @"Vala Commander $ver";
+                title = @"Vala Commander $ver";
             }
         }
 
@@ -2150,16 +2200,62 @@ row:selected .file-item-tagged {
         public void handle_mount_removed(File unmounted_root) {
             check_and_fallback_panel_dir(left_panel, unmounted_root);
             check_and_fallback_panel_dir(right_panel, unmounted_root);
+
+            // Also check console drawer terminal working directory
+            string? unmounted_path = unmounted_root.get_path();
+            if (unmounted_path != null && terminal_child_pid > 1) {
+                try {
+                    string shell_cwd = FileUtils.read_link(@"/proc/$terminal_child_pid/cwd");
+                    if (shell_cwd == unmounted_path || shell_cwd.has_prefix(unmounted_path + "/")) {
+                        string home_path = Environment.get_home_dir();
+                        sync_terminal_directory(home_path);
+                    }
+                } catch (Error e) {
+                    // ignore
+                }
+            }
+
+            save_state();
         }
 
         private void check_and_fallback_panel_dir(FilePanel panel, File unmounted_root) {
             var home = File.new_for_path(Environment.get_home_dir());
+            string? unmounted_path = unmounted_root.get_path();
+            string unmounted_uri = unmounted_root.get_uri();
+            string unmounted_uri_slash = unmounted_uri.has_suffix("/") ? unmounted_uri : (unmounted_uri + "/");
+
             for (int i = 0; i < panel.tab_view.n_pages; i++) {
                 var page = panel.tab_view.get_nth_page(i);
                 if (page != null && page.child is FilePanelPage) {
                     var panel_page = (FilePanelPage) page.child;
                     var cur = panel_page.current_directory;
-                    if (cur != null && (cur.equal(unmounted_root) || cur.has_prefix(unmounted_root))) {
+                    if (cur == null) continue;
+
+                    bool match = cur.equal(unmounted_root) || cur.has_prefix(unmounted_root);
+                    if (!match && unmounted_path != null) {
+                        string? cur_path = cur.get_path();
+                        if (cur_path != null) {
+                            if (cur_path == unmounted_path || cur_path.has_prefix(unmounted_path + "/")) {
+                                match = true;
+                            }
+                        }
+                    }
+                    if (!match) {
+                        string cur_uri = cur.get_uri();
+                        if (cur_uri == unmounted_uri || cur_uri.has_prefix(unmounted_uri_slash)) {
+                            match = true;
+                        } else if (unmounted_path != null && cur_uri.has_prefix("archive://")) {
+                            string? arc_path;
+                            string? in_path;
+                            if (ArchiveTreeService.split_archive_uri(cur_uri, out arc_path, out in_path)) {
+                                if (arc_path != null && (arc_path == unmounted_path || arc_path.has_prefix(unmounted_path + "/"))) {
+                                    match = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (match) {
                         panel_page.load_directory(home);
                     }
                 }
@@ -2475,8 +2571,12 @@ row:selected .file-item-tagged {
             string sort_col_right = right_page.sort_column_id;
             string sort_ord_right = right_page.sort_order_str;
 
+            bool pin_left = left_page.is_pinned;
+            bool pin_right = right_page.is_pinned;
+
             // Apply right state to left panel's active tab
             left_page.custom_title = title_right;
+            left_page.is_pinned = pin_right;
             if (left_page.view_mode != vmode_right) {
                 left_page.switch_view_mode(vmode_right);
             }
@@ -2486,6 +2586,7 @@ row:selected .file-item-tagged {
 
             // Apply left state to right panel's active tab
             right_page.custom_title = title_left;
+            right_page.is_pinned = pin_left;
             if (right_page.view_mode != vmode_left) {
                 right_page.switch_view_mode(vmode_left);
             }
@@ -3501,7 +3602,11 @@ row:selected .file-item-tagged {
             entry.margin_bottom = 8;
             dialog.set_extra_child(entry);
 
+            bool action_executed = false;
+
             entry.activate.connect(() => {
+                if (action_executed) return;
+                action_executed = true;
                 string dest_input = entry.text.strip();
                 dialog.force_close();
                 if (dest_input.length > 0) {
@@ -3511,7 +3616,9 @@ row:selected .file-item-tagged {
 
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
+                if (action_executed) return;
                 if (resp == "copy") {
+                    action_executed = true;
                     string dest_input = entry.text.strip();
                     if (dest_input.length > 0) {
                         prompt_execute_copy.begin(item, dest_input);
@@ -3759,7 +3866,7 @@ row:selected .file-item-tagged {
         }
 
         private async void prompt_execute_copy(FileItem item, string dest_input) {
-            File? dest_target = resolve_dest_file(item, dest_input, "Copy");
+            File? dest_target = yield resolve_dest_file_async(item, dest_input, "Copy");
             if (dest_target == null) return;
 
             if (dest_target.equal(item.file)) {
@@ -3767,7 +3874,8 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            if (dest_target.query_exists()) {
+            bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
+            if (dest_exists) {
                 yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
@@ -3997,7 +4105,7 @@ row:selected .file-item-tagged {
         }
 
         private async void prompt_execute_symlink(FileItem item, string dest_input) {
-            File? dest_target = resolve_dest_file(item, dest_input, "Symlink");
+            File? dest_target = yield resolve_dest_file_async(item, dest_input, "Symlink");
             if (dest_target == null) return;
 
             if (dest_target.equal(item.file)) {
@@ -4193,7 +4301,11 @@ row:selected .file-item-tagged {
             entry.margin_bottom = 8;
             dialog.set_extra_child(entry);
 
+            bool action_executed = false;
+
             entry.activate.connect(() => {
+                if (action_executed) return;
+                action_executed = true;
                 string dest_input = entry.text.strip();
                 dialog.force_close();
                 if (dest_input.length > 0) {
@@ -4203,7 +4315,9 @@ row:selected .file-item-tagged {
 
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
+                if (action_executed) return;
                 if (resp == "move") {
+                    action_executed = true;
                     string dest_input = entry.text.strip();
                     if (dest_input.length > 0) {
                         prompt_execute_move.begin(item, dest_input);
@@ -4243,7 +4357,11 @@ row:selected .file-item-tagged {
             entry.margin_bottom = 8;
             dialog.set_extra_child(entry);
 
+            bool action_executed = false;
+
             entry.activate.connect(() => {
+                if (action_executed) return;
+                action_executed = true;
                 string new_name = entry.text.strip();
                 dialog.force_close();
                 if (new_name.length > 0 && new_name != item.display_name) {
@@ -4253,7 +4371,9 @@ row:selected .file-item-tagged {
 
             dialog.choose.begin(this, null, (obj, res) => {
                 string resp = dialog.choose.end(res);
+                if (action_executed) return;
                 if (resp == "rename") {
+                    action_executed = true;
                     string new_name = entry.text.strip();
                     if (new_name.length > 0 && new_name != item.display_name) {
                         prompt_execute_rename.begin(item, new_name);
@@ -4286,7 +4406,8 @@ row:selected .file-item-tagged {
             if (parent_dir == null) return;
             var dest_target = parent_dir.get_child(new_name);
 
-            if (dest_target.query_exists()) {
+            bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
+            if (dest_exists) {
                 yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
@@ -4312,7 +4433,7 @@ row:selected .file-item-tagged {
         }
 
         private async void prompt_execute_move(FileItem item, string dest_input) {
-            File? dest_target = resolve_dest_file(item, dest_input, "Move");
+            File? dest_target = yield resolve_dest_file_async(item, dest_input, "Move");
             if (dest_target == null) return;
 
             if (dest_target.equal(item.file)) {
@@ -4320,7 +4441,8 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            if (dest_target.query_exists()) {
+            bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
+            if (dest_exists) {
                 yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
@@ -4448,7 +4570,7 @@ row:selected .file-item-tagged {
             }
         }
 
-        private File? resolve_dest_file(FileItem item, string dest_input, string op_name) {
+        private async File? resolve_dest_file_async(FileItem item, string dest_input, string op_name, Cancellable? cancellable = null) {
             string raw = dest_input.strip();
             File dest_file;
             if (raw.has_prefix("~/")) {
@@ -4461,24 +4583,38 @@ row:selected .file-item-tagged {
                 dest_file = active_panel.current_directory.resolve_relative_path(raw);
             }
 
-            // Check if the input specifies an existing directory directly
-            if (dest_file.query_exists()) {
-                try {
-                    var info = dest_file.query_info(FileAttribute.STANDARD_TYPE, FileQueryInfoFlags.NONE);
-                    if (info.get_file_type() == FileType.DIRECTORY) {
-                        return dest_file.get_child(item.name);
-                    }
-                } catch (Error e) {}
+            // Check if the input specifies an existing directory directly (non-blocking async)
+            try {
+                var info = yield dest_file.query_info_async(
+                    FileAttribute.STANDARD_TYPE,
+                    FileQueryInfoFlags.NONE,
+                    Priority.DEFAULT,
+                    cancellable
+                );
+                if (info.get_file_type() == FileType.DIRECTORY) {
+                    return dest_file.get_child(item.name);
+                }
                 return dest_file;
+            } catch (Error e) {
+                // dest_file does not exist or query failed
             }
 
-            // If destination does not exist, verify that its parent directory exists!
+            // If destination does not exist, verify that its parent directory exists
             var parent = dest_file.get_parent();
-            if (parent != null && !parent.query_exists()) {
-                string parent_path = parent.get_path();
-                if (parent_path == null) parent_path = parent.get_parse_name();
-                show_error_dialog(@"$op_name Error", @"The destination directory does not exist: $parent_path");
-                return null;
+            if (parent != null) {
+                try {
+                    yield parent.query_info_async(
+                        FileAttribute.STANDARD_TYPE,
+                        FileQueryInfoFlags.NONE,
+                        Priority.DEFAULT,
+                        cancellable
+                    );
+                } catch (Error e) {
+                    string parent_path = parent.get_path();
+                    if (parent_path == null) parent_path = parent.get_parse_name();
+                    show_error_dialog(@"$op_name Error", @"The destination directory does not exist: $parent_path");
+                    return null;
+                }
             }
 
             return dest_file;
@@ -4561,7 +4697,8 @@ row:selected .file-item-tagged {
 
         private async void prompt_execute_restore_single(FilePanel panel, FileItem item, string orig_path) {
             var dest_file = File.new_for_path(orig_path);
-            if (dest_file.query_exists()) {
+            bool dest_exists = yield FileOperationService.file_exists_async(dest_file);
+            if (dest_exists) {
                 yield wait_for_dialogs_to_clear();
                 var conflict_dlg = new Adw.AlertDialog(
                     "File Already Exists",
@@ -4743,6 +4880,7 @@ row:selected .file-item-tagged {
             // Left panel state
             config.left_tabs = left_panel.get_tab_paths();
             config.left_tab_titles = left_panel.get_tab_titles();
+            config.left_pinned_tabs = left_panel.get_tab_pinned_states();
             config.left_sort_cols = left_panel.get_tab_sort_cols();
             config.left_sort_orders = left_panel.get_tab_sort_orders();
             config.left_view_modes = left_panel.get_tab_view_modes();
@@ -4754,6 +4892,7 @@ row:selected .file-item-tagged {
             // Right panel state
             config.right_tabs = right_panel.get_tab_paths();
             config.right_tab_titles = right_panel.get_tab_titles();
+            config.right_pinned_tabs = right_panel.get_tab_pinned_states();
             config.right_sort_cols = right_panel.get_tab_sort_cols();
             config.right_sort_orders = right_panel.get_tab_sort_orders();
             config.right_view_modes = right_panel.get_tab_view_modes();
@@ -4835,6 +4974,20 @@ row:selected .file-item-tagged {
             apply_terminal_font();
             apply_terminal_theme();
             FilesystemRepairDialog.apply_active_console_theme();
+        }
+
+        public void show_about_dialog(Gtk.Widget? parent_widget = null) {
+            var about = new Adw.AboutDialog();
+            about.application_name = "Vala Commander";
+            about.application_icon = "org.vcmd.ValaCommander";
+            about.developer_name = "Vala Commander Contributors";
+            about.version = ConfigManager.get_version(true);
+            about.comments = "A lightweight, responsive, modern dual-pane file manager for Linux, blending the keyboard-driven speed of Midnight Commander with modern GTK4/Libadwaita GUI aesthetics.";
+            about.website = "https://github.com/ijin82/vcmd";
+            about.issue_url = "https://github.com/ijin82/vcmd/issues";
+            about.license_type = Gtk.License.GPL_3_0;
+            about.copyright = "© 2025-2026 Vala Commander Developers";
+            about.present(parent_widget != null ? parent_widget : this);
         }
 
         public override void unmap() {

@@ -162,7 +162,7 @@ namespace VCommander {
                     if (task.resume_callback != null) {
                         var cb = task.resume_callback;
                         task.resume_callback = null;
-                        cb();
+                        GLib.Idle.add((owned) cb);
                     }
                 });
             }
@@ -175,14 +175,16 @@ namespace VCommander {
             }
 
             if (task.is_cancelled || (cancellable != null && cancellable.is_cancelled())) {
+                for (int i = 0; i < active_tasks.length; i++) {
+                    if (active_tasks[i] == task) {
+                        active_tasks.remove_index(i);
+                        unmark_disks_active(disks);
+                        check_and_dispatch_next();
+                        break;
+                    }
+                }
                 throw new IOError.CANCELLED("Operation cancelled while queued");
             }
-
-            mark_disks_active(disks);
-            active_tasks.add(task);
-            dlg.set_dequeued();
-            queue_changed();
-            AppLogger.info("DriveQueue", @"Operation '$(dlg.op_title)' dispatched from queue, acquired lock on: $(format_disks_str(disks))");
         }
 
         public void release_disks(GenericArray<string> disks, OperationProgressDialog dlg) {
@@ -261,13 +263,18 @@ namespace VCommander {
 
                 string? busy = get_first_busy_disk(candidate.required_disks);
                 if (busy == null) {
-                    // All required disks are free for this candidate
+                    // All required disks are free for this candidate: mark active immediately
                     queue.remove_index(i);
+                    mark_disks_active(candidate.required_disks);
+                    active_tasks.add(candidate);
+                    candidate.dlg.set_dequeued();
                     queue_changed();
+                    AppLogger.info("DriveQueue", @"Operation '$(candidate.dlg.op_title)' dispatched from queue, acquired lock on: $(format_disks_str(candidate.required_disks))");
+
                     if (candidate.resume_callback != null) {
                         var cb = candidate.resume_callback;
                         candidate.resume_callback = null;
-                        cb();
+                        GLib.Idle.add((owned) cb);
                     }
                     // Continue scanning to wake up other tasks on independent disks
                     i--;

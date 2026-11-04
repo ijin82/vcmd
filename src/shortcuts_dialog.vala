@@ -19,6 +19,7 @@ namespace VCommander {
             // 1. Function Keys (F1..F10)
             var fn_section = new Adw.ShortcutsSection("Function Keys (F1..F10)");
             add_item(fn_section, "Help & Shortcuts", "F1");
+            add_item(fn_section, "About Vala Commander", "<Shift>F1");
             add_item(fn_section, "Drives & Locations", "<Control>F1");
             add_item(fn_section, "Connect to Server", "F2", "SSH, SFTP, FTP, or SMB. Reopen later from bookmarks");
             add_item(fn_section, "Pack / Compress to Archive", "<Shift>F2", "Create ZIP, Tarball, 7z archive");
@@ -69,6 +70,7 @@ namespace VCommander {
             // 4. Tabs Management
             var tab_section = new Adw.ShortcutsSection("Tab Management");
             add_item(tab_section, "New Tab", "<Control>t");
+            add_item(tab_section, "Pin / Unpin Current Tab", "<Control><Shift>p", "Click pin icon or press shortcut to protect tab from closing");
             add_item(tab_section, "Rename Current Tab", "<Control><Shift>t", "Up to 15 characters");
             add_item(tab_section, "Close Current Tab", "<Control>w");
             add_item(tab_section, "Previous Tab", "<Control>Page_Up", "or Ctrl+Shift+Tab");
@@ -98,6 +100,7 @@ namespace VCommander {
 
             // 7. Application & Settings
             var app_section = new Adw.ShortcutsSection("Application & Settings");
+            add_item(app_section, "About Vala Commander", "<Shift>F1");
             add_item(app_section, "Preferences Dialog", "<Control>comma");
             add_item(app_section, "View Application Log", "", "Button on the left of Header Bar");
             add_item(app_section, "Toggle Header Bar", "<Control><Shift>h");

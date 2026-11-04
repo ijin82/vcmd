@@ -447,6 +447,27 @@ namespace VCommander {
 
             page.add(archive_group);
 
+            // About Group
+            var about_group = new Adw.PreferencesGroup();
+            about_group.title = "About";
+            about_group.description = "Application version and project information";
+
+            var version_row = new Adw.ActionRow();
+            version_row.title = "Vala Commander";
+            version_row.subtitle = @"Version $(ConfigManager.get_version(true))";
+
+            var about_btn = new Gtk.Button.with_label("About");
+            about_btn.valign = Gtk.Align.CENTER;
+            about_btn.add_css_class("flat");
+            about_btn.clicked.connect(() => {
+                main_win.show_about_dialog(dialog);
+            });
+            version_row.add_suffix(about_btn);
+            version_row.activatable_widget = about_btn;
+
+            about_group.add(version_row);
+            page.add(about_group);
+
             dialog.add(page);
             dialog.present(parent);
         }

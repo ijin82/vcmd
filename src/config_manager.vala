@@ -24,6 +24,39 @@ namespace VCommander {
             return _instance;
         }
 
+        private static string? cached_version = null;
+
+        public static string get_version(bool force_reload = false) {
+            if (!force_reload && cached_version != null) {
+                return cached_version;
+            }
+
+            string[] candidate_paths = {
+                "VERSION",
+                Path.build_filename(Environment.get_current_dir(), "VERSION"),
+                Path.build_filename(Environment.get_user_data_dir(), "vcmd", "VERSION"),
+                "/usr/share/vcmd/VERSION",
+                "/usr/local/share/vcmd/VERSION"
+            };
+
+            foreach (var p in candidate_paths) {
+                if (FileUtils.test(p, FileTest.EXISTS)) {
+                    try {
+                        string content;
+                        FileUtils.get_contents(p, out content);
+                        string v = content.strip();
+                        if (v.length > 0) {
+                            cached_version = v;
+                            return cached_version;
+                        }
+                    } catch (Error e) {}
+                }
+            }
+
+            cached_version = "v0.7.2";
+            return cached_version;
+        }
+
         private string config_path;
         private KeyFile key_file;
 
@@ -36,6 +69,7 @@ namespace VCommander {
 
         public string[] left_tabs { get; set; }
         public string[] left_tab_titles { get; set; }
+        public bool[]? left_pinned_tabs { get; set; default = null; }
         public string[] left_sort_cols { get; set; }
         public string[] left_sort_orders { get; set; }
         public string[]? left_view_modes { get; set; default = null; }
@@ -45,6 +79,7 @@ namespace VCommander {
 
         public string[] right_tabs { get; set; }
         public string[] right_tab_titles { get; set; }
+        public bool[]? right_pinned_tabs { get; set; default = null; }
         public string[] right_sort_cols { get; set; }
         public string[] right_sort_orders { get; set; }
         public string[]? right_view_modes { get; set; default = null; }
@@ -399,6 +434,11 @@ namespace VCommander {
                     var titles = key_file.get_string_list("LeftPanel", "TabTitles");
                     left_tab_titles = titles;
                 }
+                if (key_file.has_key("LeftPanel", "PinnedTabs")) {
+                    try {
+                        left_pinned_tabs = key_file.get_boolean_list("LeftPanel", "PinnedTabs");
+                    } catch (Error e) {}
+                }
                 if (key_file.has_key("LeftPanel", "SortCols")) {
                     var scols = key_file.get_string_list("LeftPanel", "SortCols");
                     if (scols.length > 0) {
@@ -437,6 +477,11 @@ namespace VCommander {
                 if (key_file.has_key("RightPanel", "TabTitles")) {
                     var titles = key_file.get_string_list("RightPanel", "TabTitles");
                     right_tab_titles = titles;
+                }
+                if (key_file.has_key("RightPanel", "PinnedTabs")) {
+                    try {
+                        right_pinned_tabs = key_file.get_boolean_list("RightPanel", "PinnedTabs");
+                    } catch (Error e) {}
                 }
                 if (key_file.has_key("RightPanel", "SortCols")) {
                     var scols = key_file.get_string_list("RightPanel", "SortCols");
@@ -626,6 +671,9 @@ namespace VCommander {
                 if (left_tab_titles != null) {
                     key_file.set_string_list("LeftPanel", "TabTitles", left_tab_titles);
                 }
+                if (left_pinned_tabs != null && left_pinned_tabs.length > 0) {
+                    key_file.set_boolean_list("LeftPanel", "PinnedTabs", left_pinned_tabs);
+                }
                 if (left_sort_cols != null && left_sort_cols.length > 0) {
                     key_file.set_string_list("LeftPanel", "SortCols", left_sort_cols);
                 }
@@ -643,6 +691,9 @@ namespace VCommander {
                 key_file.set_string_list("RightPanel", "Tabs", right_tabs);
                 if (right_tab_titles != null) {
                     key_file.set_string_list("RightPanel", "TabTitles", right_tab_titles);
+                }
+                if (right_pinned_tabs != null && right_pinned_tabs.length > 0) {
+                    key_file.set_boolean_list("RightPanel", "PinnedTabs", right_pinned_tabs);
                 }
                 if (right_sort_cols != null && right_sort_cols.length > 0) {
                     key_file.set_string_list("RightPanel", "SortCols", right_sort_cols);

@@ -24,9 +24,10 @@ namespace VCommander {
             }
 
             // Remove existing destination file if overwriting
-            if (dest_file.query_exists()) {
+            bool dest_exists = yield FileOperationService.file_exists_async(dest_file, cancellable);
+            if (dest_exists) {
                 try {
-                    dest_file.delete(null);
+                    yield dest_file.delete_async(Priority.DEFAULT, cancellable);
                 } catch (Error e) {
                     AppLogger.warn("Archive", @"Failed to remove existing destination archive before pack: $(e.message)");
                 }
@@ -407,9 +408,9 @@ namespace VCommander {
             OperationProgressDialog dlg,
             Cancellable cancellable
         ) throws Error {
-            if (!dest_dir.query_exists()) {
-                dest_dir.make_directory_with_parents(cancellable);
-            }
+            try {
+                yield FileOperationService.make_directory_with_parents_async(dest_dir, cancellable);
+            } catch (Error e) {}
 
             var tree = yield ArchiveTreeService.get_tree(archive_path, cancellable);
             var targets = new GenericArray<VfsExtractionTarget>();
@@ -484,9 +485,9 @@ namespace VCommander {
             OperationProgressDialog dlg,
             Cancellable cancellable
         ) throws Error {
-            if (!dest_dir.query_exists()) {
-                dest_dir.make_directory_with_parents(cancellable);
-            }
+            try {
+                yield FileOperationService.make_directory_with_parents_async(dest_dir, cancellable);
+            } catch (Error e) {}
 
             string? archive_path = archive_file.get_path();
             if (archive_path == null) {

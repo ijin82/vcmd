@@ -35,7 +35,7 @@ namespace VCommander {
         public static void init() {
             ensure_reverse_order();
             purge_entries_older_than_days(3);
-            info("System", "Application started. Retaining log entries from the last 3 days.");
+            info("System", @"Application started ($(ConfigManager.get_version())). Retaining log entries from the last 3 days.");
         }
 
         private static void ensure_reverse_order() {

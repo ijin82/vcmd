@@ -38,6 +38,8 @@ namespace VCommander {
         private VolumeMonitor monitor;
 
         public signal void changed();
+        public signal void mount_pre_unmount_detected(Mount mount);
+        public signal void mount_removed_detected(Mount mount);
 
         public static VolumeService get_instance() {
             if (instance == null) {
@@ -49,8 +51,15 @@ namespace VCommander {
         private VolumeService() {
             monitor = VolumeMonitor.get();
 
+            monitor.mount_pre_unmount.connect((m) => {
+                mount_pre_unmount_detected(m);
+                changed();
+            });
             monitor.mount_added.connect((m) => { changed(); });
-            monitor.mount_removed.connect((m) => { changed(); });
+            monitor.mount_removed.connect((m) => {
+                mount_removed_detected(m);
+                changed();
+            });
             monitor.mount_changed.connect((m) => { changed(); });
 
             monitor.volume_added.connect((v) => { changed(); });
@@ -157,6 +166,12 @@ namespace VCommander {
                     continue;
                 }
 
+                // Removable media/flash drives must not be shown when unmounted (Nautilus behavior).
+                // They will only reappear when physically reconnected and mounted.
+                if (is_removable_volume(v)) {
+                    continue;
+                }
+
                 string? vol_id = v.get_identifier("uuid");
                 if (vol_id == null) {
                     vol_id = v.get_name();
@@ -211,20 +226,97 @@ namespace VCommander {
             return items;
         }
 
+        public static bool is_device_node_removable(string dev) {
+            try {
+                string base_name = Path.get_basename(dev);
+                string disk_name = base_name;
+                if (base_name.has_prefix("sd") || base_name.has_prefix("hd") || base_name.has_prefix("vd")) {
+                    int len = base_name.length;
+                    while (len > 0 && base_name[len - 1].isdigit()) {
+                        len--;
+                    }
+                    disk_name = base_name.substring(0, len);
+                } else if (base_name.has_prefix("nvme") || base_name.has_prefix("mmcblk")) {
+                    int p_idx = base_name.last_index_of_char('p');
+                    if (p_idx > 0) {
+                        disk_name = base_name.substring(0, p_idx);
+                    }
+                }
+
+                string rem_path = @"/sys/block/$disk_name/removable";
+                if (FileUtils.test(rem_path, FileTest.EXISTS)) {
+                    string content;
+                    FileUtils.get_contents(rem_path, out content);
+                    if (content.strip() == "1") {
+                        return true;
+                    }
+                }
+
+                string sys_path = @"/sys/block/$disk_name";
+                if (FileUtils.test(sys_path, FileTest.EXISTS)) {
+                    try {
+                        string target = FileUtils.read_link(sys_path);
+                        if (target.contains("/usb") || target.contains("/USB")) {
+                            return true;
+                        }
+                    } catch (Error e) {}
+                }
+            } catch (Error e) {}
+            return false;
+        }
+
+        public static bool is_removable_volume(Volume v) {
+            var drv = v.get_drive();
+            if (drv != null) {
+                if (drv.is_media_removable() || drv.can_eject() || drv.can_stop()) {
+                    return true;
+                }
+            }
+            if (v.can_eject()) {
+                return true;
+            }
+            string? dev = v.get_identifier("unix-device");
+            if (dev != null && is_device_node_removable(dev)) {
+                return true;
+            }
+            return false;
+        }
+
         public async bool unmount_or_eject(LocationItem item, Gtk.Window? parent) {
             var mount_op = new Gtk.MountOperation(parent);
             bool unmounted_ok = false;
             try {
                 if (item.mount != null) {
-                    if (item.mount.can_unmount()) {
+                    if (item.mount.can_eject()) {
+                        try {
+                            yield item.mount.eject_with_operation(MountUnmountFlags.NONE, mount_op, null);
+                            unmounted_ok = true;
+                        } catch (Error e) {
+                            if (item.mount.can_unmount()) {
+                                yield item.mount.unmount_with_operation(MountUnmountFlags.NONE, mount_op, null);
+                                unmounted_ok = true;
+                            } else {
+                                throw e;
+                            }
+                        }
+                    } else if (item.mount.can_unmount()) {
                         yield item.mount.unmount_with_operation(MountUnmountFlags.NONE, mount_op, null);
-                        unmounted_ok = true;
-                    } else if (item.mount.can_eject()) {
-                        yield item.mount.eject_with_operation(MountUnmountFlags.NONE, mount_op, null);
                         unmounted_ok = true;
                     } else {
                         yield item.mount.unmount_with_operation(MountUnmountFlags.NONE, mount_op, null);
                         unmounted_ok = true;
+                    }
+
+                    // Also eject or stop the drive if possible
+                    var drv = item.mount.get_drive();
+                    if (drv != null && drv.can_eject()) {
+                        try {
+                            yield drv.eject_with_operation(MountUnmountFlags.NONE, mount_op, null);
+                        } catch (Error e) {}
+                    } else if (drv != null && drv.can_stop()) {
+                        try {
+                            yield drv.stop(MountUnmountFlags.NONE, mount_op, null);
+                        } catch (Error e) {}
                     }
                 } else if (item.volume != null && item.volume.can_eject()) {
                     yield item.volume.eject_with_operation(MountUnmountFlags.NONE, mount_op, null);

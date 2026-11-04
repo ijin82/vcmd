@@ -8,8 +8,11 @@ APP_NAME="vcmd"
 APP_TITLE="vCommander"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
-# Obtain version either from argument, environment, or interactive prompt
+# Obtain version either from argument, environment, VERSION file, or interactive prompt
 VERSION="${1:-${VERSION}}"
+if [ -z "${VERSION}" ] && [ -f "VERSION" ]; then
+    VERSION="$(cat VERSION | xargs)"
+fi
 if [ -z "${VERSION}" ]; then
     read -r -p "Enter release version (e.g. 0.1.0 or v0.1.0): " VERSION
 fi
@@ -75,6 +78,10 @@ fi
 
 if [ -f "LICENSE" ]; then
     cp -p "LICENSE" "${STAGE_DIR}/LICENSE"
+fi
+
+if [ -f "VERSION" ]; then
+    cp -p "VERSION" "${STAGE_DIR}/VERSION"
 fi
 
 # 4. Create tar.gz archive

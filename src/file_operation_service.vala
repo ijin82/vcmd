@@ -116,6 +116,38 @@ namespace VCommander {
             yield file.delete_async(Priority.DEFAULT, cancellable);
         }
 
+        public static async bool file_exists_async(File file, Cancellable? cancellable = null) {
+            try {
+                var info = yield file.query_info_async(
+                    FileAttribute.STANDARD_NAME,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    cancellable
+                );
+                return (info != null);
+            } catch (Error e) {
+                return false;
+            }
+        }
+
+        public static async void make_directory_with_parents_async(File dir, Cancellable? cancellable = null) throws Error {
+            bool exists = yield file_exists_async(dir, cancellable);
+            if (exists) return;
+
+            var parent = dir.get_parent();
+            if (parent != null) {
+                yield make_directory_with_parents_async(parent, cancellable);
+            }
+
+            try {
+                yield dir.make_directory_async(Priority.DEFAULT, cancellable);
+            } catch (Error e) {
+                if (!e.matches(IOError.quark(), IOError.EXISTS)) {
+                    throw e;
+                }
+            }
+        }
+
         public static async void restore_trash_file(
             File trash_file,
             string orig_path,
@@ -124,15 +156,20 @@ namespace VCommander {
         ) throws Error {
             var dest_file = File.new_for_path(orig_path);
             var parent_dir = dest_file.get_parent();
-            if (parent_dir != null && !parent_dir.query_exists(cancellable)) {
-                parent_dir.make_directory_with_parents(cancellable);
+            if (parent_dir != null) {
+                try {
+                    yield make_directory_with_parents_async(parent_dir, cancellable);
+                } catch (Error e) {}
             }
 
-            if (overwrite && dest_file.query_exists(cancellable)) {
-                try {
-                    yield dest_file.delete_async(Priority.DEFAULT, cancellable);
-                } catch (Error e) {
-                    yield delete_recursive(dest_file, cancellable);
+            if (overwrite) {
+                bool d_exists = yield file_exists_async(dest_file, cancellable);
+                if (d_exists) {
+                    try {
+                        yield dest_file.delete_async(Priority.DEFAULT, cancellable);
+                    } catch (Error e) {
+                        yield delete_recursive(dest_file, cancellable);
+                    }
                 }
             }
 
@@ -236,7 +273,8 @@ namespace VCommander {
             );
 
             if (src_info.get_file_type() == FileType.DIRECTORY) {
-                if (!dest.query_exists(cancellable)) {
+                bool dest_exists = yield file_exists_async(dest, cancellable);
+                if (!dest_exists) {
                     yield dest.make_directory_async(Priority.DEFAULT, cancellable);
                 }
 
@@ -266,13 +304,16 @@ namespace VCommander {
                     }
                 }
             } else {
-                if (overwrite && dest.query_exists(cancellable)) {
-                    // Pre-delete destination file to avoid GIO creating temporary .goutputstream-XXXXXX files
-                    // and to free storage space immediately prior to copying large files.
-                    try {
-                        yield dest.delete_async(Priority.DEFAULT, cancellable);
-                    } catch (Error e) {
-                        yield delete_recursive(dest, cancellable);
+                if (overwrite) {
+                    bool dest_exists = yield file_exists_async(dest, cancellable);
+                    if (dest_exists) {
+                        // Pre-delete destination file to avoid GIO creating temporary .goutputstream-XXXXXX files
+                        // and to free storage space immediately prior to copying large files.
+                        try {
+                            yield dest.delete_async(Priority.DEFAULT, cancellable);
+                        } catch (Error e) {
+                            yield delete_recursive(dest, cancellable);
+                        }
                     }
                 }
 
@@ -292,11 +333,9 @@ namespace VCommander {
                         }
                     });
                 } catch (Error e) {
-                    // Clean up incomplete destination file on cancellation or failure
+                    // Clean up incomplete destination file on cancellation or failure asynchronously
                     try {
-                        if (dest.query_exists(null)) {
-                            dest.delete(null);
-                        }
+                        yield dest.delete_async(Priority.DEFAULT, null);
                     } catch (Error ignored) {}
                     throw e;
                 }
@@ -318,11 +357,14 @@ namespace VCommander {
             OperationProgressCallback? progress_cb = null,
             CopyProgressTracker? tracker = null
         ) throws Error {
-            if (overwrite && dest.query_exists(cancellable)) {
-                try {
-                    yield dest.delete_async(Priority.DEFAULT, cancellable);
-                } catch (Error e) {
-                    yield delete_recursive(dest, cancellable);
+            if (overwrite) {
+                bool dest_exists = yield file_exists_async(dest, cancellable);
+                if (dest_exists) {
+                    try {
+                        yield dest.delete_async(Priority.DEFAULT, cancellable);
+                    } catch (Error e) {
+                        yield delete_recursive(dest, cancellable);
+                    }
                 }
             }
 
