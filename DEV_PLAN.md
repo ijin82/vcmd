@@ -291,13 +291,14 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
 - [x] Preferences Dialog Integration:
   - Settings section in `PreferencesDialog` (`Ctrl+,`) listing detected archivers and default preferred compression format.
 
-#### [ ] Phase 11.2: Archive Creation Engine & Non-Blocking Queue Execution
-- [ ] Background Pack Worker (`ArchiveOperationService`):
+#### [x] Phase 11.2: Archive Creation Engine & Non-Blocking Queue Execution
+- [x] Background Pack Worker (`ArchiveOperationService`):
   - Non-blocking asynchronous compression using `GLib.Subprocess` with piped stdout/stderr.
-  - Live progress tracking and transfer parsing where supported by CLI backends.
+  - Live progress tracking and transfer parsing where supported by CLI backends (`tar`, `zip`, `7z`).
   - Integration with `DriveQueueManager` and `OperationProgressDialog` (Stage 9): minimizable to toolbar indicator button/popover with Cancel support.
   - Automatic refresh of active and target panels upon archive creation, selecting the new archive file.
-  - Error handling: command exit codes, out of disk space, write permission errors, and user cancellation.
+  - Support for "Delete source files after archiving" (move to archive).
+  - Error handling: command exit codes, out of disk space, write permission errors, and user cancellation with partial file cleanup.
 
 #### [ ] Phase 11.3: Archive Virtual File System (VFS) & Tree Model
 - [ ] Virtual Archive Path Representation:

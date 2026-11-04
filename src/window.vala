@@ -3130,10 +3130,64 @@ row:selected .file-item-tagged {
         }
 
         private void on_archive_pack_confirmed(ArchivePackRequest request) {
-            AppLogger.info("Archive", @"Pack requested: $(request.destination_archive.get_path()) [$(request.format.id), level=$(request.compression_level), items=$(request.source_items.length)]");
-            var toast = new Adw.Toast(@"Archive ready to create: $(request.destination_archive.get_basename())");
-            if (toast_overlay != null) {
-                toast_overlay.add_toast(toast);
+            do_pack_archive.begin(request);
+        }
+
+        private async void do_pack_archive(ArchivePackRequest request) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Archiving $(request.destination_archive.get_basename())", cancellable);
+
+            // Compute required disks for DriveQueueManager
+            var parent = request.destination_archive.get_parent();
+            File dest_ref = (parent != null) ? parent : request.destination_archive;
+            var disks = DriveQueueManager.get_required_disks_multi(request.source_items, dest_ref);
+            register_operation(dlg, disks);
+
+            AppLogger.info("Archive", @"Pack started: $(request.destination_archive.get_path()) [$(request.format.id), level=$(request.compression_level), items=$(request.source_items.length)]");
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+
+                yield ArchiveOperationService.pack_archive(request, dlg, cancellable);
+
+                AppLogger.info("Archive", @"Pack completed successfully: $(request.destination_archive.get_path())");
+                show_command_toast(@"Archive created: $(request.destination_archive.get_basename())");
+
+                // Clear tags in active panel
+                if (active_panel != null) {
+                    active_panel.clear_tags();
+                }
+
+                // Refresh panels and select new archive file
+                string archive_name = request.destination_archive.get_basename();
+                if (parent != null) {
+                    if (left_panel.current_directory != null && left_panel.current_directory.equal(parent)) {
+                        left_panel.load_directory(parent, archive_name);
+                    } else {
+                        left_panel.refresh();
+                    }
+
+                    if (right_panel.current_directory != null && right_panel.current_directory.equal(parent)) {
+                        right_panel.load_directory(parent, archive_name);
+                    } else {
+                        right_panel.refresh();
+                    }
+                } else {
+                    left_panel.refresh();
+                    right_panel.refresh();
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    AppLogger.info("Archive", @"Pack cancelled: $(request.destination_archive.get_path())");
+                    show_command_toast("Archive creation cancelled");
+                } else {
+                    AppLogger.error("Archive", @"Pack failed: $(request.destination_archive.get_path())", e.message);
+                    show_error_dialog("Archive Error", @"Failed to create archive:\n$(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                if (active_panel != null) active_panel.grab_focus_to_list();
             }
         }
 
