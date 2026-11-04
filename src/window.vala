@@ -1932,7 +1932,7 @@ row:selected .file-item-tagged {
         public void update_super_view_layout() {
             if (active_panel == null) return;
 
-            if (active_panel.is_super_view) {
+            if (active_panel.is_super_view || active_panel.is_grid_view) {
                 // If we haven't saved dual paned position yet, remember it
                 if (saved_dual_paned_position < 0) {
                     if (paned.position > 0) {
@@ -1951,7 +1951,7 @@ row:selected .file-item-tagged {
                     right_panel.visible = true;
                 }
             } else {
-                // Active panel is not in super detailed view
+                // Active panel is not in full-width view (super detailed or grid)
                 left_panel.visible = true;
                 right_panel.visible = true;
                 if (saved_dual_paned_position > 0) {

@@ -1,17 +1,28 @@
 namespace VCommander {
 
     public class ThumbnailTask : Object {
-        public FileItem item { get; construct set; }
-        public string filepath { get; construct set; }
-        public string cache_path { get; construct set; }
-        public string tmp_path { get; construct set; }
+        public GLib.WeakRef item_ref;
+        public string filepath;
+        public string cache_path;
+        public string tmp_path;
 
         public ThumbnailTask(FileItem item, string filepath, string cache_path, string tmp_path) {
-            Object(item: item, filepath: filepath, cache_path: cache_path, tmp_path: tmp_path);
+            this.item_ref = GLib.WeakRef(item);
+            this.filepath = filepath;
+            this.cache_path = cache_path;
+            this.tmp_path = tmp_path;
+        }
+
+        public FileItem? get_item() {
+            var obj = item_ref.get();
+            return (obj != null) ? (FileItem) obj : null;
         }
     }
 
     public class ThumbnailService : Object {
+        [CCode (cname = "malloc_trim", cheader = "malloc.h")]
+        public extern static int malloc_trim (size_t pad);
+
         private static ThreadPool<ThumbnailTask>? worker_pool = null;
         private static string? cache_dir = null;
         private static GenericSet<string>? in_flight_hashes = null;
@@ -30,6 +41,18 @@ namespace VCommander {
                 }
             }
             return cache_dir;
+        }
+
+        public static bool is_in_thumbnail_cache(string path) {
+            string c_dir = get_cache_dir();
+            if (path == c_dir || path.has_prefix(c_dir + "/") || path.has_prefix(c_dir + "\\")) {
+                return true;
+            }
+            string fd_cache = Path.build_filename(Environment.get_user_cache_dir(), "thumbnails");
+            if (path == fd_cache || path.has_prefix(fd_cache + "/") || path.has_prefix(fd_cache + "\\")) {
+                return true;
+            }
+            return false;
         }
 
         public static void init() {
@@ -85,7 +108,17 @@ namespace VCommander {
             }
 
             string? path = item.file.get_path();
-            if (path == null || !is_supported_image(item.name)) {
+            if (path == null || !is_supported_image(item.name) || item.name.has_prefix(".tmp.")) {
+                return;
+            }
+
+            // Exclude thumbnail cache directory from recursive thumbnail generation
+            if (is_in_thumbnail_cache(path)) {
+                item.is_thumbnail_requested = true;
+                // If it is already a thumbnail in cache dir, load directly as texture without disk writes
+                try {
+                    item.thumbnail_paintable = Gdk.Texture.from_file(item.file);
+                } catch (Error e) {}
                 return;
             }
 
@@ -137,6 +170,19 @@ namespace VCommander {
                 key = key.substring(0, key.length - 4);
             }
 
+            // If item has already been finalized (user navigated away), abort immediately
+            var active_item = task.get_item();
+            if (active_item == null) {
+                mutex.lock();
+                in_flight_hashes.remove(key);
+                bool is_empty = (in_flight_hashes.length == 0);
+                mutex.unlock();
+                if (is_empty) {
+                    malloc_trim(0);
+                }
+                return;
+            }
+
             bool success = false;
             try {
                 var pixbuf = new Gdk.Pixbuf.from_file_at_scale(task.filepath, 300, 300, true);
@@ -156,17 +202,25 @@ namespace VCommander {
 
             mutex.lock();
             in_flight_hashes.remove(key);
+            bool remaining_empty = (in_flight_hashes.length == 0);
             mutex.unlock();
+
+            if (remaining_empty) {
+                malloc_trim(0);
+            }
 
             if (success) {
                 Idle.add(() => {
-                    try {
-                        var cache_f = File.new_for_path(task.cache_path);
-                        if (cache_f.query_exists()) {
-                            var tex = Gdk.Texture.from_file(cache_f);
-                            task.item.thumbnail_paintable = tex;
-                        }
-                    } catch (Error e) {}
+                    var target_item = task.get_item();
+                    if (target_item != null) {
+                        try {
+                            var cache_f = File.new_for_path(task.cache_path);
+                            if (cache_f.query_exists()) {
+                                var tex = Gdk.Texture.from_file(cache_f);
+                                target_item.thumbnail_paintable = tex;
+                            }
+                        } catch (Error e) {}
+                    }
                     return Source.REMOVE;
                 });
             }

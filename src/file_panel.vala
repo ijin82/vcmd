@@ -128,6 +128,13 @@ namespace VCommander {
             }
         }
 
+        public bool is_grid_view {
+            get {
+                var page = get_current_page();
+                return page != null ? page.is_grid_view : false;
+            }
+        }
+
         public PanelViewMode view_mode {
             get {
                 var page = get_current_page();
@@ -398,6 +405,10 @@ namespace VCommander {
         private bool on_tab_close_page(Adw.TabPage page) {
             if (tab_view.n_pages <= 1) {
                 return true; // prevent closing last tab
+            }
+            var page_widget = page.child as FilePanelPage;
+            if (page_widget != null) {
+                page_widget.cleanup();
             }
             tab_view.close_page_finish(page, true);
             grab_focus_to_list();
