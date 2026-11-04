@@ -41,6 +41,8 @@ SOURCES = \
 	src/connect_dialog.vala \
 	src/filesystem_repair_dialog.vala \
 	src/archive_registry.vala \
+	src/archive_tree.vala \
+	src/archive_password_dialog.vala \
 	src/archive_pack_dialog.vala \
 	src/archive_operation_service.vala \
 	src/window.vala \

@@ -847,6 +847,15 @@ row:selected .file-item-tagged {
         public static string? resolve_local_path_for_file(File? file) {
             if (file == null) return null;
 
+            if (file.get_uri_scheme() == "archive") {
+                string? arc_path;
+                string? in_path;
+                if (ArchiveTreeService.split_archive_uri(file.get_uri(), out arc_path, out in_path)) {
+                    return Path.get_dirname(arc_path);
+                }
+                return null;
+            }
+
             string? local_path = file.get_path();
             if (local_path != null && local_path.length > 0) {
                 return local_path;
@@ -1857,9 +1866,22 @@ row:selected .file-item-tagged {
 
         private void update_window_title() {
             if (title_label == null) return;
-            string? cur_path = (active_panel != null && active_panel.current_directory != null)
-                ? active_panel.current_directory.get_parse_name()
-                : null;
+            string? cur_path = null;
+            if (active_panel != null && active_panel.current_directory != null) {
+                var dir = active_panel.current_directory;
+                if (dir.get_uri_scheme() == "archive") {
+                    string? arc_path;
+                    string? in_path;
+                    if (ArchiveTreeService.split_archive_uri(dir.get_uri(), out arc_path, out in_path)) {
+                        string arc_name = Path.get_basename(arc_path);
+                        cur_path = (in_path != null && in_path.length > 0) ? @"$arc_name/$in_path" : arc_name;
+                    } else {
+                        cur_path = dir.get_parse_name();
+                    }
+                } else {
+                    cur_path = dir.get_parse_name();
+                }
+            }
             if (cur_path != null && cur_path.length > 0) {
                 string mode = "detailed";
                 if (active_panel != null && active_panel.is_showing_search_results()) {
@@ -2553,6 +2575,10 @@ row:selected .file-item-tagged {
 
         private void on_f7_mkdir() {
             if (active_panel == null || active_panel.current_directory == null) return;
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Create Folder", "Cannot create folders inside archives.");
+                return;
+            }
             if (active_panel.is_trash_location) {
                 show_error_dialog("Create Folder", "Cannot create folders inside Trash.");
                 return;
@@ -2635,6 +2661,10 @@ row:selected .file-item-tagged {
 
         private void on_delete(bool permanent_default = false) {
             if (active_panel == null) return;
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Delete Error", "Deleting files from archives is not supported.");
+                return;
+            }
 
             var target_panel = active_panel;
             string? select_above_name = target_panel.get_item_above_selection_or_first_tag();
@@ -2855,16 +2885,25 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            string? path = item.file.get_path();
-            if (path == null) {
-                show_error_dialog("File Viewer", "Selected file does not have a local path.");
-                return;
-            }
-
             var config = ConfigManager.get_instance();
             string cmd = (config.viewer_command != null && config.viewer_command.length > 0)
                 ? config.viewer_command
                 : ConfigManager.detect_default_editor();
+
+            string? path = item.file.get_path();
+            if (path == null && item.file.get_uri_scheme() == "archive") {
+                string? arc_path;
+                string? in_path;
+                if (ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_path, out in_path) && arc_path != null && in_path != null) {
+                    var temp_file = ArchiveTreeService.get_temp_extracted_file(arc_path, in_path);
+                    extract_archive_file_and_launch.begin(arc_path, in_path, temp_file, cmd, "File Viewer", target_panel, item.name);
+                    return;
+                }
+            }
+            if (path == null) {
+                show_error_dialog("File Viewer", "Selected file does not have a local path.");
+                return;
+            }
 
             if (item.size > LARGE_FILE_THRESHOLD_BYTES) {
                 var dialog = new Adw.AlertDialog(
@@ -2891,6 +2930,27 @@ row:selected .file-item-tagged {
             }
 
             launch_external_file_tool(cmd, path, "File Viewer", target_panel, item.name);
+        }
+
+        private async void extract_archive_file_and_launch(string arc_path, string in_path, File temp_file, string cmd, string title, FilePanel target_panel, string item_name) {
+            bool is_retry = false;
+            while (true) {
+                try {
+                    yield ArchiveTreeService.extract_single_file_to(arc_path, in_path, temp_file, null);
+                    launch_external_file_tool(cmd, temp_file.get_path(), title, target_panel, item_name);
+                    break;
+                } catch (ArchivePasswordError e) {
+                    is_retry = (e is ArchivePasswordError.INVALID);
+                    string? pwd = yield ArchivePasswordDialog.prompt_async(this, Path.get_basename(arc_path), is_retry);
+                    if (pwd == null) {
+                        break;
+                    }
+                    ArchiveTreeService.set_cached_password(arc_path, pwd);
+                } catch (Error e) {
+                    show_error_dialog(title, @"Cannot extract $(Path.get_basename(in_path)): $(e.message)");
+                    break;
+                }
+            }
         }
 
         public void open_application_log() {
@@ -2922,16 +2982,25 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            string? path = item.file.get_path();
-            if (path == null) {
-                show_error_dialog("File Editor", "Selected file does not have a local path.");
-                return;
-            }
-
             var config = ConfigManager.get_instance();
             string cmd = (config.editor_command != null && config.editor_command.length > 0)
                 ? config.editor_command
                 : ConfigManager.detect_default_editor();
+
+            string? path = item.file.get_path();
+            if (path == null && item.file.get_uri_scheme() == "archive") {
+                string? arc_path;
+                string? in_path;
+                if (ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_path, out in_path) && arc_path != null && in_path != null) {
+                    var temp_file = ArchiveTreeService.get_temp_extracted_file(arc_path, in_path);
+                    extract_archive_file_and_launch.begin(arc_path, in_path, temp_file, cmd, "File Editor", target_panel, item.name);
+                    return;
+                }
+            }
+            if (path == null) {
+                show_error_dialog("File Editor", "Selected file does not have a local path.");
+                return;
+            }
 
             if (item.size > LARGE_FILE_THRESHOLD_BYTES) {
                 var dialog = new Adw.AlertDialog(
@@ -3102,6 +3171,11 @@ row:selected .file-item-tagged {
         private void on_pack_archive() {
             if (active_panel == null) return;
 
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Archive Error", "Cannot create archives from items inside another archive.");
+                return;
+            }
+
             if (active_panel.is_trash_location) {
                 show_error_dialog("Archive Error", "Cannot create archives from Trash items. Please restore them first.");
                 return;
@@ -3194,6 +3268,11 @@ row:selected .file-item-tagged {
         private void on_f5_copy() {
             if (active_panel == null) return;
 
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Archive Extraction", "Extracting files from archives via F5 will be available in Phase 11.5.");
+                return;
+            }
+
             if (active_panel.is_trash_location) {
                 show_error_dialog("Copy Error", "Cannot copy files from Trash. Please restore them first.");
                 return;
@@ -3202,6 +3281,11 @@ row:selected .file-item-tagged {
             var tagged_items = active_panel.get_tagged_items();
             var opp = get_opposite_panel();
             File? dest_dir = opp.current_directory;
+
+            if (dest_dir != null && dest_dir.get_uri_scheme() == "archive") {
+                show_error_dialog("Copy Error", "Copying files directly into an archive is not supported.");
+                return;
+            }
 
             if (dest_dir != null && dest_dir.get_uri_scheme() == "trash") {
                 show_error_dialog("Copy Error", "Cannot copy items into Trash. Use Delete (F8) to move items to Trash.");
@@ -3646,6 +3730,11 @@ row:selected .file-item-tagged {
         private void on_f6_move() {
             if (active_panel == null) return;
 
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Move Error", "Moving files from archives is not supported.");
+                return;
+            }
+
             if (active_panel.is_trash_location) {
                 prompt_restore_trash(active_panel);
                 return;
@@ -3654,6 +3743,11 @@ row:selected .file-item-tagged {
             var tagged_items = active_panel.get_tagged_items();
             var opp = get_opposite_panel();
             File? dest_dir = opp.current_directory;
+
+            if (dest_dir != null && dest_dir.get_uri_scheme() == "archive") {
+                show_error_dialog("Move Error", "Moving files directly into an archive is not supported.");
+                return;
+            }
 
             if (dest_dir != null && dest_dir.get_uri_scheme() == "trash") {
                 show_error_dialog("Move Error", "Cannot move items into Trash this way. Use Delete (F8) to move items to Trash.");

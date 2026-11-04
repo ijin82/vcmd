@@ -65,7 +65,18 @@ namespace VCommander {
                     }
                 }
 
-                if (f.query_exists()) {
+                bool exists = false;
+                if (f.get_uri_scheme() == "archive") {
+                    string? arc_path;
+                    string? in_path;
+                    if (ArchiveTreeService.split_archive_uri(f.get_uri(), out arc_path, out in_path)) {
+                        exists = (arc_path != null && File.new_for_path(arc_path).query_exists());
+                    }
+                } else {
+                    exists = f.query_exists();
+                }
+
+                if (exists) {
                     string scol = "name";
                     if (sort_cols != null && i < sort_cols.length && sort_cols[i] != null && sort_cols[i].length > 0) {
                         scol = sort_cols[i];
@@ -153,6 +164,13 @@ namespace VCommander {
             get {
                 var page = get_current_page();
                 return page != null ? page.is_trash_location() : false;
+            }
+        }
+
+        public bool is_archive_location {
+            get {
+                var page = get_current_page();
+                return page != null ? page.is_archive_location() : false;
             }
         }
 
@@ -456,6 +474,23 @@ namespace VCommander {
                     page.tooltip = page_widget.current_directory.get_parse_name();
                 }
                 page.icon = new ThemedIcon("folder-symbolic");
+            } else if (page_widget.is_archive_location()) {
+                string? arc_path;
+                string? in_path;
+                ArchiveTreeService.split_archive_uri(page_widget.current_directory.get_uri(), out arc_path, out in_path);
+                string arc_name = (arc_path != null) ? Path.get_basename(arc_path) : "Archive";
+                string title = arc_name;
+                if (in_path != null && in_path.length > 0) {
+                    title = Path.get_basename(in_path);
+                }
+                if (title.char_count() > 15) {
+                    title = title.substring(0, 15);
+                }
+                page.title = title;
+                page.tooltip = (in_path != null && in_path.length > 0)
+                    ? @"$(arc_name)/$(in_path)"
+                    : arc_name;
+                page.icon = new ThemedIcon("package-x-generic-symbolic");
             } else if (page_widget.current_directory != null) {
                 string name = page_widget.current_directory.get_basename();
                 if (name == null || name.length == 0) {

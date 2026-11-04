@@ -300,16 +300,17 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
   - Support for "Delete source files after archiving" (move to archive).
   - Error handling: command exit codes, out of disk space, write permission errors, and user cancellation with partial file cleanup.
 
-#### [ ] Phase 11.3: Archive Virtual File System (VFS) & Tree Model
-- [ ] Virtual Archive Path Representation:
-  - Custom URI scheme or path representation (e.g. `archive:///path/to/archive.zip#sub/folder`).
+#### [x] Phase 11.3: Archive Virtual File System (VFS) & Tree Model
+- [x] Virtual Archive Path Representation:
+  - Custom URI scheme (`archive:///path/to/archive.zip/sub/folder`).
   - Automatic detection when pressing `Enter` or double-clicking an archive file: opens archive as a virtual folder instead of launching external viewer.
-- [ ] In-Memory Archive Tree (`ArchiveTree` / `ArchiveNode`):
+- [x] In-Memory Archive Tree (`ArchiveTree` / `ArchiveNode`):
   - Instant directory listings built from single table-of-contents scan.
-  - Native parsers for `tar` (`tar -tvf`), `zip` (`zipinfo` / `unzip -Z -l`), and `7z` (`7z l -ba`).
+  - Native parsers for `tar` (`tar -tvf`), `zip` (`zipinfo` / `unzip -l`), and `7z` (`7z l -ba -bsp0`).
   - Virtual `FileItem` generation with accurate names, sizes, permissions, dates, and directory structures.
   - Cache tree by archive path and modification time: folder navigation inside the archive is instantaneous.
   - Seamless `..` navigation: `..` at archive root returns to parent folder on disk and focuses the archive file.
+  - Single-file on-demand preview extraction for `Enter`, `F3` (View), and `F4` (Edit) inside archives.
 
 #### [ ] Phase 11.4: ExtFS Plugin Engine (Midnight Commander Compatibility)
 - [ ] ExtFS Command Runner (`ExtFSRunner`):

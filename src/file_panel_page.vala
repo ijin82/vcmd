@@ -111,6 +111,10 @@ namespace VCommander {
             return current_directory != null && current_directory.get_uri_scheme() == "trash";
         }
 
+        public bool is_archive_location() {
+            return current_directory != null && current_directory.get_uri_scheme() == "archive";
+        }
+
         public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc", bool start_load = true) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
 
@@ -2399,8 +2403,66 @@ namespace VCommander {
                 restore_item_requested(item);
             } else if (item.is_dir) {
                 load_directory(item.file);
+            } else if (is_archive_location()) {
+                open_archive_file(item);
+            } else if (ArchiverRegistry.get_instance().is_archive_filename(item.name)) {
+                string? p = item.file.get_path();
+                if (p != null) {
+                    load_directory(File.new_for_uri(@"archive://$p"));
+                } else {
+                    open_file_with_default_app(item);
+                }
             } else {
                 open_file_with_default_app(item);
+            }
+        }
+
+        private bool is_opening_archive_file = false;
+
+        private void open_archive_file(FileItem item) {
+            if (is_opening_archive_file) return;
+            is_opening_archive_file = true;
+
+            string? archive_path;
+            string? inner_path;
+            if (!ArchiveTreeService.split_archive_uri(item.file.get_uri(), out archive_path, out inner_path)) {
+                is_opening_archive_file = false;
+                return;
+            }
+            if (archive_path == null || inner_path == null) {
+                is_opening_archive_file = false;
+                return;
+            }
+
+            status_label.label = @"Extracting $(item.name) for preview...";
+            var temp_file = ArchiveTreeService.get_temp_extracted_file(archive_path, inner_path);
+
+            extract_and_launch_file.begin(archive_path, inner_path, temp_file, (obj, res) => {
+                is_opening_archive_file = false;
+                update_status_bar();
+            });
+        }
+
+        private async void extract_and_launch_file(string archive_path, string inner_path, File temp_file) {
+            bool is_retry = false;
+            while (true) {
+                try {
+                    yield ArchiveTreeService.extract_single_file_to(archive_path, inner_path, temp_file, null);
+                    var launcher = new Gtk.FileLauncher(temp_file);
+                    yield launcher.launch(get_root() as Gtk.Window, null);
+                    break;
+                } catch (ArchivePasswordError e) {
+                    is_retry = (e is ArchivePasswordError.INVALID);
+                    string? pwd = yield ArchivePasswordDialog.prompt_async(get_root() as Gtk.Window, Path.get_basename(archive_path), is_retry);
+                    if (pwd == null) {
+                        status_label.label = "Extraction cancelled";
+                        break;
+                    }
+                    ArchiveTreeService.set_cached_password(archive_path, pwd);
+                } catch (Error e) {
+                    error_occurred("Preview Error", @"Cannot extract $(Path.get_basename(inner_path)): $(e.message)");
+                    break;
+                }
             }
         }
 
@@ -2408,6 +2470,29 @@ namespace VCommander {
             if (showing_search_results && current_directory != null) {
                 load_directory(current_directory);
                 return;
+            }
+            if (is_archive_location()) {
+                string? archive_path;
+                string? inner_path;
+                if (ArchiveTreeService.split_archive_uri(current_directory.get_uri(), out archive_path, out inner_path)) {
+                    if (inner_path == null || inner_path.length == 0) {
+                        // At root of archive, go up to host directory on disk and select the archive file
+                        var parent_dir = File.new_for_path(Path.get_dirname(archive_path));
+                        string archive_name = Path.get_basename(archive_path);
+                        load_directory(parent_dir, archive_name);
+                        return;
+                    } else {
+                        // Inside archive subfolder, go up to parent inner folder
+                        int last_slash = inner_path.last_index_of_char('/');
+                        string prev_folder = (last_slash >= 0) ? inner_path.substring(last_slash + 1) : inner_path;
+                        string parent_inner = (last_slash >= 0) ? inner_path.substring(0, last_slash) : "";
+                        string parent_uri = (parent_inner.length > 0)
+                            ? @"archive://$(archive_path)/$(parent_inner)"
+                            : @"archive://$(archive_path)";
+                        load_directory(File.new_for_uri(parent_uri), prev_folder);
+                        return;
+                    }
+                }
             }
             var parent = current_directory.get_parent();
             if (parent != null) {
@@ -2526,10 +2611,144 @@ namespace VCommander {
             load_directory_async.begin(dir, cursor_select_name, preserved_tags, load_cancellable);
         }
 
+        private async void load_archive_directory_async(File dir, string? target_select_name, GenericSet<string>? preserved_tags, Cancellable cancellable) {
+            string? archive_path;
+            string? inner_path;
+            if (!ArchiveTreeService.split_archive_uri(dir.get_uri(), out archive_path, out inner_path)) {
+                error_occurred("Archive Error", @"Invalid archive path: $(dir.get_uri())");
+                status_label.label = "Error opening archive";
+                return;
+            }
+
+            status_label.label = @"Reading archive $(Path.get_basename(archive_path))...";
+
+            ArchiveTree tree;
+            while (true) {
+                try {
+                    tree = yield ArchiveTreeService.get_tree(archive_path, cancellable);
+                    break;
+                } catch (ArchivePasswordError e) {
+                    bool is_retry = (e is ArchivePasswordError.INVALID);
+                    string? pwd = yield ArchivePasswordDialog.prompt_async(get_root() as Gtk.Window, Path.get_basename(archive_path), is_retry);
+                    if (pwd == null) {
+                        status_label.label = "Archive access cancelled";
+                        return;
+                    }
+                    ArchiveTreeService.set_cached_password(archive_path, pwd);
+                } catch (IOError.CANCELLED e) {
+                    return;
+                } catch (Error e) {
+                    error_occurred("Archive Error", @"Cannot read archive $(Path.get_basename(archive_path)): $(e.message)");
+                    status_label.label = @"Error: $(e.message)";
+                    return;
+                }
+            }
+
+            if (cancellable.is_cancelled()) {
+                return;
+            }
+
+            var items = new GenericArray<FileItem>();
+
+            // Add parent ".." entry
+            if (inner_path == null || inner_path.length == 0) {
+                var parent_disk = File.new_for_path(Path.get_dirname(archive_path));
+                items.add(new FileItem.for_parent(parent_disk));
+            } else {
+                int last_slash = inner_path.last_index_of_char('/');
+                string parent_inner = (last_slash >= 0) ? inner_path.substring(0, last_slash) : "";
+                string parent_uri = (parent_inner.length > 0)
+                    ? @"archive://$(archive_path)/$(parent_inner)"
+                    : @"archive://$(archive_path)";
+                var parent_arc = File.new_for_uri(parent_uri);
+                items.add(new FileItem.for_parent(parent_arc));
+            }
+
+            var children = ArchiveTreeService.list_directory(tree, inner_path != null ? inner_path : "", dir);
+            uint count_files = 0;
+            uint count_dirs = 0;
+            int64 total_bytes = 0;
+
+            for (uint i = 0; i < children.length; i++) {
+                var item = children.get(i);
+                bool is_hidden = item.is_hidden || item.name.has_prefix(".");
+                if (is_hidden && !show_hidden) {
+                    continue;
+                }
+                if (preserved_tags != null && preserved_tags.contains(item.name)) {
+                    item.is_tagged = true;
+                }
+                items.add(item);
+                if (item.is_dir) {
+                    count_dirs++;
+                } else {
+                    count_files++;
+                    total_bytes += item.size;
+                }
+            }
+
+            var array = new Object[items.length];
+            for (int i = 0; i < items.length; i++) {
+                array[i] = items[i];
+            }
+            uint old_count = store.get_n_items();
+            for (uint i = 0; i < old_count; i++) {
+                var old_item = (FileItem) store.get_item(i);
+                if (old_item != null) {
+                    old_item.thumbnail_paintable = null;
+                }
+            }
+            store.splice(0, old_count, array);
+            ThumbnailService.malloc_trim(0);
+
+            update_columns_for_current_location();
+            update_trash_banner_state();
+            current_dir_stats = @"$(count_dirs) folders, $(count_files) files ($(format_size(total_bytes))) [Archive]";
+            update_status_bar();
+
+            uint total_items = sort_model.get_n_items();
+            if (total_items > 0) {
+                uint target_index = 0;
+                bool found_target = false;
+
+                if (target_select_name != null && target_select_name.length > 0) {
+                    for (uint i = 0; i < total_items; i++) {
+                        var it = (FileItem) sort_model.get_item(i);
+                        if (it != null && it.name == target_select_name) {
+                            target_index = i;
+                            found_target = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found_target && total_items > 1) {
+                    var first_it = (FileItem) sort_model.get_item(0);
+                    if (first_it != null && first_it.is_parent_dir) {
+                        target_index = 1;
+                    }
+                }
+
+                if (is_active) {
+                    selection_model.selected = target_index;
+                    scroll_to_selected();
+                    grab_focus_to_list();
+                } else {
+                    saved_selected_pos = target_index;
+                    selection_model.selected = Gtk.INVALID_LIST_POSITION;
+                }
+            }
+        }
+
         private async void load_directory_async(File dir, string? target_select_name, GenericSet<string>? preserved_tags, Cancellable cancellable) {
+            string? scheme = dir.get_uri_scheme();
+            if (scheme == "archive") {
+                yield load_archive_directory_async(dir, target_select_name, preserved_tags, cancellable);
+                return;
+            }
+
             status_label.label = "Scanning directory...";
 
-            string? scheme = dir.get_uri_scheme();
             if (scheme != null && scheme != "file") {
                 status_label.label = "Connecting…";
                 try {

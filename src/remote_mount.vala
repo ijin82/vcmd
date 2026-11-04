@@ -27,12 +27,12 @@ namespace VCommander {
             if (path.length == 0) {
                 return false;
             }
-            if (path.contains("://") && !path.has_prefix("file://")) {
+            if (path.contains("://") && !path.has_prefix("file://") && !path.has_prefix("archive://")) {
                 return true;
             }
             var f = File.new_for_commandline_arg(path);
             string? scheme = f.get_uri_scheme();
-            if (scheme != null && scheme != "file") {
+            if (scheme != null && scheme != "file" && scheme != "archive") {
                 return true;
             }
             string ssh_mount_root = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "ssh");

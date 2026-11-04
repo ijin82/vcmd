@@ -240,6 +240,41 @@ namespace VCommander {
             );
         }
 
+        public FileItem.custom(
+            File file,
+            string name,
+            string display_name,
+            int64 size,
+            DateTime? mtime,
+            bool is_dir,
+            bool is_symlink = false,
+            string? symlink_target = null,
+            bool is_hidden = false,
+            Icon? icon = null,
+            string file_type = "",
+            string owner = "",
+            string group = "",
+            uint32 mode = 0
+        ) {
+            Object(
+                file: file,
+                name: name,
+                display_name: display_name,
+                size: size,
+                mtime: mtime,
+                is_dir: is_dir,
+                is_parent_dir: false,
+                is_symlink: is_symlink,
+                symlink_target: symlink_target,
+                is_hidden: is_hidden,
+                icon: icon,
+                file_type: file_type,
+                owner: owner,
+                group: group,
+                mode: mode
+            );
+        }
+
         public static int compare_by_name(FileItem a, FileItem b) {
             // Parent directory ".." always stays at the top
             if (a.is_parent_dir) return -1;
