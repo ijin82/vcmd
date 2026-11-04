@@ -2992,8 +2992,33 @@ row:selected .file-item-tagged {
                 string? arc_path;
                 string? in_path;
                 if (ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_path, out in_path) && arc_path != null && in_path != null) {
+                    if (item.size > LARGE_FILE_THRESHOLD_BYTES) {
+                        var dialog = new Adw.AlertDialog(
+                            "Warning: large file",
+                            @"The file '$(item.display_name)' is very large ($(GLib.format_size(item.size))).\nOpening it may take significant time or freeze the editor.\n\nDo you want to open it anyway?"
+                        );
+                        dialog.set_prefer_wide_layout(true);
+                        dialog.set_content_width(520);
+                        dialog.add_response("cancel", "Cancel");
+                        dialog.add_response("open", "Open Anyway");
+                        dialog.set_default_response("cancel");
+                        dialog.set_close_response("cancel");
+                        dialog.set_response_appearance("open", Adw.ResponseAppearance.DESTRUCTIVE);
+
+                        dialog.choose.begin(this, null, (obj, res) => {
+                            string resp = dialog.choose.end(res);
+                            if (resp == "open") {
+                                var temp_file = ArchiveTreeService.get_temp_extracted_file(arc_path, in_path);
+                                extract_archive_file_and_edit.begin(arc_path, in_path, temp_file, cmd, target_panel, item.name);
+                            } else {
+                                target_panel.grab_focus_to_list();
+                            }
+                        });
+                        return;
+                    }
+
                     var temp_file = ArchiveTreeService.get_temp_extracted_file(arc_path, in_path);
-                    extract_archive_file_and_launch.begin(arc_path, in_path, temp_file, cmd, "File Editor", target_panel, item.name);
+                    extract_archive_file_and_edit.begin(arc_path, in_path, temp_file, cmd, target_panel, item.name);
                     return;
                 }
             }
@@ -3029,7 +3054,113 @@ row:selected .file-item-tagged {
             launch_external_file_tool(cmd, path, "File Editor", target_panel, item.name);
         }
 
+        private async void extract_archive_file_and_edit(string arc_path, string in_path, File temp_file, string cmd, FilePanel target_panel, string item_name) {
+            bool is_retry = false;
+            while (true) {
+                try {
+                    yield ArchiveTreeService.extract_single_file_to(arc_path, in_path, temp_file, null);
+                    break;
+                } catch (ArchivePasswordError e) {
+                    is_retry = (e is ArchivePasswordError.INVALID);
+                    string? pwd = yield ArchivePasswordDialog.prompt_async(this, Path.get_basename(arc_path), is_retry);
+                    if (pwd == null) {
+                        return;
+                    }
+                    ArchiveTreeService.set_cached_password(arc_path, pwd);
+                } catch (Error e) {
+                    show_error_dialog("File Editor", @"Cannot extract $(Path.get_basename(in_path)): $(e.message)");
+                    return;
+                }
+            }
+
+            int64 initial_mtime = 0;
+            int64 initial_size = 0;
+            try {
+                var info = yield temp_file.query_info_async(FileAttribute.TIME_MODIFIED + "," + FileAttribute.STANDARD_SIZE, FileQueryInfoFlags.NONE);
+                var dt = info.get_modification_date_time();
+                initial_mtime = (dt != null) ? dt.to_unix() : 0;
+                initial_size = info.get_size();
+            } catch (Error e) {}
+
+            bool ran = yield launch_external_file_tool_async(cmd, temp_file.get_path(), "File Editor", target_panel, item_name);
+            if (!ran) return;
+
+            int64 post_mtime = 0;
+            int64 post_size = 0;
+            try {
+                var info = yield temp_file.query_info_async(FileAttribute.TIME_MODIFIED + "," + FileAttribute.STANDARD_SIZE, FileQueryInfoFlags.NONE);
+                var dt = info.get_modification_date_time();
+                post_mtime = (dt != null) ? dt.to_unix() : 0;
+                post_size = info.get_size();
+            } catch (Error e) {}
+
+            bool modified = (post_mtime != initial_mtime) || (post_size != initial_size);
+            if (modified) {
+                prompt_archive_member_update(arc_path, in_path, temp_file, target_panel);
+            }
+        }
+
+        private void prompt_archive_member_update(string arc_path, string in_path, File temp_file, FilePanel target_panel) {
+            string member_name = Path.get_basename(in_path);
+            string arc_name = Path.get_basename(arc_path);
+            var dialog = new Adw.AlertDialog(
+                "Update Archive Member?",
+                @"The file '$member_name' has been modified.\nDo you want to update it in '$arc_name'?"
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("update", "Update");
+            dialog.set_default_response("update");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "update") {
+                    do_update_archive_member.begin(arc_path, in_path, temp_file, target_panel);
+                } else {
+                    target_panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private async void do_update_archive_member(string arc_path, string in_path, File temp_file, FilePanel target_panel) {
+            string member_name = Path.get_basename(in_path);
+            string arc_name = Path.get_basename(arc_path);
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Updating member '$member_name'", cancellable);
+
+            File arc_file = File.new_for_path(arc_path);
+            var disks = DriveQueueManager.get_required_disks(temp_file, arc_file);
+            register_operation(dlg, disks);
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+                yield ArchiveOperationService.update_archive_member(arc_path, in_path, temp_file, cancellable);
+                ArchiveTreeService.clear_cache(arc_path);
+                show_command_toast(@"Updated '$member_name' in $arc_name");
+                target_panel.refresh();
+                var opp = (target_panel == left_panel) ? right_panel : left_panel;
+                if (opp.is_archive_location && opp.current_directory != null && opp.current_directory.get_uri().has_prefix("archive://" + Uri.escape_string(arc_path))) {
+                    opp.refresh();
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_command_toast("Archive update cancelled");
+                } else {
+                    show_error_dialog("Update Archive", @"Failed to update '$member_name': $(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                activate_panel(target_panel, true);
+            }
+        }
+
         private void launch_external_file_tool(string command_template, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
+            launch_external_file_tool_async.begin(command_template, file_path, tool_title, target_panel, selected_name);
+        }
+
+        private async bool launch_external_file_tool_async(string command_template, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
             string cmd_str = command_template.strip();
             if (cmd_str.length == 0) {
                 cmd_str = ConfigManager.detect_default_editor();
@@ -3041,7 +3172,7 @@ row:selected .file-item-tagged {
 
                 if (parsed_argv.length == 0) {
                     show_error_dialog(tool_title, @"Invalid command: '$command_template'");
-                    return;
+                    return false;
                 }
 
                 var final_argv = new GenericArray<string>();
@@ -3061,21 +3192,28 @@ row:selected .file-item-tagged {
                 }
 
                 string base_bin = Path.get_basename(parsed_argv[0]);
+                string[] spawn_args;
 
                 if (is_terminal_command(base_bin)) {
                     string? term = find_terminal_emulator();
                     if (term == null) {
                         show_error_dialog(tool_title,
                             @"No terminal emulator found to run '$base_bin'. Please install gnome-terminal or ptyxis, or configure a graphical editor like gnome-text-editor or gvim.");
-                        return;
+                        return false;
                     }
 
                     var term_argv = new GenericArray<string>();
                     term_argv.add(term);
 
                     string term_base = Path.get_basename(term);
-                    if (term_base == "gnome-terminal" || term_base == "ptyxis" || term_base == "kitty" || term_base == "alacritty" || term_base == "konsole") {
+                    if (term_base == "gnome-terminal" || term_base == "ptyxis") {
+                        term_argv.add("--wait");
                         term_argv.add("--");
+                    } else if (term_base == "kitty" || term_base == "alacritty") {
+                        term_argv.add("--");
+                    } else if (term_base == "konsole") {
+                        term_argv.add("--nofork");
+                        term_argv.add("-e");
                     } else {
                         term_argv.add("-e");
                     }
@@ -3084,26 +3222,25 @@ row:selected .file-item-tagged {
                         term_argv.add(final_argv[i]);
                     }
 
-                    var term_args = new string[term_argv.length];
+                    spawn_args = new string[term_argv.length];
                     for (int i = 0; i < term_argv.length; i++) {
-                        term_args[i] = term_argv[i];
+                        spawn_args[i] = term_argv[i];
                     }
-
-                    spawn_tool_and_watch.begin(term_args, file_path, tool_title, target_panel, selected_name);
                 } else {
-                    var spawn_args = new string[final_argv.length];
+                    spawn_args = new string[final_argv.length];
                     for (int i = 0; i < final_argv.length; i++) {
                         spawn_args[i] = final_argv[i];
                     }
-
-                    spawn_tool_and_watch.begin(spawn_args, file_path, tool_title, target_panel, selected_name);
                 }
+
+                return yield spawn_tool_and_watch(spawn_args, file_path, tool_title, target_panel, selected_name);
             } catch (Error e) {
                 show_error_dialog(tool_title, @"Failed to launch '$command_template': $(e.message)");
+                return false;
             }
         }
 
-        private async void spawn_tool_and_watch(string[] argv, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
+        private async bool spawn_tool_and_watch(string[] argv, string file_path, string tool_title, FilePanel target_panel, string? selected_name) {
             try {
                 var launcher = new SubprocessLauncher(SubprocessFlags.NONE);
                 string? cwd = Path.get_dirname(file_path);
@@ -3136,9 +3273,11 @@ row:selected .file-item-tagged {
 
                 // Re-assert focus and active state on target_panel
                 activate_panel(target_panel, true);
+                return true;
             } catch (Error e) {
                 show_error_dialog(tool_title, @"Error executing tool: $(e.message)");
                 activate_panel(target_panel, true);
+                return false;
             }
         }
 
@@ -3269,7 +3408,7 @@ row:selected .file-item-tagged {
             if (active_panel == null) return;
 
             if (active_panel.is_archive_location) {
-                show_error_dialog("Archive Extraction", "Extracting files from archives via F5 will be available in Phase 11.5.");
+                on_f5_archive_extract();
                 return;
             }
 
@@ -3329,6 +3468,16 @@ row:selected .file-item-tagged {
                 return;
             }
 
+            if (!item.is_dir && ArchiverRegistry.get_instance().is_archive_filename(item.name) &&
+                dest_dir != null && dest_dir.get_uri_scheme() != "archive" && dest_dir.get_uri_scheme() != "trash") {
+                prompt_archive_outside_actions(item, dest_dir, opp);
+                return;
+            }
+
+            prompt_single_file_copy(item, dest_dir);
+        }
+
+        private void prompt_single_file_copy(FileItem item, File? dest_dir) {
             File default_dest_dir = (dest_dir != null) ? dest_dir : active_panel.current_directory;
             File default_target_file = default_dest_dir.get_child(item.name);
 
@@ -3377,6 +3526,236 @@ row:selected .file-item-tagged {
                 entry.set_position(-1);
                 return GLib.Source.REMOVE;
             });
+        }
+
+        public static string strip_archive_extension(string filename) {
+            string lower = filename.down();
+            string[] multi_exts = {
+                ".tar.gz", ".tar.xz", ".tar.zst", ".tar.bz2",
+                ".tgz", ".txz", ".tzst", ".tbz2",
+                ".tar", ".zip", ".7z", ".rar", ".deb", ".rpm",
+                ".iso", ".cpio", ".ar", ".cab", ".jar", ".war"
+            };
+            foreach (var ext in multi_exts) {
+                if (lower.has_suffix(ext)) {
+                    return filename.substring(0, filename.length - ext.length);
+                }
+            }
+            int dot = filename.last_index_of_char('.');
+            if (dot > 0) {
+                return filename.substring(0, dot);
+            }
+            return filename;
+        }
+
+        private void prompt_archive_outside_actions(FileItem item, File dest_dir, FilePanel opp_panel) {
+            string stem = strip_archive_extension(item.name);
+            var dialog = new Adw.AlertDialog("Archive Actions", @"What would you like to do with '$(item.name)'?");
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("copy", "Copy File");
+            dialog.add_response("extract_subfolder", @"Extract to '$stem/'");
+            dialog.add_response("extract_here", "Extract to Opposite Pane");
+            dialog.set_default_response("extract_subfolder");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("extract_subfolder", Adw.ResponseAppearance.SUGGESTED);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "copy") {
+                    prompt_single_file_copy(item, dest_dir);
+                } else if (resp == "extract_subfolder") {
+                    File target_subfolder = dest_dir.get_child(stem);
+                    do_extract_full_archive.begin(item.file, target_subfolder, opp_panel);
+                } else if (resp == "extract_here") {
+                    do_extract_full_archive.begin(item.file, dest_dir, opp_panel);
+                } else {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private void on_f5_archive_extract() {
+            var opp = get_opposite_panel();
+            File? dest_dir = opp.current_directory;
+            if (dest_dir == null) {
+                show_error_dialog("Extract Error", "Opposite panel has no directory open.");
+                return;
+            }
+            if (dest_dir.get_uri_scheme() == "archive") {
+                show_error_dialog("Extract Error", "Extracting directly into another archive is not supported.");
+                return;
+            }
+            if (dest_dir.get_uri_scheme() == "trash") {
+                show_error_dialog("Extract Error", "Cannot extract files into Trash.");
+                return;
+            }
+
+            var tagged_items = active_panel.get_tagged_items();
+            var items_to_extract = new GenericArray<FileItem>();
+            if (tagged_items.length > 0) {
+                for (uint i = 0; i < tagged_items.length; i++) {
+                    items_to_extract.add(tagged_items.get(i));
+                }
+            } else {
+                var sel = active_panel.get_selected_item();
+                if (sel == null || sel.is_parent_dir) {
+                    show_error_dialog("Extract", "Please select a file or folder to extract.");
+                    return;
+                }
+                items_to_extract.add(sel);
+            }
+
+            string? arc_path = null;
+            string? in_path = null;
+            if (active_panel.current_directory != null) {
+                ArchiveTreeService.split_archive_uri(active_panel.current_directory.get_uri(), out arc_path, out in_path);
+            }
+            if (arc_path == null && items_to_extract.length > 0) {
+                ArchiveTreeService.split_archive_uri(items_to_extract.get(0).file.get_uri(), out arc_path, out in_path);
+            }
+            if (arc_path == null) {
+                show_error_dialog("Extract Error", "Cannot determine archive location.");
+                return;
+            }
+
+            string default_dest_path = dest_dir.get_path();
+            if (default_dest_path == null) default_dest_path = dest_dir.get_parse_name();
+
+            string prompt_msg = (items_to_extract.length > 1)
+                ? @"Extract $(items_to_extract.length) items to:"
+                : @"Extract '$(items_to_extract.get(0).display_name)' to:";
+
+            var dialog = new Adw.AlertDialog("Extract from Archive", prompt_msg);
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("extract", "Extract");
+            dialog.set_default_response("extract");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("extract", Adw.ResponseAppearance.SUGGESTED);
+
+            var entry = new Gtk.Entry();
+            entry.text = default_dest_path;
+            entry.margin_start = 12;
+            entry.margin_end = 12;
+            entry.margin_top = 8;
+            entry.margin_bottom = 8;
+            dialog.set_extra_child(entry);
+
+            entry.activate.connect(() => {
+                string dest_input = entry.text.strip();
+                dialog.force_close();
+                if (dest_input.length > 0) {
+                    do_extract_vfs_items.begin(arc_path, items_to_extract, File.new_for_commandline_arg(dest_input), opp);
+                }
+            });
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "extract") {
+                    string dest_input = entry.text.strip();
+                    if (dest_input.length > 0) {
+                        do_extract_vfs_items.begin(arc_path, items_to_extract, File.new_for_commandline_arg(dest_input), opp);
+                    }
+                } else {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
+                }
+            });
+
+            GLib.Idle.add(() => {
+                entry.grab_focus();
+                entry.set_position(-1);
+                return GLib.Source.REMOVE;
+            });
+        }
+
+        private async void do_extract_vfs_items(string arc_path, GenericArray<FileItem> items, File dest_dir, FilePanel opp_panel) {
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Extracting $(items.length) item(s) from $(Path.get_basename(arc_path))", cancellable);
+
+            File arc_file = File.new_for_path(arc_path);
+            var disks = DriveQueueManager.get_required_disks(arc_file, dest_dir);
+            register_operation(dlg, disks);
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+                while (true) {
+                    try {
+                        yield ArchiveOperationService.extract_vfs_items(arc_path, items, dest_dir, dlg, cancellable);
+                        break;
+                    } catch (ArchivePasswordError e) {
+                        bool is_retry = (e is ArchivePasswordError.INVALID);
+                        string? pwd = yield ArchivePasswordDialog.prompt_async(this, Path.get_basename(arc_path), is_retry);
+                        if (pwd == null) {
+                            cancellable.cancel();
+                            break;
+                        }
+                        ArchiveTreeService.set_cached_password(arc_path, pwd);
+                    }
+                }
+                if (!cancellable.is_cancelled()) {
+                    show_command_toast(@"Extracted $(items.length) item(s) to $(dest_dir.get_basename())");
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_command_toast("Archive extraction cancelled");
+                } else {
+                    show_error_dialog("Extraction Error", @"Failed to extract from archive: $(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                opp_panel.refresh();
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
+            }
+        }
+
+        private async void do_extract_full_archive(File archive_file, File dest_dir, FilePanel opp_panel) {
+            string? arc_path = archive_file.get_path();
+            if (arc_path == null) {
+                show_error_dialog("Extract Error", "Archive must be on local filesystem.");
+                return;
+            }
+
+            var cancellable = new Cancellable();
+            var dlg = new OperationProgressDialog(@"Extracting $(archive_file.get_basename())", cancellable);
+
+            var disks = DriveQueueManager.get_required_disks(archive_file, dest_dir);
+            register_operation(dlg, disks);
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+                while (true) {
+                    try {
+                        yield ArchiveOperationService.extract_full_archive(archive_file, dest_dir, dlg, cancellable);
+                        break;
+                    } catch (ArchivePasswordError e) {
+                        bool is_retry = (e is ArchivePasswordError.INVALID);
+                        string? pwd = yield ArchivePasswordDialog.prompt_async(this, Path.get_basename(arc_path), is_retry);
+                        if (pwd == null) {
+                            cancellable.cancel();
+                            break;
+                        }
+                        ArchiveTreeService.set_cached_password(arc_path, pwd);
+                    }
+                }
+                if (!cancellable.is_cancelled()) {
+                    show_command_toast(@"Extracted '$(archive_file.get_basename())' to $(dest_dir.get_basename())");
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_command_toast("Archive extraction cancelled");
+                } else {
+                    show_error_dialog("Extraction Error", @"Failed to extract archive: $(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                opp_panel.refresh();
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
+            }
         }
 
         private async void prompt_execute_copy(FileItem item, string dest_input) {

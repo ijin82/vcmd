@@ -299,5 +299,337 @@ namespace VCommander {
                 AppLogger.warn("Archive", @"Failed to clean up partial archive: $(e.message)");
             }
         }
+
+        public static async void update_archive_member(
+            string archive_path,
+            string inner_path,
+            File temp_file,
+            Cancellable? cancellable = null
+        ) throws Error {
+            var registry = ArchiverRegistry.get_instance();
+            string lower = archive_path.down();
+
+            // 1. ExtFS archives
+            var helper = registry.get_extfs_helper_for_archive(archive_path);
+            if (helper != null && !lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") &&
+                !lower.has_suffix(".tgz") && !lower.has_suffix(".tar.xz") && !lower.has_suffix(".txz") &&
+                !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2") && !lower.has_suffix(".tbz2") &&
+                !((lower.has_suffix(".zip") || lower.has_suffix(".7z")) && (registry.has_tool("7z") || registry.has_tool("7zz") || registry.has_tool("zip")))) {
+                var runner = ExtFSRunner.get_instance();
+                yield runner.copyin(helper, archive_path, inner_path, temp_file.get_path(), cancellable);
+                return;
+            }
+
+            string cache_dir = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview", Path.get_basename(archive_path));
+            string? pwd = ArchiveTreeService.get_cached_password(archive_path);
+            bool has_pwd = (pwd != null && pwd.length > 0);
+
+            // 2. ZIP archives
+            if (lower.has_suffix(".zip")) {
+                if (registry.has_tool("zip")) {
+                    var args = new GenericArray<string>();
+                    args.add("zip");
+                    if (has_pwd) {
+                        args.add("-P");
+                        args.add(pwd);
+                    }
+                    args.add(archive_path);
+                    args.add(inner_path);
+                    string[] argv = new string[args.length];
+                    for (int i = 0; i < args.length; i++) argv[i] = args[i];
+
+                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+                    launcher.set_cwd(cache_dir);
+                    var proc = launcher.spawnv(argv);
+                    yield proc.wait_check_async(cancellable);
+                    return;
+                } else if (registry.has_tool("7z") || registry.has_tool("7zz")) {
+                    string tool = registry.has_tool("7z") ? "7z" : "7zz";
+                    var args = new GenericArray<string>();
+                    args.add(tool);
+                    args.add("u");
+                    if (has_pwd) {
+                        args.add(@"-p$pwd");
+                    }
+                    args.add(archive_path);
+                    args.add(inner_path);
+                    string[] argv = new string[args.length];
+                    for (int i = 0; i < args.length; i++) argv[i] = args[i];
+
+                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+                    launcher.set_cwd(cache_dir);
+                    var proc = launcher.spawnv(argv);
+                    yield proc.wait_check_async(cancellable);
+                    return;
+                }
+            }
+
+            // 3. 7z archives
+            if (lower.has_suffix(".7z")) {
+                if (registry.has_tool("7z") || registry.has_tool("7zz")) {
+                    string tool = registry.has_tool("7z") ? "7z" : "7zz";
+                    var args = new GenericArray<string>();
+                    args.add(tool);
+                    args.add("u");
+                    if (has_pwd) {
+                        args.add(@"-p$pwd");
+                    }
+                    args.add(archive_path);
+                    args.add(inner_path);
+                    string[] argv = new string[args.length];
+                    for (int i = 0; i < args.length; i++) argv[i] = args[i];
+
+                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+                    launcher.set_cwd(cache_dir);
+                    var proc = launcher.spawnv(argv);
+                    yield proc.wait_check_async(cancellable);
+                    return;
+                }
+            }
+
+            // 4. Uncompressed TAR archives
+            if (lower.has_suffix(".tar") && registry.has_tool("tar")) {
+                string[] argv = { "tar", "-uf", archive_path, inner_path };
+                var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+                launcher.set_cwd(cache_dir);
+                var proc = launcher.spawnv(argv);
+                yield proc.wait_check_async(cancellable);
+                return;
+            }
+
+            throw new IOError.NOT_SUPPORTED(@"Updating files inside $(Path.get_basename(archive_path)) is not supported for this archive format.");
+        }
+
+        public static async void extract_vfs_items(
+            string archive_path,
+            GenericArray<FileItem> items,
+            File dest_dir,
+            OperationProgressDialog dlg,
+            Cancellable cancellable
+        ) throws Error {
+            if (!dest_dir.query_exists()) {
+                dest_dir.make_directory_with_parents(cancellable);
+            }
+
+            var tree = yield ArchiveTreeService.get_tree(archive_path, cancellable);
+            var targets = new GenericArray<VfsExtractionTarget>();
+            int64 total_size = 0;
+
+            for (uint i = 0; i < items.length; i++) {
+                var item = items.get(i);
+                string? arc_p, in_p;
+                if (!ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_p, out in_p)) continue;
+                if (in_p == null) continue;
+
+                if (!item.is_dir) {
+                    File target_file = dest_dir.get_child(item.name);
+                    targets.add(new VfsExtractionTarget(in_p, target_file, item.size));
+                    total_size += item.size;
+                } else {
+                    var node = tree.find_node(in_p);
+                    if (node != null) {
+                        File child_dest_dir = dest_dir.get_child(item.name);
+                        collect_node_leaves(node, in_p, child_dest_dir, targets, ref total_size);
+                    }
+                }
+            }
+
+            if (total_size <= 0) total_size = 1024;
+            int64 bytes_extracted = 0;
+
+            for (uint i = 0; i < targets.length; i++) {
+                if (cancellable.is_cancelled()) {
+                    throw new IOError.CANCELLED("Extraction cancelled");
+                }
+
+                var target = targets.get(i);
+                dlg.update_progress(target.dest_file.get_basename(), bytes_extracted, total_size);
+                yield ArchiveTreeService.extract_single_file_to(archive_path, target.inner_path, target.dest_file, cancellable);
+                bytes_extracted += target.size;
+                dlg.update_progress(target.dest_file.get_basename(), bytes_extracted, total_size);
+            }
+
+            dlg.update_progress("Extraction complete", total_size, total_size);
+        }
+
+        private static void collect_node_leaves(
+            ArchiveTreeNode node,
+            string base_inner_path,
+            File base_dest_dir,
+            GenericArray<VfsExtractionTarget> targets,
+            ref int64 total_size
+        ) {
+            for (uint i = 0; i < node.children.length; i++) {
+                var child = node.children.get(i);
+                if (child.is_dir) {
+                    collect_node_leaves(child, base_inner_path, base_dest_dir, targets, ref total_size);
+                } else {
+                    string rel = child.full_path;
+                    if (rel.has_prefix(base_inner_path)) {
+                        rel = rel.substring(base_inner_path.length);
+                    }
+                    while (rel.has_prefix("/")) rel = rel.substring(1);
+
+                    File dest_file = (rel.length > 0) ? base_dest_dir.resolve_relative_path(rel) : base_dest_dir.get_child(child.name);
+                    int64 sz = (child.entry != null) ? child.entry.size : 0;
+                    targets.add(new VfsExtractionTarget(child.full_path, dest_file, sz));
+                    total_size += sz;
+                }
+            }
+        }
+
+        public static async void extract_full_archive(
+            File archive_file,
+            File dest_dir,
+            OperationProgressDialog dlg,
+            Cancellable cancellable
+        ) throws Error {
+            if (!dest_dir.query_exists()) {
+                dest_dir.make_directory_with_parents(cancellable);
+            }
+
+            string? archive_path = archive_file.get_path();
+            if (archive_path == null) {
+                throw new IOError.NOT_SUPPORTED("Archive file must be on local filesystem.");
+            }
+            string? dest_path = dest_dir.get_path();
+            if (dest_path == null) {
+                throw new IOError.NOT_SUPPORTED("Destination folder must be on local filesystem.");
+            }
+
+            string lower = archive_path.down();
+            var registry = ArchiverRegistry.get_instance();
+            string? pwd = ArchiveTreeService.get_cached_password(archive_path);
+            bool has_pwd = (pwd != null && pwd.length > 0);
+
+            dlg.update_progress(@"Unpacking $(archive_file.get_basename())...", 0, 0);
+
+            string[] cmd_argv;
+            bool is_bulk_cli = false;
+
+            if (lower.has_suffix(".tar") || lower.has_suffix(".tar.gz") || lower.has_suffix(".tgz") ||
+                lower.has_suffix(".tar.xz") || lower.has_suffix(".txz") || lower.has_suffix(".tar.zst") ||
+                lower.has_suffix(".tar.bz2") || lower.has_suffix(".tbz2")) {
+                is_bulk_cli = true;
+                cmd_argv = new string[] { "tar", "-xf", archive_path, "-C", dest_path };
+            } else if (lower.has_suffix(".zip") && registry.has_tool("unzip")) {
+                is_bulk_cli = true;
+                if (has_pwd) {
+                    cmd_argv = new string[] { "unzip", "-q", "-o", "-P", pwd, archive_path, "-d", dest_path };
+                } else {
+                    cmd_argv = new string[] { "unzip", "-q", "-o", "-P", "", archive_path, "-d", dest_path };
+                }
+            } else if ((lower.has_suffix(".7z") || lower.has_suffix(".zip")) && (registry.has_tool("7z") || registry.has_tool("7zz"))) {
+                is_bulk_cli = true;
+                string tool = registry.has_tool("7z") ? "7z" : "7zz";
+                if (has_pwd) {
+                    cmd_argv = new string[] { tool, "x", "-y", "-p" + pwd, @"-o$dest_path", archive_path };
+                } else {
+                    cmd_argv = new string[] { tool, "x", "-y", "-p-", @"-o$dest_path", archive_path };
+                }
+            } else {
+                // ExtFS or unsupported bulk CLI: stream through ArchiveTreeService
+                var tree = yield ArchiveTreeService.get_tree(archive_path, cancellable);
+                var vfs_items = new GenericArray<FileItem>();
+                for (uint i = 0; i < tree.root.children.length; i++) {
+                    var ch = tree.root.children.get(i);
+                    string uri = @"archive://$archive_path/$(ch.full_path)";
+                    var fi = new FileItem.custom(
+                        File.new_for_uri(uri),
+                        ch.name,
+                        ch.name,
+                        (ch.entry != null) ? ch.entry.size : 0,
+                        (ch.entry != null) ? ch.entry.mtime : null,
+                        ch.is_dir,
+                        false,
+                        null,
+                        false,
+                        new ThemedIcon(ch.is_dir ? "folder-symbolic" : "text-x-generic-symbolic"),
+                        ch.is_dir ? "Folder" : "File",
+                        "",
+                        "",
+                        0
+                    );
+                    vfs_items.add(fi);
+                }
+                yield extract_vfs_items(archive_path, vfs_items, dest_dir, dlg, cancellable);
+                return;
+            }
+
+            if (is_bulk_cli) {
+                var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+                Subprocess proc = launcher.spawnv(cmd_argv);
+
+                ulong cancel_handler_id = 0;
+                if (cancellable != null) {
+                    cancel_handler_id = cancellable.connect(() => {
+                        proc.force_exit();
+                    });
+                }
+
+                var err_stream = new DataInputStream(proc.get_stderr_pipe());
+                var err_sb = new StringBuilder();
+
+                Error? proc_error = null;
+                try {
+                    yield proc.wait_check_async(cancellable);
+                } catch (Error e) {
+                    proc_error = e;
+                }
+
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                }
+
+                if (cancellable.is_cancelled()) {
+                    throw new IOError.CANCELLED("Archive extraction cancelled by user");
+                }
+
+                if (proc_error != null) {
+                    size_t len;
+                    string? err_line;
+                    try {
+                        while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
+                            err_sb.append(err_line);
+                            err_sb.append("\n");
+                        }
+                    } catch (Error ignored) {}
+
+                    int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+                    string lower_err = err_sb.str.down();
+                    bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
+                                      lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
+                                      exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
+
+                    if (is_pwd_err) {
+                        if (has_pwd) {
+                            ArchiveTreeService.clear_cached_password(archive_path);
+                            throw new ArchivePasswordError.INVALID(@"Incorrect password for $(archive_file.get_basename())");
+                        } else {
+                            throw new ArchivePasswordError.REQUIRED(@"Password required for $(archive_file.get_basename())");
+                        }
+                    }
+
+                    string err_msg = err_sb.str.strip();
+                    if (err_msg.length > 0) {
+                        throw new IOError.FAILED(@"Failed to extract $(archive_file.get_basename()):\n$err_msg");
+                    } else {
+                        throw new IOError.FAILED(@"Failed to extract $(archive_file.get_basename()) (exit code $exit_code)");
+                    }
+                }
+            }
+
+            dlg.update_progress("Extraction complete", 1, 1);
+        }
+    }
+
+    public class VfsExtractionTarget : Object {
+        public string inner_path { get; construct set; }
+        public File dest_file { get; construct set; }
+        public int64 size { get; construct set; }
+
+        public VfsExtractionTarget(string inner_path, File dest_file, int64 size) {
+            Object(inner_path: inner_path, dest_file: dest_file, size: size);
+        }
     }
 }

@@ -323,11 +323,11 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
   - Parse `/etc/mc/mc.ext.ini`, `~/.config/mc/mc.ext.ini`, `~/.config/vcmd/extfs.ini` and fallback registry to bind extensions (`.deb`, `.rpm`, `.iso`, `.rar`, `.cab`, etc.) to respective helpers (`deb`, `rpm`, `iso9660`, `urar`, `ucab`).
   - User plugin support: scan `~/.config/vcmd/extfs/` allowing users to drop custom shell/Python scripts for arbitrary container formats with auto-binding.
 
-#### [ ] Phase 11.5: Archive Extraction, File Viewing (F3/F4) & Operations
-- [ ] In-Archive File Viewing & Editing (`F3` / `F4`):
+#### [x] Phase 11.5: Archive Extraction, File Viewing (F3/F4) & Operations
+- [x] In-Archive File Viewing & Editing (`F3` / `F4`):
   - Pressing `F3` or `F4` on a file inside an archive extracts it to a temporary directory (`~/.cache/vcmd/preview/` or `/tmp/vcmd-...`) and opens it in the configured external viewer or editor.
   - For `F4` (Edit): detect file modifications upon editor exit; prompt user to update the archive using `copyin` or backend tool.
-- [ ] Extraction to Opposite Pane (`F5` Copy):
+- [x] Extraction to Opposite Pane (`F5` Copy):
   - Pressing `F5` inside an archive extracts selected files/directories to the opposite panel's current path.
   - Pressing `F5` on an archive file from outside offers extraction options ("Extract here", "Extract to subdirectory <name>/").
   - Password prompt dialog for encrypted archives.
