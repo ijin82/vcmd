@@ -16,8 +16,9 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 6** | Search Engine (`Alt+F7`) | **Completed (100%)** | Async recursive search by name mask and file contents. Results open in a Super Detailed tab. The last query is stored in config; the start path comes from the active tab. |
 | **Stage 7** | Remote Connections & SFTP (`sftp://` / GVfs) | **Completed (100%)** | F2 connect dialog for SFTP, FTP, and SMB. Bookmarks store the URI without a password. Drives & Locations menu (`Ctrl+F1`). |
 | **Stage 8** | Trash Management & File Recovery (`trash:///`) | **Completed (100%)** | Contextual Trash banner, Empty Trash confirmation, Restore Selected files (`trash::orig-path`), permanent delete (F8). |
-| **Stage 9** | Non-Blocking Background Operations & Minimized Progress | **Planned (Complexity: Moderate)** | Minimizable copy/move dialogs into a toolbar progress indicator button/popover, allowing non-blocking workflow during heavy transfers. |
-| **Stage 10** | Icon / Thumbnail Grid View & Live Background Thumbnail Engine | **Planned (Complexity: High)** | Single/dual-pane image & video thumbnail grid view (30–300px), Ctrl++/Ctrl+-/scroll zoom, atomic background worker pool (`~/.config/vcmd/thumbnails/`), crash recovery, streaming live updates without UI jumps. |
+| **Stage 9** | Non-Blocking Background Operations & Minimized Progress | **Completed (100%)** | Minimizable copy/move dialogs into a toolbar progress indicator button/popover, allowing non-blocking workflow during heavy transfers. |
+| **Stage 10** | Icon / Thumbnail Grid View & Live Background Thumbnail Engine | **Completed (100%)** | Single/dual-pane image & video thumbnail grid view (30–300px), Ctrl++/Ctrl+-/scroll zoom, atomic background worker pool (`~/.config/vcmd/thumbnails/`), crash recovery, streaming live updates without UI jumps. |
+| **Stage 11** | Archive Integration, ExtFS Plugin System & Compression Manager | **Planned (Complexity: High)** | Tier-1 native/POSIX archivers (tar, zip, gz, xz, zstd), Tier-2 Midnight Commander ExtFS plugins (7z, rar, deb, rpm, iso), Archiver Selection Dialog (Alt+F5), VFS archive browsing (Enter), F3 preview, F5 extract. |
 
 ---
 
@@ -262,4 +263,71 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
   - As each thumbnail is finished, dispatches an idle signal to the GTK main loop (`GLib.Idle.add`).
   - Binds the newly loaded texture/paintable directly to the `FileItem` without reloading or re-sorting the `GListStore`.
   - Zero scroll jumping, zero UI jitter, smooth streaming of thumbnails directly into the active view as they become available.
+
+---
+
+## Detailed Status by Stage
+
+### [ ] Stage 11: Archive Integration, ExtFS Plugin System & Compression Manager [Complexity: High]
+
+This stage provides full archive management for `vcmd`. It introduces a two-tier architecture:
+- **Tier 1 (Core):** Direct integration with standard Linux CLI utilities (`tar`, `zip`, `unzip`, `gzip`, `bzip2`, `xz`, `zstd`, `7z`) without external library bloat.
+- **Tier 2 (Extensibility / Compatibility):** Midnight Commander ExtFS plugin system compatibility (`/usr/lib/mc/extfs.d/`, `/usr/libexec/mc/extfs.d/`, and `~/.config/vcmd/extfs/`), enabling out-of-the-box support for `rar`, `iso`, `deb`, `rpm`, `cab`, `arj`, and custom user scripts.
+
+#### [ ] Phase 11.1: Archiver Detection, Capabilities Registry & Selection Dialog
+- [ ] Centralized Archiver Registry (`ArchiverRegistry` / `ArchiveBackend`):
+  - Detect installed system archiver CLI tools at startup: `tar`, `zip`, `unzip`, `7z` / `7zz`, `rar` / `unrar`, `gzip`, `bzip2`, `xz`, `zstd`.
+  - Detect installed Midnight Commander ExtFS helpers (`/usr/lib/mc/extfs.d/`, `/usr/libexec/mc/extfs.d/`) and custom user plugins (`~/.config/vcmd/extfs/`).
+  - Map archive formats and extensions (`.tar.gz`, `.tar.xz`, `.tar.zst`, `.tar.bz2`, `.zip`, `.7z`, `.rar`, `.iso`, `.deb`, `.rpm`, etc.) to available packing and unpacking backends.
+- [ ] Archiver Selection & Pack Dialog (`ArchivePackDialog`):
+  - Hotkey `Alt+F5` (Midnight Commander classic shortcut) or menu/toolbar trigger when one or more files/folders are selected.
+  - Archive destination path entry, prefilled with target directory (opposite pane or current folder) and smart default archive name (e.g., `<selected_item>.zip`).
+  - Format selection selector (dropdown or card list of supported formats filtered by currently available system tools).
+  - Archiver backend picker when multiple engines can generate the format (e.g., `zip` vs `7z`).
+  - Compression level slider / selector: Store (0), Fast (1), Normal (6), Maximum (9), Ultra.
+  - Optional encryption password entry with show/hide toggle for formats supporting encryption (`.zip`, `.7z`).
+  - Checkbox: "Delete source files after archiving" (Move to archive).
+  - Validation: real-time check for destination writability and existing archive overwrite warning.
+- [ ] Preferences Dialog Integration:
+  - Settings section in `PreferencesDialog` (`Ctrl+,`) listing detected archivers and default preferred compression format.
+
+#### [ ] Phase 11.2: Archive Creation Engine & Non-Blocking Queue Execution
+- [ ] Background Pack Worker (`ArchiveOperationService`):
+  - Non-blocking asynchronous compression using `GLib.Subprocess` with piped stdout/stderr.
+  - Live progress tracking and transfer parsing where supported by CLI backends.
+  - Integration with `DriveQueueManager` and `OperationProgressDialog` (Stage 9): minimizable to toolbar indicator button/popover with Cancel support.
+  - Automatic refresh of active and target panels upon archive creation, selecting the new archive file.
+  - Error handling: command exit codes, out of disk space, write permission errors, and user cancellation.
+
+#### [ ] Phase 11.3: Archive Virtual File System (VFS) & Tree Model
+- [ ] Virtual Archive Path Representation:
+  - Custom URI scheme or path representation (e.g. `archive:///path/to/archive.zip#sub/folder`).
+  - Automatic detection when pressing `Enter` or double-clicking an archive file: opens archive as a virtual folder instead of launching external viewer.
+- [ ] In-Memory Archive Tree (`ArchiveTree` / `ArchiveNode`):
+  - Instant directory listings built from single table-of-contents scan.
+  - Native parsers for `tar` (`tar -tvf`), `zip` (`zipinfo` / `unzip -Z -l`), and `7z` (`7z l -ba`).
+  - Virtual `FileItem` generation with accurate names, sizes, permissions, dates, and directory structures.
+  - Cache tree by archive path and modification time: folder navigation inside the archive is instantaneous.
+  - Seamless `..` navigation: `..` at archive root returns to parent folder on disk and focuses the archive file.
+
+#### [ ] Phase 11.4: ExtFS Plugin Engine (Midnight Commander Compatibility)
+- [ ] ExtFS Command Runner (`ExtFSRunner`):
+  - Execute standard ExtFS protocol verbs:
+    - `list <archive>`: stream and parse standard ExtFS `ls -l` table-of-contents into `ArchiveTree`.
+    - `copyout <archive> <stored_file> <extract_dest>`: extract individual file/directory from archive.
+    - `copyin <archive> <stored_file> <source_file>`: inject file into archive (for writable formats).
+    - `rm <archive> <stored_file>`: delete file from archive.
+  - Parse `/etc/mc/mc.ext.ini` and internal fallback registry to bind extensions (`.deb`, `.rpm`, `.iso`, `.rar`, `.cab`, etc.) to respective helpers (`deb`, `rpm`, `iso9660`, `urar`, `ucab`).
+  - User plugin support: scan `~/.config/vcmd/extfs/` allowing users to drop custom shell/Python scripts for arbitrary container formats.
+
+#### [ ] Phase 11.5: Archive Extraction, File Viewing (F3/F4) & Operations
+- [ ] In-Archive File Viewing & Editing (`F3` / `F4`):
+  - Pressing `F3` or `F4` on a file inside an archive extracts it to a temporary directory (`~/.cache/vcmd/preview/` or `/tmp/vcmd-...`) and opens it in the configured external viewer or editor.
+  - For `F4` (Edit): detect file modifications upon editor exit; prompt user to update the archive using `copyin` or backend tool.
+- [ ] Extraction to Opposite Pane (`F5` Copy):
+  - Pressing `F5` inside an archive extracts selected files/directories to the opposite panel's current path.
+  - Pressing `F5` on an archive file from outside offers extraction options ("Extract here", "Extract to subdirectory <name>/").
+  - Password prompt dialog for encrypted archives.
+  - Extraction integrated with `DriveQueueManager` with real-time progress and cancel support.
+
 
