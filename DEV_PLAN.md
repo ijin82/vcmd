@@ -312,15 +312,16 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
   - Seamless `..` navigation: `..` at archive root returns to parent folder on disk and focuses the archive file.
   - Single-file on-demand preview extraction for `Enter`, `F3` (View), and `F4` (Edit) inside archives.
 
-#### [ ] Phase 11.4: ExtFS Plugin Engine (Midnight Commander Compatibility)
-- [ ] ExtFS Command Runner (`ExtFSRunner`):
+#### [x] Phase 11.4: ExtFS Plugin Engine (Midnight Commander Compatibility)
+- [x] ExtFS Command Runner (`ExtFSRunner`):
   - Execute standard ExtFS protocol verbs:
     - `list <archive>`: stream and parse standard ExtFS `ls -l` table-of-contents into `ArchiveTree`.
     - `copyout <archive> <stored_file> <extract_dest>`: extract individual file/directory from archive.
     - `copyin <archive> <stored_file> <source_file>`: inject file into archive (for writable formats).
     - `rm <archive> <stored_file>`: delete file from archive.
-  - Parse `/etc/mc/mc.ext.ini` and internal fallback registry to bind extensions (`.deb`, `.rpm`, `.iso`, `.rar`, `.cab`, etc.) to respective helpers (`deb`, `rpm`, `iso9660`, `urar`, `ucab`).
-  - User plugin support: scan `~/.config/vcmd/extfs/` allowing users to drop custom shell/Python scripts for arbitrary container formats.
+    - `mkdir <archive> <dir_path>`: create directory in archive.
+  - Parse `/etc/mc/mc.ext.ini`, `~/.config/mc/mc.ext.ini`, `~/.config/vcmd/extfs.ini` and fallback registry to bind extensions (`.deb`, `.rpm`, `.iso`, `.rar`, `.cab`, etc.) to respective helpers (`deb`, `rpm`, `iso9660`, `urar`, `ucab`).
+  - User plugin support: scan `~/.config/vcmd/extfs/` allowing users to drop custom shell/Python scripts for arbitrary container formats with auto-binding.
 
 #### [ ] Phase 11.5: Archive Extraction, File Viewing (F3/F4) & Operations
 - [ ] In-Archive File Viewing & Editing (`F3` / `F4`):

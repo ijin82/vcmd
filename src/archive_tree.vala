@@ -255,27 +255,30 @@ namespace VCommander {
                 lower.has_suffix(".tar.xz") || lower.has_suffix(".txz") || lower.has_suffix(".tar.zst") ||
                 lower.has_suffix(".tar.bz2") || lower.has_suffix(".tbz2")) {
                 cmd_argv = new string[] { "tar", "-tvf", archive_path };
-            } else if (registry.has_tool("7z") || registry.has_tool("7zz")) {
+            } else if (lower.has_suffix(".zip") && registry.has_tool("unzip")) {
+                cmd_argv = new string[] { "unzip", "-l", archive_path };
+            } else if ((lower.has_suffix(".7z") || lower.has_suffix(".zip")) && (registry.has_tool("7z") || registry.has_tool("7zz"))) {
                 string tool = registry.has_tool("7z") ? "7z" : "7zz";
                 if (has_pwd) {
                     cmd_argv = new string[] { tool, "l", "-ba", "-bsp0", "-p" + pwd, archive_path };
                 } else {
                     cmd_argv = new string[] { tool, "l", "-ba", "-bsp0", "-p-", archive_path };
                 }
-            } else if (lower.has_suffix(".zip") && registry.has_tool("unzip")) {
-                cmd_argv = new string[] { "unzip", "-l", archive_path };
             } else {
                 // Check ExtFS helper
-                string? helper_name = registry.get_extfs_helper_name_for_filename(archive_path);
-                if (helper_name != null) {
-                    var h = registry.find_extfs_helper(helper_name);
-                    if (h != null) {
-                        cmd_argv = new string[] { h.script_path, "list", archive_path };
+                var helper = registry.get_extfs_helper_for_archive(archive_path);
+                if (helper != null) {
+                    cmd_argv = new string[] { helper.script_path, "list", archive_path };
+                } else if (registry.has_tool("7z") || registry.has_tool("7zz")) {
+                    // Fallback to 7z for miscellaneous formats
+                    string tool = registry.has_tool("7z") ? "7z" : "7zz";
+                    if (has_pwd) {
+                        cmd_argv = new string[] { tool, "l", "-ba", "-bsp0", "-p" + pwd, archive_path };
                     } else {
-                        throw new IOError.NOT_SUPPORTED(@"No suitable archiver found to list $(Path.get_basename(archive_path))");
+                        cmd_argv = new string[] { tool, "l", "-ba", "-bsp0", "-p-", archive_path };
                     }
                 } else {
-                    throw new IOError.NOT_SUPPORTED(@"Unsupported archive format: $(Path.get_basename(archive_path))");
+                    throw new IOError.NOT_SUPPORTED(@"No suitable archiver or ExtFS helper found to list $(Path.get_basename(archive_path))");
                 }
             }
 
@@ -327,9 +330,10 @@ namespace VCommander {
 
                 int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
                 string lower_err = err_text.down();
-                bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
+                bool is_7z_or_unzip = (cmd_argv[0] == "7z" || cmd_argv[0] == "7zz" || cmd_argv[0] == "unzip");
+                bool is_pwd_err = is_7z_or_unzip && (lower_err.contains("password") || lower_err.contains("wrong password") ||
                                   lower_err.contains("cannot open encrypted archive") || lower_err.contains("headers error") ||
-                                  exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
+                                  exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255)));
 
                 if (is_pwd_err && tree.root.children.length == 0) {
                     if (has_pwd) {
@@ -493,9 +497,171 @@ namespace VCommander {
             return new ArchiveEntry(raw_path, name, is_dir, size, mtime, 0, "", "", false, null, raw_entry_path);
         }
 
+        private static int month_name_to_number(string tok) {
+            string s = tok.down();
+            switch (s) {
+                case "jan": return 1;
+                case "feb": return 2;
+                case "mar": return 3;
+                case "apr": return 4;
+                case "may": return 5;
+                case "jun": return 6;
+                case "jul": return 7;
+                case "aug": return 8;
+                case "sep": return 9;
+                case "oct": return 10;
+                case "nov": return 11;
+                case "dec": return 12;
+                default: return 0;
+            }
+        }
+
+        private static DateTime? parse_numeric_extfs_date(string date_str, string time_str) {
+            int year = 1970, month = 1, day = 1;
+            int hour = 0, min = 0, sec = 0;
+
+            if (time_str.length > 0) {
+                string[] t_parts = time_str.split(":");
+                if (t_parts.length > 0) int.try_parse(t_parts[0], out hour);
+                if (t_parts.length > 1) int.try_parse(t_parts[1], out min);
+                if (t_parts.length > 2) int.try_parse(t_parts[2], out sec);
+            }
+
+            if (date_str.contains("-")) {
+                string[] d_parts = date_str.split("-");
+                if (d_parts.length >= 3) {
+                    if (d_parts[0].length == 4) {
+                        int.try_parse(d_parts[0], out year);
+                        int.try_parse(d_parts[1], out month);
+                        int.try_parse(d_parts[2], out day);
+                    } else {
+                        int.try_parse(d_parts[0], out month);
+                        int.try_parse(d_parts[1], out day);
+                        int.try_parse(d_parts[2], out year);
+                    }
+                }
+            } else if (date_str.contains("/")) {
+                string[] d_parts = date_str.split("/");
+                if (d_parts.length >= 3) {
+                    if (d_parts[0].length == 4) {
+                        int.try_parse(d_parts[0], out year);
+                        int.try_parse(d_parts[1], out month);
+                        int.try_parse(d_parts[2], out day);
+                    } else {
+                        int.try_parse(d_parts[0], out month);
+                        int.try_parse(d_parts[1], out day);
+                        int.try_parse(d_parts[2], out year);
+                        if (year < 70) year += 2000;
+                        else if (year < 100) year += 1900;
+                    }
+                }
+            }
+
+            if (month < 1 || month > 12) month = 1;
+            if (day < 1 || day > 31) day = 1;
+            return new DateTime.local(year, month, day, hour, min, sec);
+        }
+
         private static ArchiveEntry? parse_extfs_line(string line) {
-            // Standard modified ls -l output
-            return parse_tar_line(line);
+            // Standard ExtFS / ls -l format:
+            // PERMS LINKS OWNER GROUP SIZE [MONTH DAY TIME_OR_YEAR | DATE TIME] [PATH/]FILENAME [-> TARGET]
+            string[] parts = line.split_set(" \t");
+            var non_empty = new GenericArray<string>();
+            for (int i = 0; i < parts.length; i++) {
+                if (parts[i].length > 0) non_empty.add(parts[i]);
+            }
+            if (non_empty.length < 7) return null;
+
+            string perms = non_empty.get(0);
+            bool is_dir = perms.has_prefix("d");
+            bool is_symlink = perms.has_prefix("l");
+
+            uint32 mode = 0;
+            if (perms.length >= 10) {
+                if (perms[1] == 'r') mode |= 0400;
+                if (perms[2] == 'w') mode |= 0200;
+                if (perms[3] == 'x' || perms[3] == 's') mode |= 0100;
+                if (perms[4] == 'r') mode |= 0040;
+                if (perms[5] == 'w') mode |= 0020;
+                if (perms[6] == 'x' || perms[6] == 's') mode |= 0010;
+                if (perms[7] == 'r') mode |= 0004;
+                if (perms[8] == 'w') mode |= 0002;
+                if (perms[9] == 'x' || perms[9] == 't') mode |= 0001;
+            }
+
+            string owner = non_empty.get(2);
+            string group = non_empty.get(3);
+
+            int64 size = 0;
+            int64.try_parse(non_empty.get(4), out size);
+
+            DateTime? mtime = null;
+            uint path_start_idx = 7;
+
+            string tok5 = non_empty.get(5).down();
+            int month_num = month_name_to_number(tok5);
+
+            if (month_num > 0 && non_empty.length >= 8) {
+                // Mon DD TIME_OR_YEAR
+                int day_num = 1;
+                int.try_parse(non_empty.get(6), out day_num);
+                string tok7 = non_empty.get(7);
+                path_start_idx = 8;
+
+                if (tok7.contains(":")) {
+                    string[] t_parts = tok7.split(":");
+                    int hour = 0, min = 0, sec = 0;
+                    if (t_parts.length > 0) int.try_parse(t_parts[0], out hour);
+                    if (t_parts.length > 1) int.try_parse(t_parts[1], out min);
+                    if (t_parts.length > 2) int.try_parse(t_parts[2], out sec);
+
+                    var now = new DateTime.now_local();
+                    int year = now.get_year();
+                    if (month_num > now.get_month() + 1) {
+                        year -= 1;
+                    }
+                    mtime = new DateTime.local(year, month_num, day_num, hour, min, sec);
+                } else {
+                    int year = 2000;
+                    int.try_parse(tok7, out year);
+                    mtime = new DateTime.local(year, month_num, day_num, 0, 0, 0);
+                }
+            } else if (non_empty.length >= 7) {
+                // Numeric date format
+                string date_tok = non_empty.get(5);
+                string time_tok = (non_empty.length >= 8 && non_empty.get(6).contains(":")) ? non_empty.get(6) : "";
+                path_start_idx = (time_tok.length > 0) ? 7 : 6;
+
+                mtime = parse_numeric_extfs_date(date_tok, time_tok);
+            }
+
+            if (path_start_idx >= non_empty.length) return null;
+
+            var sb = new StringBuilder();
+            for (uint i = path_start_idx; i < non_empty.length; i++) {
+                if (sb.len > 0) sb.append(" ");
+                sb.append(non_empty.get(i));
+            }
+            string raw_path = sb.str.strip();
+            string? symlink_target = null;
+            if (is_symlink) {
+                int arrow = raw_path.index_of(" -> ");
+                if (arrow > 0) {
+                    symlink_target = raw_path.substring(arrow + 4);
+                    raw_path = raw_path.substring(0, arrow).strip();
+                }
+            }
+
+            string raw_entry_path = raw_path;
+            while (raw_path.has_prefix("./")) raw_path = raw_path.substring(2);
+            while (raw_path.has_suffix("/")) {
+                is_dir = true;
+                raw_path = raw_path.substring(0, raw_path.length - 1);
+            }
+            if (raw_path.length == 0) return null;
+
+            string name = Path.get_basename(raw_path);
+            return new ArchiveEntry(raw_path, name, is_dir, size, mtime, mode, owner, group, is_symlink, symlink_target, raw_entry_path);
         }
 
         public static GenericArray<FileItem> list_directory(ArchiveTree tree, string inner_path, File current_dir_file) {
@@ -587,9 +753,24 @@ namespace VCommander {
             string? pwd = get_cached_password(archive_path);
             bool has_pwd = (pwd != null && pwd.length > 0);
 
-            string[] cmd_argv;
-            bool is_extfs = false;
+            var helper = registry.get_extfs_helper_for_archive(archive_path);
+            if (helper != null && !lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") &&
+                !lower.has_suffix(".tgz") && !lower.has_suffix(".tar.xz") && !lower.has_suffix(".txz") &&
+                !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2") && !lower.has_suffix(".tbz2") &&
+                !((lower.has_suffix(".zip") || lower.has_suffix(".7z")) && (registry.has_tool("7z") || registry.has_tool("7zz") || registry.has_tool("unzip")))) {
+                var runner = ExtFSRunner.get_instance();
+                try {
+                    yield runner.copyout(helper, archive_path, member_path, dest_file.get_path(), cancellable);
+                } catch (Error e) {
+                    if (dest_file.query_exists()) {
+                        try { dest_file.delete(); } catch (Error ignored) {}
+                    }
+                    throw e;
+                }
+                return;
+            }
 
+            string[] cmd_argv;
             if (lower.has_suffix(".tar") || lower.has_suffix(".tar.gz") || lower.has_suffix(".tgz") ||
                 lower.has_suffix(".tar.xz") || lower.has_suffix(".txz") || lower.has_suffix(".tar.zst") ||
                 lower.has_suffix(".tar.bz2") || lower.has_suffix(".tbz2")) {
@@ -608,79 +789,55 @@ namespace VCommander {
                     cmd_argv = new string[] { "unzip", "-p", "-P", "", archive_path, member_path };
                 }
             } else {
-                string? helper_name = registry.get_extfs_helper_name_for_filename(archive_path);
-                if (helper_name != null) {
-                    var h = registry.find_extfs_helper(helper_name);
-                    if (h != null) {
-                        is_extfs = true;
-                        cmd_argv = new string[] { h.script_path, "copyout", archive_path, member_path, dest_file.get_path() };
-                    } else {
-                        throw new IOError.NOT_SUPPORTED(@"No suitable archiver found to extract from $(Path.get_basename(archive_path))");
-                    }
-                } else {
-                    throw new IOError.NOT_SUPPORTED(@"Unsupported archive format: $(Path.get_basename(archive_path))");
-                }
+                throw new IOError.NOT_SUPPORTED(@"Unsupported archive format: $(Path.get_basename(archive_path))");
             }
 
-            if (is_extfs) {
-                var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
-                Subprocess proc = launcher.spawnv(cmd_argv);
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
+            Subprocess proc = launcher.spawnv(cmd_argv);
+
+            var in_stream = proc.get_stdout_pipe();
+            var out_stream = yield dest_file.replace_async(null, false, FileCreateFlags.REPLACE_DESTINATION, Priority.DEFAULT, cancellable);
+
+            yield out_stream.splice_async(in_stream, OutputStreamSpliceFlags.CLOSE_SOURCE | OutputStreamSpliceFlags.CLOSE_TARGET, Priority.DEFAULT, cancellable);
+
+            try {
+                yield proc.wait_check_async(cancellable);
+            } catch (Error e) {
+                // Read stderr for error analysis
+                string err_text = "";
                 try {
-                    yield proc.wait_check_async(cancellable);
-                } catch (Error e) {
-                    if (dest_file.query_exists()) {
-                        try { dest_file.delete(); } catch (Error ignored) {}
+                    var err_stream = new DataInputStream(proc.get_stderr_pipe());
+                    size_t len;
+                    string? err_line;
+                    var err_sb = new StringBuilder();
+                    while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
+                        err_sb.append(err_line);
+                        err_sb.append("\n");
                     }
-                    throw e;
+                    err_text = err_sb.str;
+                } catch (Error ignored) {}
+
+                // Clean up partially written / empty output file
+                if (dest_file.query_exists()) {
+                    try { dest_file.delete(); } catch (Error ignored) {}
                 }
-            } else {
-                var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
-                Subprocess proc = launcher.spawnv(cmd_argv);
 
-                var in_stream = proc.get_stdout_pipe();
-                var out_stream = yield dest_file.replace_async(null, false, FileCreateFlags.REPLACE_DESTINATION, Priority.DEFAULT, cancellable);
+                int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+                string lower_err = err_text.down();
+                bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
+                                  lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
+                                  exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
 
-                yield out_stream.splice_async(in_stream, OutputStreamSpliceFlags.CLOSE_SOURCE | OutputStreamSpliceFlags.CLOSE_TARGET, Priority.DEFAULT, cancellable);
-
-                try {
-                    yield proc.wait_check_async(cancellable);
-                } catch (Error e) {
-                    // Read stderr for error analysis
-                    string err_text = "";
-                    try {
-                        var err_stream = new DataInputStream(proc.get_stderr_pipe());
-                        size_t len;
-                        string? err_line;
-                        var err_sb = new StringBuilder();
-                        while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
-                            err_sb.append(err_line);
-                            err_sb.append("\n");
-                        }
-                        err_text = err_sb.str;
-                    } catch (Error ignored) {}
-
-                    // Clean up partially written / empty output file
-                    if (dest_file.query_exists()) {
-                        try { dest_file.delete(); } catch (Error ignored) {}
+                if (is_pwd_err) {
+                    if (has_pwd) {
+                        clear_cached_password(archive_path);
+                        throw new ArchivePasswordError.INVALID(@"Incorrect password for $(Path.get_basename(archive_path))");
+                    } else {
+                        throw new ArchivePasswordError.REQUIRED(@"Password required for $(Path.get_basename(archive_path))");
                     }
-
-                    int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
-                    string lower_err = err_text.down();
-                    bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
-                                      lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
-                                      exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
-
-                    if (is_pwd_err) {
-                        if (has_pwd) {
-                            clear_cached_password(archive_path);
-                            throw new ArchivePasswordError.INVALID(@"Incorrect password for $(Path.get_basename(archive_path))");
-                        } else {
-                            throw new ArchivePasswordError.REQUIRED(@"Password required for $(Path.get_basename(archive_path))");
-                        }
-                    }
-
-                    throw e;
                 }
+
+                throw e;
             }
         }
     }

@@ -53,12 +53,51 @@ namespace VCommander {
         }
     }
 
+    public class ExtFSBindingRule : Object {
+        public string helper_name { get; construct set; }
+        public string? shell_pattern { get; construct set; default = null; }
+        public Regex? regex_pattern { get; construct set; default = null; }
+        public bool ignore_case { get; construct set; default = true; }
+
+        public ExtFSBindingRule(string helper_name, string? shell_pattern, Regex? regex_pattern, bool ignore_case = true) {
+            Object(
+                helper_name: helper_name,
+                shell_pattern: shell_pattern,
+                regex_pattern: regex_pattern,
+                ignore_case: ignore_case
+            );
+        }
+
+        public bool matches(string filename) {
+            string base_name = Path.get_basename(filename);
+            if (shell_pattern != null && shell_pattern.length > 0) {
+                if (shell_pattern.has_prefix(".")) {
+                    if (ignore_case) {
+                        if (base_name.down().has_suffix(shell_pattern.down())) return true;
+                    } else {
+                        if (base_name.has_suffix(shell_pattern)) return true;
+                    }
+                } else {
+                    string pat = shell_pattern.contains("*") || shell_pattern.contains("?") ?
+                        shell_pattern : "*" + shell_pattern;
+                    var ps = new PatternSpec(ignore_case ? pat.down() : pat);
+                    if (ps.match_string(ignore_case ? base_name.down() : base_name)) return true;
+                }
+            }
+            if (regex_pattern != null) {
+                if (regex_pattern.match(base_name)) return true;
+            }
+            return false;
+        }
+    }
+
     public class ArchiverRegistry : Object {
         private static ArchiverRegistry? instance = null;
 
         private GenericSet<string> available_tools;
         private GenericArray<ArchiveFormatInfo> pack_formats;
         private GenericArray<ExtFSHelperInfo> extfs_helpers;
+        private GenericArray<ExtFSBindingRule> extfs_rules;
 
         public static ArchiverRegistry get_instance() {
             if (instance == null) {
@@ -71,9 +110,11 @@ namespace VCommander {
             available_tools = new GenericSet<string>(str_hash, str_equal);
             pack_formats = new GenericArray<ArchiveFormatInfo>();
             extfs_helpers = new GenericArray<ExtFSHelperInfo>();
+            extfs_rules = new GenericArray<ExtFSBindingRule>();
 
             detect_system_tools();
             detect_extfs_helpers();
+            load_extfs_rules();
             initialize_pack_formats();
         }
 
@@ -81,9 +122,11 @@ namespace VCommander {
             available_tools.remove_all();
             pack_formats = new GenericArray<ArchiveFormatInfo>();
             extfs_helpers = new GenericArray<ExtFSHelperInfo>();
+            extfs_rules = new GenericArray<ExtFSBindingRule>();
 
             detect_system_tools();
             detect_extfs_helpers();
+            load_extfs_rules();
             initialize_pack_formats();
         }
 
@@ -132,12 +175,28 @@ namespace VCommander {
             return extfs_helpers;
         }
 
+        public GenericArray<ExtFSBindingRule> get_extfs_rules() {
+            return extfs_rules;
+        }
+
         public ExtFSHelperInfo? find_extfs_helper(string name) {
             for (uint i = 0; i < extfs_helpers.length; i++) {
                 var h = extfs_helpers.get(i);
                 if (h.name == name) {
                     return h;
                 }
+            }
+            return null;
+        }
+
+        public bool is_extfs_archive(string filename) {
+            return get_extfs_helper_name_for_filename(filename) != null;
+        }
+
+        public ExtFSHelperInfo? get_extfs_helper_for_archive(string filename) {
+            string? helper_name = get_extfs_helper_name_for_filename(filename);
+            if (helper_name != null) {
+                return find_extfs_helper(helper_name);
             }
             return null;
         }
@@ -151,40 +210,50 @@ namespace VCommander {
                 lower.has_suffix(".tar.xz") || lower.has_suffix(".txz") ||
                 lower.has_suffix(".tar.zst") ||
                 lower.has_suffix(".7z") ||
-                lower.has_suffix(".rar") ||
-                lower.has_suffix(".iso") ||
-                lower.has_suffix(".deb") ||
-                lower.has_suffix(".rpm") ||
-                lower.has_suffix(".cab") ||
-                lower.has_suffix(".arj") ||
-                lower.has_suffix(".cpio") ||
                 lower.has_suffix(".gz") ||
                 lower.has_suffix(".bz2") ||
                 lower.has_suffix(".xz") ||
                 lower.has_suffix(".zst")) {
                 return true;
             }
+            if (is_extfs_archive(filename)) {
+                return true;
+            }
             return false;
         }
 
         public string? get_extfs_helper_name_for_filename(string filename) {
+            // 1. Check loaded rules (from user & system ini + fallbacks)
+            for (uint i = 0; i < extfs_rules.length; i++) {
+                var rule = extfs_rules.get(i);
+                if (rule.matches(filename)) {
+                    if (find_extfs_helper(rule.helper_name) != null) {
+                        return rule.helper_name;
+                    }
+                }
+            }
+
+            // 2. Direct match with user plugin names:
+            // e.g. ~/.config/vcmd/extfs/myarch matches *.myarch
+            for (uint i = 0; i < extfs_helpers.length; i++) {
+                var h = extfs_helpers.get(i);
+                if (h.is_user_plugin) {
+                    string ext = "." + h.name.down();
+                    if (filename.down().has_suffix(ext)) {
+                        return h.name;
+                    }
+                }
+            }
+
+            // 3. Fallbacks for zip and 7z when native CLI tools are absent
             string lower = filename.down();
-            if (lower.has_suffix(".7z")) return "u7z";
-            if (lower.has_suffix(".rar")) return "urar";
-            if (lower.has_suffix(".iso")) return "iso9660";
-            if (lower.has_suffix(".deb")) return "deb";
-            if (lower.has_suffix(".rpm")) return "rpm";
-            if (lower.has_suffix(".cab")) return "ucab";
-            if (lower.has_suffix(".arj")) return "uarj";
-            if (lower.has_suffix(".lha") || lower.has_suffix(".lzh")) return "ulha";
-            if (lower.has_suffix(".ace")) return "uace";
-            if (lower.has_suffix(".zoo")) return "uzoo";
-            if (lower.has_suffix(".ha")) return "uha";
-            if (lower.has_suffix(".alz")) return "ualz";
-            if (lower.has_suffix(".arc")) return "uarc";
-            if (lower.has_suffix(".dar")) return "udar";
-            if (lower.has_suffix(".wim")) return "uwim";
-            if (lower.has_suffix(".zip") && !has_tool("unzip") && !has_tool("7z") && !has_tool("7zz")) return "uzip";
+            if (lower.has_suffix(".zip") && !has_tool("unzip") && !has_tool("7z") && !has_tool("7zz")) {
+                if (find_extfs_helper("uzip") != null) return "uzip";
+            }
+            if (lower.has_suffix(".7z") && !has_tool("7z") && !has_tool("7zz")) {
+                if (find_extfs_helper("u7z") != null) return "u7z";
+            }
+
             return null;
         }
 
@@ -213,11 +282,21 @@ namespace VCommander {
         }
 
         private void detect_extfs_helpers() {
-            // Check user config directory first (~/.config/vcmd/extfs)
+            // 1. Check user config directory (~/.config/vcmd/extfs)
             string user_extfs_dir = Path.build_filename(Environment.get_user_config_dir(), "vcmd", "extfs");
+            var user_dir = File.new_for_path(user_extfs_dir);
+            if (!user_dir.query_exists()) {
+                try {
+                    user_dir.make_directory_with_parents(null);
+                } catch (Error ignored) {}
+            }
             scan_extfs_directory(user_extfs_dir, true);
 
-            // System ExtFS directories (from Midnight Commander)
+            // 2. Check MC user extfs directory (~/.local/share/mc/extfs.d)
+            string mc_user_extfs_dir = Path.build_filename(Environment.get_user_data_dir(), "mc", "extfs.d");
+            scan_extfs_directory(mc_user_extfs_dir, true);
+
+            // 3. System ExtFS directories (from Midnight Commander)
             string[] system_extfs_dirs = {
                 "/usr/lib/mc/extfs.d",
                 "/usr/libexec/mc/extfs.d",
@@ -228,6 +307,120 @@ namespace VCommander {
             foreach (var dir in system_extfs_dirs) {
                 scan_extfs_directory(dir, false);
             }
+        }
+
+        private void load_extfs_rules() {
+            // 1. User config in vcmd (~/.config/vcmd/extfs.ini)
+            string user_vcmd_ini = Path.build_filename(Environment.get_user_config_dir(), "vcmd", "extfs.ini");
+            load_rules_from_ini(user_vcmd_ini);
+
+            // 2. User MC config (~/.config/mc/mc.ext.ini)
+            string user_mc_ini = Path.build_filename(Environment.get_user_config_dir(), "mc", "mc.ext.ini");
+            load_rules_from_ini(user_mc_ini);
+
+            // 3. System MC config (/etc/mc/mc.ext.ini)
+            load_rules_from_ini("/etc/mc/mc.ext.ini");
+
+            // 4. Built-in fallback rules
+            load_default_fallback_rules();
+        }
+
+        private void load_rules_from_ini(string file_path) {
+            var file = File.new_for_path(file_path);
+            if (!file.query_exists()) return;
+
+            var kf = new KeyFile();
+            try {
+                kf.load_from_file(file_path, KeyFileFlags.NONE);
+            } catch (Error e) {
+                return;
+            }
+
+            string[] groups = kf.get_groups();
+            foreach (string g in groups) {
+                try {
+                    if (!kf.has_key(g, "Open")) continue;
+                    string open_val = kf.get_string(g, "Open");
+                    int p = open_val.index_of("%p/");
+                    if (p < 0) continue;
+                    string after = open_val.substring(p + 3);
+                    int colon = after.index_of("://");
+                    if (colon <= 0) continue;
+                    string helper_name = after.substring(0, colon);
+                    if (helper_name.has_suffix("+")) {
+                        helper_name = helper_name.substring(0, helper_name.length - 1);
+                    }
+
+                    string? shell_pat = null;
+                    if (kf.has_key(g, "Shell")) {
+                        shell_pat = kf.get_string(g, "Shell").strip();
+                    }
+
+                    string? regex_pat = null;
+                    if (kf.has_key(g, "Regex")) {
+                        regex_pat = kf.get_string(g, "Regex").strip();
+                    }
+
+                    bool ignore_case = true;
+                    if (kf.has_key(g, "ShellIgnoreCase")) {
+                        ignore_case = kf.get_boolean(g, "ShellIgnoreCase");
+                    } else if (kf.has_key(g, "RegexIgnoreCase")) {
+                        ignore_case = kf.get_boolean(g, "RegexIgnoreCase");
+                    }
+
+                    Regex? rx = null;
+                    if (regex_pat != null && regex_pat.length > 0) {
+                        try {
+                            RegexCompileFlags flags = RegexCompileFlags.OPTIMIZE;
+                            if (ignore_case) flags |= RegexCompileFlags.CASELESS;
+                            rx = new Regex(regex_pat, flags);
+                        } catch (RegexError ignored) {}
+                    }
+
+                    if (shell_pat != null || rx != null) {
+                        extfs_rules.add(new ExtFSBindingRule(helper_name, shell_pat, rx, ignore_case));
+                    }
+                } catch (Error ignored) {}
+            }
+        }
+
+        private void load_default_fallback_rules() {
+            string[,] fallbacks = {
+                { "deb", ".deb" },
+                { "deb", ".udeb" },
+                { "deb", ".ipk" },
+                { "rpm", ".rpm" },
+                { "rpm", ".srpm" },
+                { "rpm", ".spm" },
+                { "iso9660", ".iso" },
+                { "iso9660", ".img" },
+                { "urar", ".rar" },
+                { "ucab", ".cab" },
+                { "uarj", ".arj" },
+                { "ulha", ".lha" },
+                { "ulha", ".lzh" },
+                { "uace", ".ace" },
+                { "uzoo", ".zoo" },
+                { "uha", ".ha" },
+                { "ualz", ".alz" },
+                { "uarc", ".arc" },
+                { "udar", ".dar" },
+                { "uwim", ".wim" },
+                { "trpm", ".trpm" },
+                { "uar", ".a" },
+                { "uar", ".lib" }
+            };
+
+            for (int i = 0; i < fallbacks.length[0]; i++) {
+                string helper = fallbacks[i, 0];
+                string ext = fallbacks[i, 1];
+                extfs_rules.add(new ExtFSBindingRule(helper, ext, null, true));
+            }
+
+            try {
+                extfs_rules.add(new ExtFSBindingRule("urar", null, new Regex("\\.r[0-9][0-9]$", RegexCompileFlags.CASELESS | RegexCompileFlags.OPTIMIZE), true));
+                extfs_rules.add(new ExtFSBindingRule("uarj", null, new Regex("\\.a[0-9][0-9]$", RegexCompileFlags.CASELESS | RegexCompileFlags.OPTIMIZE), true));
+            } catch (RegexError ignored) {}
         }
 
         private void scan_extfs_directory(string dir_path, bool is_user_plugin) {

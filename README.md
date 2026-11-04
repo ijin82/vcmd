@@ -59,6 +59,12 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 * **Unified Conflict Resolution:** Centralized handling for overwrite, skip, or retry when encountering existing files or permissions issues.
 * **Trash & Direct Delete:** Support for both FreeDesktop Trash and direct permanent deletion.
 
+### 📦 Archive Virtual File System & Packing (<kbd>Shift</kbd> + <kbd>F2</kbd>)
+* **Virtual Archive VFS (`archive:///`):** Press <kbd>Enter</kbd> or double-click any archive or container file (`.zip`, `.tar.*`, `.7z`, `.rar`, `.deb`, `.rpm`, `.iso`, etc.) to enter and navigate it as a virtual directory.
+* **Instant Navigation & In-Archive Viewing:** Fast in-memory tree browsing with accurate dates, sizes, permissions, and directory hierarchies. Press <kbd>Enter</kbd>, <kbd>F3</kbd>, or <kbd>F4</kbd> to inspect or edit files directly from within the archive.
+* **Password & Encryption Support:** Seamless password prompting dialog (`Adw.AlertDialog`) with session caching and peek toggle for password-protected `.zip` and `.7z` archives.
+* **Archive Pack Dialog (<kbd>Shift</kbd> + <kbd>F2</kbd>):** Pack selected files into `.zip`, `.tar.gz`, `.7z`, `.tar.xz`, `.tar.zst`, `.tar.bz2`, or `.tar` with configurable compression levels (Store, Fast, Normal, Maximum, Ultra), optional password encryption, and "Delete files after archiving" (move to archive).
+
 ### 🌐 Remote Connections (<kbd>F2</kbd>)
 * Connect to SSH, SFTP, FTP, or SMB through GVfs. SSH and SFTP first try the SSH agent from the built-in terminal (`SSH_AUTH_SOCK`) via `sshfs`. If that key is not available, the system asks for a password.
 * The address can be saved as a bookmark without the password. Opening that bookmark mounts the location again.
@@ -86,6 +92,100 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 * **Layout & Visibility:** Toggle path toolbar, function key bar, and customize brief view column width.
 * **Dialog Sizes:** Customize default width and height for dialogs (Bookmarks, Shortcuts, Open With).
 * **Shell & Console:** Configure preferred shell interpreter (`/bin/bash`, `/bin/zsh`, `/usr/bin/fish`) and terminal scrollback history limit.
+
+---
+
+## 🔌 ExtFS Plugins & Custom Archive Handlers
+
+`vcmd` features full compatibility with the **Midnight Commander ExtFS (External Virtual File System)** plugin specification. This allows browsing and extracting archive and container formats without writing custom code or linking external libraries.
+
+### Supported Out of the Box
+* **System ExtFS Helpers:** If Midnight Commander is installed or system ExtFS helpers are present (`/usr/lib/mc/extfs.d/`, `/usr/libexec/mc/extfs.d/`), `vcmd` automatically recognizes and browses `.deb`, `.rpm`, `.iso`, `.rar`, `.cab`, `.arj`, `.lha`, `.zoo`, `.wim`, `.cpio`, `.a`, and more.
+* **Native Fallbacks:** Standard formats (`.zip`, `.tar.*`, `.7z`) use fast direct CLI tools (`tar`, `unzip`, `7z`).
+
+### Creating Custom Plugins
+Users can easily add support for proprietary or exotic container formats by dropping an executable shell or Python script into:
+```bash
+~/.config/vcmd/extfs/
+```
+
+#### Auto-Binding Convention
+If your script is named `foo` (and marked executable with `chmod +x ~/.config/vcmd/extfs/foo`), `vcmd` will automatically match and open all `*.foo` files with it!
+
+#### ExtFS Protocol Specification
+ExtFS plugins are executable scripts that receive commands as command-line arguments:
+
+1. **`list <archive_file>`** (Required)
+   Outputs the archive's table of contents to `stdout` in standard `ls -l` format:
+   ```text
+   PERMS LINKS OWNER GROUP SIZE DATE TIME [PATH/]FILENAME [-> [PATH/]FILENAME]
+   ```
+   *Example output:*
+   ```text
+   drwxr-xr-x 1 user group 0 Nov 04 12:00 docs/
+   -rw-r--r-- 1 user group 1024 Nov 04 12:00 docs/manual.txt
+   ```
+   *Note:* The output must not include `.` or `..` entries.
+
+2. **`copyout <archive_file> <member_path> <dest_file>`** (Required for viewing/extraction)
+   Extracts `member_path` from `archive_file` into `dest_file`.
+
+3. **`copyin <archive_file> <member_path> <source_file>`** (Optional, for writable formats)
+   Injects `source_file` as `member_path` inside `archive_file`.
+
+4. **`rm <archive_file> <member_path>`** (Optional)
+   Removes `member_path` from `archive_file`.
+
+5. **`mkdir <archive_file> <dir_path>`** (Optional)
+   Creates `dir_path` inside `archive_file`.
+
+#### Example Skeleton Script (`~/.config/vcmd/extfs/mycontainer`):
+```bash
+#!/bin/bash
+ACTION="$1"
+ARCHIVE="$2"
+
+case "$ACTION" in
+    list)
+        # Output table of contents formatted like ls -l
+        mytool list "$ARCHIVE" | awk '{ printf "-rw-r--r-- 1 user group %s Nov 04 12:00 %s\n", $1, $2 }'
+        exit 0
+        ;;
+    copyout)
+        MEMBER="$3"
+        DEST="$4"
+        mytool extract-file "$ARCHIVE" "$MEMBER" -o "$DEST"
+        exit $?
+        ;;
+    copyin)
+        MEMBER="$3"
+        SRC="$4"
+        mytool add-file "$ARCHIVE" "$MEMBER" "$SRC"
+        exit $?
+        ;;
+    rm)
+        MEMBER="$3"
+        mytool remove-file "$ARCHIVE" "$MEMBER"
+        exit $?
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+```
+Mark it executable:
+```bash
+chmod +x ~/.config/vcmd/extfs/mycontainer
+```
+
+#### Custom Extension Mappings (`~/.config/vcmd/extfs.ini`)
+To map multiple extensions or regular expressions to an ExtFS helper, you can create `~/.config/vcmd/extfs.ini` (or use existing `~/.config/mc/mc.ext.ini`):
+```ini
+[mycontainer]
+Shell=.mycontainer
+Regex=\.(cnt|pak|bundle)$
+Open=%cd %p/mycontainer://
+```
 
 ---
 
@@ -121,6 +221,7 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 | <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Insert selected item name into bottom command line |
 | <kbd>F1</kbd> | Open Keyboard Shortcuts & Help dialog |
 | <kbd>F2</kbd> | Connect to a remote server (SSH, SFTP, FTP, SMB) |
+| <kbd>Shift</kbd> + <kbd>F2</kbd> | Pack selected files to archive (`ArchivePackDialog`) |
 | <kbd>F3</kbd> | View selected file in external viewer |
 | <kbd>F4</kbd> | Edit selected file in external editor |
 | <kbd>F5</kbd> | Copy selected / tagged items |
