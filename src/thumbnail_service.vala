@@ -161,6 +161,10 @@ namespace VCommander {
                     in_flight_hashes.remove(key);
                     mutex.unlock();
                 }
+            } else {
+                mutex.lock();
+                in_flight_hashes.remove(key);
+                mutex.unlock();
             }
         }
 

@@ -33,7 +33,8 @@ namespace VCommander {
                 }
             });
             add_action(quit_action);
-            set_accels_for_action("app.quit", new string[] { "<Control>q", "<Control>Q" });
+            string[] accels = { "<Control>q", "<Control>Q", null };
+            set_accels_for_action("app.quit", accels);
         }
 
         protected override void activate() {

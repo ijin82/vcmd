@@ -1419,6 +1419,9 @@ namespace VCommander {
             if (custom_master_sorter != null) {
                 custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
             }
+            if (mode == PanelViewMode.GRID && thumbnail_grid_view != null) {
+                thumbnail_grid_view.factory = create_grid_factory();
+            }
             grab_focus_to_list();
             scroll_to_selected();
             view_mode_changed();
@@ -1753,20 +1756,8 @@ namespace VCommander {
                 cleanup_grid_item_binding(list_item);
                 list_item.set_data<FileItem?>("grid_bound_item", file_item);
 
-                if (file_item.thumbnail_paintable != null) {
-                    picture.paintable = file_item.thumbnail_paintable;
-                    picture.visible = true;
-                    icon.visible = false;
-                } else {
-                    picture.visible = false;
-                    picture.paintable = null;
-                    icon.gicon = file_item.icon;
-                    icon.pixel_size = icon_size;
-                    icon.visible = true;
-
-                    ThumbnailService.request_thumbnail(file_item);
-                }
-
+                // Connect thumbnail and tag notification handlers BEFORE requesting thumbnail
+                // so that synchronous cache resolutions or immediate updates are never missed
                 unowned FileItem target_item = file_item;
                 unowned Gtk.Picture target_pic = picture;
                 unowned Gtk.Image target_icon = icon;
@@ -1786,6 +1777,27 @@ namespace VCommander {
                     apply_tag_class(target_img_box, target_item.is_tagged);
                 });
                 list_item.set_data<ulong>("grid_tag_id", tag_handler_id);
+
+                if (file_item.thumbnail_paintable != null) {
+                    picture.paintable = file_item.thumbnail_paintable;
+                    picture.visible = true;
+                    icon.visible = false;
+                } else {
+                    picture.visible = false;
+                    picture.paintable = null;
+                    icon.gicon = file_item.icon;
+                    icon.pixel_size = icon_size;
+                    icon.visible = true;
+
+                    ThumbnailService.request_thumbnail(file_item);
+
+                    // Re-check in case request_thumbnail resolved synchronously from cache
+                    if (file_item.thumbnail_paintable != null) {
+                        picture.paintable = file_item.thumbnail_paintable;
+                        picture.visible = true;
+                        icon.visible = false;
+                    }
+                }
             });
 
             grid_factory.unbind.connect((item) => {
@@ -2894,6 +2906,14 @@ namespace VCommander {
         }
 
         public void cleanup() {
+            if (load_cancellable != null) {
+                load_cancellable.cancel();
+                load_cancellable = null;
+            }
+            if (dir_calc_cancellable != null) {
+                dir_calc_cancellable.cancel();
+                dir_calc_cancellable = null;
+            }
             if (save_config_timeout_id != 0) {
                 GLib.Source.remove(save_config_timeout_id);
                 save_config_timeout_id = 0;

@@ -4940,6 +4940,10 @@ row:selected .file-item-tagged {
                 });
                 return true;
             }
+            if (escape_sequence_timeout_id != 0) {
+                Source.remove(escape_sequence_timeout_id);
+                escape_sequence_timeout_id = 0;
+            }
             save_state();
             return false;
         }

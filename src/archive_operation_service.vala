@@ -625,12 +625,14 @@ namespace VCommander {
     }
 
     public class VfsExtractionTarget : Object {
-        public string inner_path { get; construct set; }
-        public File dest_file { get; construct set; }
-        public int64 size { get; construct set; }
+        public string inner_path { get; set; }
+        public File dest_file { get; set; }
+        public int64 size { get; set; }
 
         public VfsExtractionTarget(string inner_path, File dest_file, int64 size) {
-            Object(inner_path: inner_path, dest_file: dest_file, size: size);
+            this.inner_path = inner_path;
+            this.dest_file = dest_file;
+            this.size = size;
         }
     }
 }
