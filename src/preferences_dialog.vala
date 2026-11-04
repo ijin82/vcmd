@@ -57,9 +57,9 @@ namespace VCommander {
 
             panel_group.add(column_width_row);
 
-            var grid_tile_size_row = new Adw.SpinRow.with_range(30, 300, 30);
+            var grid_tile_size_row = new Adw.SpinRow.with_range(30, 390, 30);
             grid_tile_size_row.title = "Grid thumbnail tile size (px)";
-            grid_tile_size_row.subtitle = "Tile size in pixels for thumbnail grid view (30 - 300 px)";
+            grid_tile_size_row.subtitle = "Tile size in pixels for thumbnail grid view (30 - 390 px)";
             grid_tile_size_row.value = config.grid_tile_size;
 
             grid_tile_size_row.notify["value"].connect(() => {

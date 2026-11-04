@@ -102,7 +102,7 @@ namespace VCommander {
                     if (cancellable != null && cancellable.is_cancelled()) {
                         throw new IOError.CANCELLED("Operation cancelled");
                     }
-                    var file_list = yield enumerator.next_files_async(10, Priority.DEFAULT, cancellable);
+                    var file_list = yield enumerator.next_files_async(100, Priority.DEFAULT, cancellable);
                     if (file_list == null || file_list.length() == 0) {
                         break;
                     }
@@ -241,7 +241,7 @@ namespace VCommander {
                     );
                     while (true) {
                         if (cancellable != null && cancellable.is_cancelled()) return sum;
-                        var list = yield enumerator.next_files_async(25, Priority.DEFAULT, cancellable);
+                        var list = yield enumerator.next_files_async(200, Priority.DEFAULT, cancellable);
                         if (list == null || list.length() == 0) break;
                         foreach (var item in list) {
                             var child = file.get_child(item.get_name());
@@ -293,7 +293,7 @@ namespace VCommander {
                     if (cancellable != null && cancellable.is_cancelled()) {
                         throw new IOError.CANCELLED("Operation cancelled");
                     }
-                    var file_list = yield enumerator.next_files_async(20, Priority.DEFAULT, cancellable);
+                    var file_list = yield enumerator.next_files_async(100, Priority.DEFAULT, cancellable);
                     if (file_list == null || file_list.length() == 0) {
                         break;
                     }

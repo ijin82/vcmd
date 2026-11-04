@@ -61,6 +61,8 @@ namespace VCommander {
         private Cancellable? load_cancellable = null;
         private Cancellable? dir_calc_cancellable = null;
         private FileItem? calculating_item = null;
+        private uint shift_anchor_pos = Gtk.INVALID_LIST_POSITION;
+        private bool is_shift_navigating = false;
 
         // Detailed view columns (no Type column)
         private Gtk.ColumnViewColumn name_col;
@@ -159,6 +161,9 @@ namespace VCommander {
                 var old_item = (FileItem) store.get_item(i);
                 if (old_item != null) {
                     old_item.thumbnail_paintable = null;
+                    if (old_item.is_thumbnail_requested) {
+                        ThumbnailService.cancel_request(old_item);
+                    }
                 }
             }
             store.splice(0, old_search_count, array);
@@ -230,12 +235,7 @@ namespace VCommander {
                 box.append(label);
                 list_item.child = box;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                box.add_controller(right_click);
+                attach_item_click_controllers(list_item, box);
             });
 
             name_factory.bind.connect((item) => {
@@ -303,12 +303,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
 
             size_factory.bind.connect((item) => {
@@ -364,12 +359,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
 
             time_factory.bind.connect((item) => {
@@ -427,12 +417,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
 
             trash_orig_factory.bind.connect((item) => {
@@ -481,12 +466,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
 
             trash_date_factory.bind.connect((item) => {
@@ -550,12 +530,7 @@ namespace VCommander {
                 box.append(label);
                 list_item.child = box;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                box.add_controller(right_click);
+                attach_item_click_controllers(list_item, box);
             });
 
             super_name_factory.bind.connect((item) => {
@@ -632,12 +607,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
             super_owner_factory.bind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
@@ -679,12 +649,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
             super_group_factory.bind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
@@ -726,12 +691,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
             super_perm_factory.bind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
@@ -773,12 +733,7 @@ namespace VCommander {
                 label.hexpand = true;
                 list_item.child = label;
 
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                label.add_controller(right_click);
+                attach_item_click_controllers(list_item, label);
             });
             super_size_factory.bind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
@@ -921,6 +876,10 @@ namespace VCommander {
             custom_filter = new Gtk.CustomFilter((item) => {
                 var file_item = (FileItem) item;
                 if (file_item.is_parent_dir) {
+                    // Hide ".." parent folder in thumbnail grid mode for a clean Nautilus-like appearance
+                    if (view_mode == PanelViewMode.GRID) {
+                        return false;
+                    }
                     return true;
                 }
                 if (filter_text.length == 0) {
@@ -939,36 +898,41 @@ namespace VCommander {
             selection_model.notify["selected"].connect(() => {
                 if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
                     saved_selected_pos = selection_model.selected;
+                    if (!is_shift_navigating) {
+                        shift_anchor_pos = selection_model.selected;
+                    }
                 }
                 update_trash_restore_button();
             });
 
-            column_view.model = selection_model;
+            column_view.model = null;
             column_view.activate.connect(on_item_activated);
             attach_view_controllers(column_view);
 
-            super_column_view.model = selection_model;
+            super_column_view.model = null;
             super_column_view.activate.connect(on_item_activated);
             attach_view_controllers(super_column_view);
 
             // 2. GridView (Brief View)
-            grid_view = new Gtk.GridView(selection_model, create_brief_factory());
+            grid_view = new Gtk.GridView(null, create_brief_factory());
             grid_view.orientation = Gtk.Orientation.HORIZONTAL;
-            grid_view.max_columns = 100;
+            grid_view.max_columns = 40;
             grid_view.min_columns = 1;
             grid_view.add_css_class("file-list-view");
             grid_view.activate.connect(on_item_activated);
             attach_view_controllers(grid_view);
 
             // 3. GridView (Thumbnail / Grid View)
-            thumbnail_grid_view = new Gtk.GridView(selection_model, create_grid_factory());
+            thumbnail_grid_view = new Gtk.GridView(null, create_grid_factory());
             thumbnail_grid_view.orientation = Gtk.Orientation.VERTICAL;
-            thumbnail_grid_view.max_columns = 100;
+            thumbnail_grid_view.max_columns = 15;
             thumbnail_grid_view.min_columns = 1;
             thumbnail_grid_view.add_css_class("file-list-view");
             thumbnail_grid_view.add_css_class("thumbnail-grid-view");
             thumbnail_grid_view.activate.connect(on_item_activated);
             attach_view_controllers(thumbnail_grid_view);
+
+            update_active_view_model();
 
             var scroll_ctrl = new Gtk.EventControllerScroll(Gtk.EventControllerScrollFlags.VERTICAL);
             scroll_ctrl.scroll.connect((dx, dy) => {
@@ -1217,7 +1181,12 @@ namespace VCommander {
                     }
                     return Gdk.EVENT_STOP;
                 }
+                bool is_shift = (state & Gdk.ModifierType.SHIFT_MASK) != 0;
                 if (keyval == Gdk.Key.Down) {
+                    if (is_shift) {
+                        handle_shift_arrow_navigation(Gdk.Key.Down);
+                        return Gdk.EVENT_STOP;
+                    }
                     uint cur = selection_model.selected;
                     uint total = sort_model.get_n_items();
                     if (total > 0 && cur + 1 < total) {
@@ -1227,6 +1196,10 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
                 if (keyval == Gdk.Key.Up) {
+                    if (is_shift) {
+                        handle_shift_arrow_navigation(Gdk.Key.Up);
+                        return Gdk.EVENT_STOP;
+                    }
                     uint cur = selection_model.selected;
                     if (cur > 0) {
                         selection_model.selected = cur - 1;
@@ -1235,6 +1208,10 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
                 if (keyval == Gdk.Key.Page_Down) {
+                    if (is_shift) {
+                        handle_shift_arrow_navigation(Gdk.Key.Page_Down);
+                        return Gdk.EVENT_STOP;
+                    }
                     uint cur = selection_model.selected;
                     uint total = sort_model.get_n_items();
                     if (total > 0) {
@@ -1245,6 +1222,10 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
                 if (keyval == Gdk.Key.Page_Up) {
+                    if (is_shift) {
+                        handle_shift_arrow_navigation(Gdk.Key.Page_Up);
+                        return Gdk.EVENT_STOP;
+                    }
                     uint cur = selection_model.selected;
                     if (cur > 0) {
                         uint next = (cur > 10) ? cur - 10 : 0;
@@ -1255,6 +1236,14 @@ namespace VCommander {
                 }
                 return Gdk.EVENT_PROPAGATE;
             });
+            key_ctrl.key_released.connect((keyval, keycode, state) => {
+                if (keyval == Gdk.Key.Shift_L || keyval == Gdk.Key.Shift_R) {
+                    is_shift_navigating = false;
+                    if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                        shift_anchor_pos = selection_model.selected;
+                    }
+                }
+            });
             filter_entry.add_controller(key_ctrl);
 
             filter_box.append(filter_entry);
@@ -1263,8 +1252,18 @@ namespace VCommander {
 
         private void attach_view_controllers(Gtk.Widget target_view) {
             var key_controller = new Gtk.EventControllerKey();
+            key_controller.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_controller.key_pressed.connect((keyval, keycode, state) => {
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
+                bool is_shift = (state & Gdk.ModifierType.SHIFT_MASK) != 0;
+                bool is_ctrl = (state & Gdk.ModifierType.CONTROL_MASK) != 0;
+                bool is_alt = (state & Gdk.ModifierType.ALT_MASK) != 0;
+
+                if (keyval == Gdk.Key.Shift_L || keyval == Gdk.Key.Shift_R) {
+                    if (!is_shift_navigating && selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                        shift_anchor_pos = selection_model.selected;
+                    }
+                }
 
                 if (keyval == Gdk.Key.Escape && is_filter_active) {
                     hide_filter();
@@ -1277,30 +1276,43 @@ namespace VCommander {
                     return Gdk.EVENT_STOP;
                 }
 
+                // Shift + navigation keys (arrows, PgUp/PgDn, Home/End)
+                if (is_shift && !is_ctrl && !is_alt) {
+                    if (keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down ||
+                        keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up ||
+                        keyval == Gdk.Key.Left || keyval == Gdk.Key.KP_Left ||
+                        keyval == Gdk.Key.Right || keyval == Gdk.Key.KP_Right ||
+                        keyval == Gdk.Key.Page_Down || keyval == Gdk.Key.KP_Page_Down ||
+                        keyval == Gdk.Key.Page_Up || keyval == Gdk.Key.KP_Page_Up ||
+                        keyval == Gdk.Key.Home || keyval == Gdk.Key.KP_Home ||
+                        keyval == Gdk.Key.End || keyval == Gdk.Key.KP_End) {
+                        handle_shift_arrow_navigation(keyval);
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
                 if (keyval == Gdk.Key.BackSpace) {
                     go_up();
                     return Gdk.EVENT_STOP;
                 }
-                if (latin_key == Gdk.Key.h && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                if (latin_key == Gdk.Key.h && is_ctrl) {
                     toggle_hidden_requested();
                     return Gdk.EVENT_STOP;
                 }
                 if ((latin_key == Gdk.Key.r || keyval == Gdk.Key.r || keyval == Gdk.Key.R) &&
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
-                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    is_ctrl && !is_alt && !is_shift) {
                     refresh();
                     return Gdk.EVENT_STOP;
                 }
 
                 // Ctrl+Space: calculate folder or file size
-                if (keyval == Gdk.Key.space && (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                if (keyval == Gdk.Key.space && is_ctrl) {
                     calculate_selected_size();
                     return Gdk.EVENT_STOP;
                 }
 
                 // Ctrl++ or Ctrl+= : zoom in grid
-                if ((keyval == Gdk.Key.plus || keyval == Gdk.Key.equal || keyval == Gdk.Key.KP_Add) && 
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                if ((keyval == Gdk.Key.plus || keyval == Gdk.Key.equal || keyval == Gdk.Key.KP_Add) && is_ctrl) {
                     if (view_mode == PanelViewMode.GRID) {
                         zoom_in();
                         return Gdk.EVENT_STOP;
@@ -1308,8 +1320,7 @@ namespace VCommander {
                 }
 
                 // Ctrl+- : zoom out grid
-                if ((keyval == Gdk.Key.minus || keyval == Gdk.Key.KP_Subtract) && 
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                if ((keyval == Gdk.Key.minus || keyval == Gdk.Key.KP_Subtract) && is_ctrl) {
                     if (view_mode == PanelViewMode.GRID) {
                         zoom_out();
                         return Gdk.EVENT_STOP;
@@ -1317,8 +1328,7 @@ namespace VCommander {
                 }
 
                 // Ctrl+0 : reset grid zoom
-                if ((keyval == Gdk.Key.@0 || keyval == Gdk.Key.KP_0) && 
-                    (state & Gdk.ModifierType.CONTROL_MASK) != 0) {
+                if ((keyval == Gdk.Key.@0 || keyval == Gdk.Key.KP_0) && is_ctrl) {
                     if (view_mode == PanelViewMode.GRID) {
                         zoom_reset();
                         return Gdk.EVENT_STOP;
@@ -1326,19 +1336,19 @@ namespace VCommander {
                 }
 
                 // Alt+T: toggle Brief / Full view mode
-                if (latin_key == Gdk.Key.t && (state & Gdk.ModifierType.ALT_MASK) != 0) {
+                if (latin_key == Gdk.Key.t && is_alt) {
                     toggle_view_mode();
                     return Gdk.EVENT_STOP;
                 }
 
                 // Alt+Up: Go to parent directory
-                if (keyval == Gdk.Key.Up && (state & Gdk.ModifierType.ALT_MASK) != 0) {
+                if (keyval == Gdk.Key.Up && is_alt) {
                     go_up();
                     return Gdk.EVENT_STOP;
                 }
 
                 // Left Arrow: Jump to top/first item (Full view or leftmost column in Brief view)
-                if (keyval == Gdk.Key.Left && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                if (keyval == Gdk.Key.Left && !is_ctrl && !is_alt && !is_shift) {
                     if (handle_left_arrow()) {
                         return Gdk.EVENT_STOP;
                     }
@@ -1346,7 +1356,7 @@ namespace VCommander {
                 }
 
                 // Right Arrow: Jump to end/last item (Full view or rightmost column in Brief view)
-                if (keyval == Gdk.Key.Right && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                if (keyval == Gdk.Key.Right && !is_ctrl && !is_alt && !is_shift) {
                     if (handle_right_arrow()) {
                         return Gdk.EVENT_STOP;
                     }
@@ -1366,6 +1376,15 @@ namespace VCommander {
                 }
 
                 return Gdk.EVENT_PROPAGATE;
+            });
+
+            key_controller.key_released.connect((keyval, keycode, state) => {
+                if (keyval == Gdk.Key.Shift_L || keyval == Gdk.Key.Shift_R) {
+                    is_shift_navigating = false;
+                    if (selection_model.selected != Gtk.INVALID_LIST_POSITION) {
+                        shift_anchor_pos = selection_model.selected;
+                    }
+                }
             });
             target_view.add_controller(key_controller);
 
@@ -1415,7 +1434,11 @@ namespace VCommander {
 
         public void switch_view_mode(PanelViewMode mode) {
             view_mode = mode;
+            update_active_view_model();
             view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
+            if (custom_filter != null) {
+                custom_filter.changed(Gtk.FilterChange.DIFFERENT);
+            }
             if (custom_master_sorter != null) {
                 custom_master_sorter.changed(Gtk.SorterChange.DIFFERENT);
             }
@@ -1570,30 +1593,13 @@ namespace VCommander {
                 box.append(label);
                 list_item.child = box;
 
-                var click = new Gtk.GestureClick();
-                click.button = 1;
-                click.pressed.connect((n_press, x, y) => {
-                    uint pos = list_item.position;
-                    if (pos != Gtk.INVALID_LIST_POSITION) {
-                        selection_model.selected = pos;
-                        saved_selected_pos = pos;
-                    }
-                });
-                box.add_controller(click);
-
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                box.add_controller(right_click);
+                attach_item_click_controllers(list_item, box);
             });
 
             brief_factory.bind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
                 var file_item = (FileItem) list_item.item;
                 var box = (Gtk.Box) list_item.child;
-                box.width_request = config.brief_column_width;
                 var image = (Gtk.Image) box.get_first_child();
                 var label = (Gtk.Label) image.get_next_sibling();
 
@@ -1655,7 +1661,7 @@ namespace VCommander {
             var config = ConfigManager.get_instance();
             int tile_size = config.grid_tile_size;
             if (tile_size < 30) tile_size = 30;
-            if (tile_size > 300) tile_size = 300;
+            if (tile_size > 390) tile_size = 390;
             int icon_size = int.max(16, (int)(tile_size * 0.7));
 
             grid_factory.setup.connect((item) => {
@@ -1675,7 +1681,7 @@ namespace VCommander {
 
                 var picture = new Gtk.Picture();
                 picture.can_shrink = true;
-                picture.content_fit = Gtk.ContentFit.CONTAIN;
+                picture.content_fit = Gtk.ContentFit.COVER;
                 picture.hexpand = true;
                 picture.vexpand = true;
 
@@ -1698,23 +1704,7 @@ namespace VCommander {
                 box.append(label);
                 list_item.child = box;
 
-                var click = new Gtk.GestureClick();
-                click.button = 1;
-                click.pressed.connect((n_press, x, y) => {
-                    uint pos = list_item.position;
-                    if (pos != Gtk.INVALID_LIST_POSITION) {
-                        selection_model.selected = pos;
-                        saved_selected_pos = pos;
-                    }
-                });
-                box.add_controller(click);
-
-                var right_click = new Gtk.GestureClick();
-                right_click.button = 3;
-                right_click.pressed.connect(() => {
-                    on_item_right_clicked(list_item);
-                });
-                box.add_controller(right_click);
+                attach_item_click_controllers(list_item, box);
             });
 
             grid_factory.bind.connect((item) => {
@@ -1822,6 +1812,10 @@ namespace VCommander {
         private void cleanup_grid_item_binding(Gtk.ListItem list_item) {
             var bound_item = list_item.get_data<FileItem?>("grid_bound_item");
             if (bound_item != null) {
+                if (bound_item.thumbnail_paintable == null) {
+                    ThumbnailService.cancel_request(bound_item);
+                }
+
                 ulong thumb_handler_id = list_item.get_data<ulong>("grid_thumb_id");
                 if (thumb_handler_id != 0) {
                     bound_item.disconnect(thumb_handler_id);
@@ -1851,7 +1845,7 @@ namespace VCommander {
         }
 
         public void set_grid_zoom(int size) {
-            int clamped = int.max(30, int.min(300, (size / 30) * 30));
+            int clamped = int.max(30, int.min(390, (size / 30) * 30));
             if (clamped < 30) clamped = 30;
             var config = ConfigManager.get_instance();
             if (config.grid_tile_size == clamped) return;
@@ -2011,6 +2005,11 @@ namespace VCommander {
                 }
                 rows++;
                 child = child.get_next_sibling();
+            }
+            if (rows > 0) return rows;
+            int height = grid_view.get_height();
+            if (height > 0) {
+                rows = (uint)(height / 28);
             }
             return rows > 0 ? rows : 1;
         }
@@ -2297,6 +2296,93 @@ namespace VCommander {
             }
         }
 
+        private void attach_item_click_controllers(Gtk.ListItem list_item, Gtk.Widget widget) {
+            var left_click = new Gtk.GestureClick();
+            left_click.button = 1;
+            left_click.pressed.connect((n_press, x, y) => {
+                on_item_left_clicked(list_item, left_click, n_press);
+            });
+            widget.add_controller(left_click);
+
+            var right_click = new Gtk.GestureClick();
+            right_click.button = 3;
+            right_click.pressed.connect(() => {
+                on_item_right_clicked(list_item);
+            });
+            widget.add_controller(right_click);
+        }
+
+        private void on_item_left_clicked(Gtk.ListItem list_item, Gtk.GestureClick gesture, int n_press) {
+            page_activated();
+            grab_focus_to_list();
+
+            uint pos = list_item.position;
+            if (pos == Gtk.INVALID_LIST_POSITION || pos >= sort_model.get_n_items()) return;
+
+            var state = gesture.get_current_event_state();
+            bool is_shift = (state & Gdk.ModifierType.SHIFT_MASK) != 0;
+            bool is_ctrl = (state & Gdk.ModifierType.CONTROL_MASK) != 0;
+
+            if (is_shift) {
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED);
+                handle_shift_click(pos);
+            } else if (is_ctrl) {
+                gesture.set_state(Gtk.EventSequenceState.CLAIMED);
+                handle_ctrl_click(pos);
+            } else {
+                handle_normal_click(pos);
+            }
+        }
+
+        private void handle_shift_click(uint pos) {
+            uint total = sort_model.get_n_items();
+            if (total == 0 || pos >= total) return;
+
+            uint anchor = shift_anchor_pos;
+            if (anchor == Gtk.INVALID_LIST_POSITION || anchor >= total) {
+                anchor = (selection_model.selected != Gtk.INVALID_LIST_POSITION && selection_model.selected < total)
+                    ? selection_model.selected
+                    : pos;
+            }
+
+            uint start = uint.min(anchor, pos);
+            uint end = uint.max(anchor, pos);
+            for (uint i = start; i <= end; i++) {
+                var it = (FileItem) sort_model.get_item(i);
+                if (it != null && !it.is_parent_dir) {
+                    it.is_tagged = true;
+                }
+            }
+
+            selection_model.selected = pos;
+            saved_selected_pos = pos;
+            shift_anchor_pos = anchor;
+            scroll_to_selected();
+            update_status_bar();
+        }
+
+        private void handle_ctrl_click(uint pos) {
+            uint total = sort_model.get_n_items();
+            if (total == 0 || pos >= total) return;
+
+            var it = (FileItem) sort_model.get_item(pos);
+            if (it != null && !it.is_parent_dir) {
+                it.is_tagged = !it.is_tagged;
+            }
+
+            selection_model.selected = pos;
+            saved_selected_pos = pos;
+            shift_anchor_pos = pos;
+            scroll_to_selected();
+            update_status_bar();
+        }
+
+        private void handle_normal_click(uint pos) {
+            selection_model.selected = pos;
+            saved_selected_pos = pos;
+            shift_anchor_pos = pos;
+        }
+
         private void on_item_right_clicked(Gtk.ListItem list_item) {
             page_activated();
             grab_focus_to_list();
@@ -2307,7 +2393,128 @@ namespace VCommander {
             }
 
             file_item.is_tagged = !file_item.is_tagged;
+            uint pos = list_item.position;
+            if (pos != Gtk.INVALID_LIST_POSITION && pos < sort_model.get_n_items()) {
+                selection_model.selected = pos;
+                saved_selected_pos = pos;
+                shift_anchor_pos = pos;
+            }
             update_status_bar();
+        }
+
+        private uint get_grid_columns() {
+            uint cols = 0;
+            var child = thumbnail_grid_view.get_first_child();
+            while (child != null) {
+                Graphene.Rect bounds;
+                if (child.compute_bounds(thumbnail_grid_view, out bounds)) {
+                    if (bounds.get_y() > 1.0f) {
+                        break;
+                    }
+                }
+                cols++;
+                child = child.get_next_sibling();
+            }
+            if (cols > 0) return cols;
+
+            int width = thumbnail_grid_view.get_width();
+            var config = ConfigManager.get_instance();
+            int tile_size = config.grid_tile_size;
+            if (tile_size < 30) tile_size = 30;
+            int col_width = tile_size + 16;
+            if (width > 0 && col_width > 0) {
+                cols = (uint)(width / col_width);
+            }
+            return cols > 0 ? cols : 1;
+        }
+
+        private void handle_shift_arrow_navigation(uint keyval) {
+            uint total = sort_model.get_n_items();
+            if (total == 0) return;
+
+            uint cur_pos = selection_model.selected;
+            if (cur_pos == Gtk.INVALID_LIST_POSITION || cur_pos >= total) {
+                cur_pos = (saved_selected_pos < total) ? saved_selected_pos : 0;
+            }
+
+            if (shift_anchor_pos == Gtk.INVALID_LIST_POSITION || shift_anchor_pos >= total) {
+                shift_anchor_pos = cur_pos;
+            }
+            is_shift_navigating = true;
+
+            uint target_pos = cur_pos;
+
+            if (view_mode == PanelViewMode.BRIEF) {
+                uint rows = get_brief_rows_per_col();
+                if (keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) {
+                    target_pos = uint.min(cur_pos + 1, total - 1);
+                } else if (keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) {
+                    target_pos = (cur_pos > 0) ? cur_pos - 1 : 0;
+                } else if (keyval == Gdk.Key.Right || keyval == Gdk.Key.KP_Right || keyval == Gdk.Key.Page_Down || keyval == Gdk.Key.KP_Page_Down) {
+                    target_pos = uint.min(cur_pos + rows, total - 1);
+                } else if (keyval == Gdk.Key.Left || keyval == Gdk.Key.KP_Left || keyval == Gdk.Key.Page_Up || keyval == Gdk.Key.KP_Page_Up) {
+                    target_pos = (cur_pos >= rows) ? cur_pos - rows : 0;
+                } else if (keyval == Gdk.Key.Home || keyval == Gdk.Key.KP_Home) {
+                    target_pos = 0;
+                } else if (keyval == Gdk.Key.End || keyval == Gdk.Key.KP_End) {
+                    target_pos = total - 1;
+                }
+            } else if (view_mode == PanelViewMode.GRID) {
+                uint cols = get_grid_columns();
+                if (keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) {
+                    target_pos = uint.min(cur_pos + cols, total - 1);
+                } else if (keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) {
+                    target_pos = (cur_pos >= cols) ? cur_pos - cols : 0;
+                } else if (keyval == Gdk.Key.Right || keyval == Gdk.Key.KP_Right) {
+                    target_pos = uint.min(cur_pos + 1, total - 1);
+                } else if (keyval == Gdk.Key.Left || keyval == Gdk.Key.KP_Left) {
+                    target_pos = (cur_pos > 0) ? cur_pos - 1 : 0;
+                } else if (keyval == Gdk.Key.Page_Down || keyval == Gdk.Key.KP_Page_Down) {
+                    target_pos = uint.min(cur_pos + cols * 4, total - 1);
+                } else if (keyval == Gdk.Key.Page_Up || keyval == Gdk.Key.KP_Page_Up) {
+                    target_pos = (cur_pos >= cols * 4) ? cur_pos - cols * 4 : 0;
+                } else if (keyval == Gdk.Key.Home || keyval == Gdk.Key.KP_Home) {
+                    target_pos = 0;
+                } else if (keyval == Gdk.Key.End || keyval == Gdk.Key.KP_End) {
+                    target_pos = total - 1;
+                }
+            } else {
+                // Detailed or Super Detailed
+                if (keyval == Gdk.Key.Down || keyval == Gdk.Key.KP_Down) {
+                    target_pos = uint.min(cur_pos + 1, total - 1);
+                } else if (keyval == Gdk.Key.Up || keyval == Gdk.Key.KP_Up) {
+                    target_pos = (cur_pos > 0) ? cur_pos - 1 : 0;
+                } else if (keyval == Gdk.Key.Page_Down || keyval == Gdk.Key.KP_Page_Down) {
+                    target_pos = uint.min(cur_pos + 20, total - 1);
+                } else if (keyval == Gdk.Key.Page_Up || keyval == Gdk.Key.KP_Page_Up) {
+                    target_pos = (cur_pos >= 20) ? cur_pos - 20 : 0;
+                } else if (keyval == Gdk.Key.Home || keyval == Gdk.Key.KP_Home || keyval == Gdk.Key.Left || keyval == Gdk.Key.KP_Left) {
+                    target_pos = 0;
+                } else if (keyval == Gdk.Key.End || keyval == Gdk.Key.KP_End || keyval == Gdk.Key.Right || keyval == Gdk.Key.KP_Right) {
+                    target_pos = total - 1;
+                }
+            }
+
+            uint start = uint.min(uint.min(shift_anchor_pos, cur_pos), target_pos);
+            uint end = uint.max(uint.max(shift_anchor_pos, cur_pos), target_pos);
+            for (uint i = start; i <= end; i++) {
+                var it = (FileItem) sort_model.get_item(i);
+                if (it != null && !it.is_parent_dir) {
+                    it.is_tagged = true;
+                }
+            }
+
+            selection_model.selected = target_pos;
+            saved_selected_pos = target_pos;
+            scroll_to_selected();
+            update_status_bar();
+        }
+
+        private void update_active_view_model() {
+            column_view.model = (view_mode == PanelViewMode.DETAILED) ? selection_model : null;
+            super_column_view.model = (view_mode == PanelViewMode.SUPER) ? selection_model : null;
+            grid_view.model = (view_mode == PanelViewMode.BRIEF) ? selection_model : null;
+            thumbnail_grid_view.model = (view_mode == PanelViewMode.GRID) ? selection_model : null;
         }
 
         public void toggle_tag_current_item() {
@@ -2744,10 +2951,13 @@ namespace VCommander {
 
                 if (is_active) {
                     selection_model.selected = target_index;
+                    saved_selected_pos = target_index;
+                    shift_anchor_pos = target_index;
                     scroll_to_selected();
                     grab_focus_to_list();
                 } else {
                     saved_selected_pos = target_index;
+                    shift_anchor_pos = target_index;
                     selection_model.selected = Gtk.INVALID_LIST_POSITION;
                 }
             }
@@ -2802,15 +3012,20 @@ namespace VCommander {
             int64 total_bytes = 0;
 
             try {
+                string attributes = "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode";
+                if (dir.get_uri_scheme() == "trash") {
+                    attributes += ",trash::orig-path,trash::deletion-date";
+                }
+
                 var enumerator = yield dir.enumerate_children_async(
-                    "standard::name,standard::display-name,standard::type,standard::size,standard::is-hidden,standard::is-symlink,standard::symlink-target,standard::icon,time::modified,owner::user,owner::group,unix::uid,unix::user-name,unix::gid,unix::group-name,unix::mode,trash::orig-path,trash::deletion-date",
+                    attributes,
                     FileQueryInfoFlags.NONE,
                     Priority.DEFAULT,
                     cancellable
                 );
 
                 while (true) {
-                    var files = yield enumerator.next_files_async(50, Priority.DEFAULT, cancellable);
+                    var files = yield enumerator.next_files_async(500, Priority.DEFAULT, cancellable);
                     if (files == null || files.length() == 0) {
                         break;
                     }
@@ -2855,6 +3070,9 @@ namespace VCommander {
                 var old_item = (FileItem) store.get_item(i);
                 if (old_item != null) {
                     old_item.thumbnail_paintable = null;
+                    if (old_item.is_thumbnail_requested) {
+                        ThumbnailService.cancel_request(old_item);
+                    }
                 }
             }
             store.splice(0, old_count, array);
@@ -2896,16 +3114,24 @@ namespace VCommander {
 
                 if (is_active) {
                     selection_model.selected = target_index;
+                    saved_selected_pos = target_index;
+                    shift_anchor_pos = target_index;
                     scroll_to_selected();
                     grab_focus_to_list();
                 } else {
                     saved_selected_pos = target_index;
+                    shift_anchor_pos = target_index;
                     selection_model.selected = Gtk.INVALID_LIST_POSITION;
                 }
+            } else {
+                selection_model.selected = Gtk.INVALID_LIST_POSITION;
+                shift_anchor_pos = Gtk.INVALID_LIST_POSITION;
             }
         }
 
         public void cleanup() {
+            shift_anchor_pos = Gtk.INVALID_LIST_POSITION;
+            is_shift_navigating = false;
             if (load_cancellable != null) {
                 load_cancellable.cancel();
                 load_cancellable = null;
@@ -2924,6 +3150,9 @@ namespace VCommander {
                 var it = (FileItem) store.get_item(i);
                 if (it != null) {
                     it.thumbnail_paintable = null;
+                    if (it.is_thumbnail_requested) {
+                        ThumbnailService.cancel_request(it);
+                    }
                 }
             }
             store.remove_all();

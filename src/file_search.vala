@@ -78,7 +78,7 @@ namespace VCommander {
 
                     List<FileInfo> infos;
                     try {
-                        infos = yield enumerator.next_files_async(40, Priority.DEFAULT_IDLE, cancellable);
+                        infos = yield enumerator.next_files_async(200, Priority.DEFAULT_IDLE, cancellable);
                     } catch (IOError.CANCELLED e) {
                         break;
                     } catch (Error e) {

@@ -532,7 +532,7 @@ namespace VCommander {
 
             page.indicator_icon = new ThemedIcon("view-pin-symbolic");
             page.indicator_activatable = true;
-            page.indicator_tooltip = page_widget.is_pinned ? "Pinned (click to unpin)" : "Pin tab";
+            page.indicator_tooltip = "";
             sync_tab_bar_pins();
         }
 
@@ -765,7 +765,15 @@ namespace VCommander {
             }
         }
 
+        private int64 last_pin_toggle_time = 0;
+
         public void toggle_tab_pinned(FilePanelPage page_widget) {
+            int64 now = GLib.get_monotonic_time();
+            if (now - last_pin_toggle_time < 200000) { // 200ms debounce
+                return;
+            }
+            last_pin_toggle_time = now;
+
             page_widget.is_pinned = !page_widget.is_pinned;
             update_tab_title(page_widget);
             sync_tab_bar_pins();
@@ -825,8 +833,7 @@ namespace VCommander {
                 if (page_widget == null) continue;
 
                 bool pinned = page_widget.is_pinned;
-
-                page.indicator_tooltip = pinned ? "Pinned (click to unpin)" : "Pin tab";
+                page.indicator_tooltip = "";
 
                 if (pinned) {
                     tab_widget.add_css_class("pinned-tab");
@@ -834,13 +841,92 @@ namespace VCommander {
                     tab_widget.remove_css_class("pinned-tab");
                 }
 
+                Gtk.Button? ind_btn = null;
                 var sub = tab_widget.get_first_child();
                 while (sub != null) {
                     if (sub.has_css_class("tab-close-button")) {
                         sub.set_visible(!pinned);
                         sub.sensitive = !pinned;
+                    } else if (sub.has_css_class("tab-indicator")) {
+                        ind_btn = sub as Gtk.Button;
                     }
                     sub = sub.get_next_sibling();
+                }
+
+                if (ind_btn != null) {
+                    var actions_box = ind_btn.get_child() as Gtk.Box;
+                    Gtk.Box? pin_box = null;
+                    Gtk.Box? up_box = null;
+
+                    if (actions_box == null || !actions_box.has_css_class("tab-actions-box")) {
+                        actions_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 1);
+                        actions_box.add_css_class("tab-actions-box");
+
+                        pin_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+                        pin_box.add_css_class("tab-action-icon");
+                        pin_box.add_css_class("tab-pin-icon");
+                        var pin_img = new Gtk.Image.from_icon_name("view-pin-symbolic");
+                        pin_box.append(pin_img);
+
+                        var pin_click = new Gtk.GestureClick();
+                        pin_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                        pin_click.pressed.connect((n, x, y) => {
+                            pin_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
+                            tab_widget.get_property("page", ref cur_val);
+                            var cur_p = (Adw.TabPage) cur_val.get_object();
+                            if (cur_p != null && cur_p.child is FilePanelPage) {
+                                toggle_tab_pinned((FilePanelPage) cur_p.child);
+                            }
+                        });
+                        pin_box.add_controller(pin_click);
+
+                        up_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+                        up_box.add_css_class("tab-action-icon");
+                        up_box.add_css_class("tab-up-icon");
+                        var up_img = new Gtk.Image.from_icon_name("go-up-symbolic");
+                        up_box.append(up_img);
+
+                        var up_click = new Gtk.GestureClick();
+                        up_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                        up_click.pressed.connect((n, x, y) => {
+                            up_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
+                            tab_widget.get_property("page", ref cur_val);
+                            var cur_p = (Adw.TabPage) cur_val.get_object();
+                            if (cur_p != null && cur_p.child is FilePanelPage) {
+                                tab_view.set_selected_page(cur_p);
+                                ((FilePanelPage) cur_p.child).go_up();
+                            }
+                        });
+                        up_box.add_controller(up_click);
+
+                        actions_box.append(pin_box);
+                        actions_box.append(up_box);
+                        ind_btn.set_child(actions_box);
+                    } else {
+                        pin_box = actions_box.get_first_child() as Gtk.Box;
+                        if (pin_box != null) {
+                            up_box = pin_box.get_next_sibling() as Gtk.Box;
+                        }
+                    }
+
+                    if (pin_box != null) {
+                        pin_box.tooltip_text = pinned ? "Pinned (click to unpin)" : "Pin tab";
+                        if (pinned) {
+                            pin_box.add_css_class("pinned");
+                        } else {
+                            pin_box.remove_css_class("pinned");
+                        }
+                    }
+
+                    if (up_box != null) {
+                        up_box.tooltip_text = "Go to parent directory (Alt+Up)";
+                        bool can_go_up = (page_widget.is_archive_location() ||
+                                          (page_widget.current_directory != null && page_widget.current_directory.get_parent() != null) ||
+                                          page_widget.is_showing_search_results);
+                        up_box.sensitive = can_go_up;
+                    }
                 }
             }
         }

@@ -325,7 +325,7 @@ namespace VCommander {
                 if (key_file.has_key("General", "GridTileSize")) {
                     grid_tile_size = key_file.get_integer("General", "GridTileSize");
                     if (grid_tile_size < 30) grid_tile_size = 30;
-                    if (grid_tile_size > 300) grid_tile_size = 300;
+                    if (grid_tile_size > 390) grid_tile_size = 390;
                 }
                 if (key_file.has_key("General", "Theme")) {
                     string th = key_file.get_string("General", "Theme").strip();

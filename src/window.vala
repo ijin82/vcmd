@@ -251,6 +251,7 @@ row:selected .file-item-tagged {
 .thumbnail-img-box {
     border-radius: 6px;
     background-color: alpha(currentColor, 0.05);
+    overflow: hidden;
 }
 
 .thumbnail-img-box.file-item-tagged {
