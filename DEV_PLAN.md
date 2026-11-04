@@ -18,7 +18,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
 | **Stage 8** | Trash Management & File Recovery (`trash:///`) | **Completed (100%)** | Contextual Trash banner, Empty Trash confirmation, Restore Selected files (`trash::orig-path`), permanent delete (F8). |
 | **Stage 9** | Non-Blocking Background Operations & Minimized Progress | **Completed (100%)** | Minimizable copy/move dialogs into a toolbar progress indicator button/popover, allowing non-blocking workflow during heavy transfers. |
 | **Stage 10** | Icon / Thumbnail Grid View & Live Background Thumbnail Engine | **Completed (100%)** | Single/dual-pane image & video thumbnail grid view (30–300px), Ctrl++/Ctrl+-/scroll zoom, atomic background worker pool (`~/.config/vcmd/thumbnails/`), crash recovery, streaming live updates without UI jumps. |
-| **Stage 11** | Archive Integration, ExtFS Plugin System & Compression Manager | **Planned (Complexity: High)** | Tier-1 native/POSIX archivers (tar, zip, gz, xz, zstd), Tier-2 Midnight Commander ExtFS plugins (7z, rar, deb, rpm, iso), Archiver Selection Dialog (Alt+F5), VFS archive browsing (Enter), F3 preview, F5 extract. |
+| **Stage 11** | Archive Integration, ExtFS Plugin System & Compression Manager | **Planned (Complexity: High)** | Tier-1 native/POSIX archivers (tar, zip, gz, xz, zstd), Tier-2 Midnight Commander ExtFS plugins (7z, rar, deb, rpm, iso), Archiver Selection Dialog (Shift+F2), VFS archive browsing (Enter), F3 preview, F5 extract. |
 
 ---
 
@@ -274,21 +274,21 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
 - **Tier 1 (Core):** Direct integration with standard Linux CLI utilities (`tar`, `zip`, `unzip`, `gzip`, `bzip2`, `xz`, `zstd`, `7z`) without external library bloat.
 - **Tier 2 (Extensibility / Compatibility):** Midnight Commander ExtFS plugin system compatibility (`/usr/lib/mc/extfs.d/`, `/usr/libexec/mc/extfs.d/`, and `~/.config/vcmd/extfs/`), enabling out-of-the-box support for `rar`, `iso`, `deb`, `rpm`, `cab`, `arj`, and custom user scripts.
 
-#### [ ] Phase 11.1: Archiver Detection, Capabilities Registry & Selection Dialog
-- [ ] Centralized Archiver Registry (`ArchiverRegistry` / `ArchiveBackend`):
+#### [x] Phase 11.1: Archiver Detection, Capabilities Registry & Selection Dialog
+- [x] Centralized Archiver Registry (`ArchiverRegistry` / `ArchiveBackend`):
   - Detect installed system archiver CLI tools at startup: `tar`, `zip`, `unzip`, `7z` / `7zz`, `rar` / `unrar`, `gzip`, `bzip2`, `xz`, `zstd`.
   - Detect installed Midnight Commander ExtFS helpers (`/usr/lib/mc/extfs.d/`, `/usr/libexec/mc/extfs.d/`) and custom user plugins (`~/.config/vcmd/extfs/`).
   - Map archive formats and extensions (`.tar.gz`, `.tar.xz`, `.tar.zst`, `.tar.bz2`, `.zip`, `.7z`, `.rar`, `.iso`, `.deb`, `.rpm`, etc.) to available packing and unpacking backends.
-- [ ] Archiver Selection & Pack Dialog (`ArchivePackDialog`):
-  - Hotkey `Alt+F5` (Midnight Commander classic shortcut) or menu/toolbar trigger when one or more files/folders are selected.
+- [x] Archiver Selection & Pack Dialog (`ArchivePackDialog`):
+  - Hotkey `Shift+F2` (accessible in bottom function key bar, changes from `F2 Connect` to `Shift+F2 Pack` on holding Shift) or menu/toolbar trigger when one or more files/folders are selected. (Avoids system WM conflict with `Alt+F5`).
+  - Dynamic interactive bottom function key bar with clickable badges and Shift state responsiveness.
   - Archive destination path entry, prefilled with target directory (opposite pane or current folder) and smart default archive name (e.g., `<selected_item>.zip`).
-  - Format selection selector (dropdown or card list of supported formats filtered by currently available system tools).
-  - Archiver backend picker when multiple engines can generate the format (e.g., `zip` vs `7z`).
-  - Compression level slider / selector: Store (0), Fast (1), Normal (6), Maximum (9), Ultra.
+  - Format selection selector (dropdown of supported formats filtered by currently available system tools).
+  - Compression level selector: Store (0), Fast (1), Normal (6), Maximum (9), Ultra (10).
   - Optional encryption password entry with show/hide toggle for formats supporting encryption (`.zip`, `.7z`).
-  - Checkbox: "Delete source files after archiving" (Move to archive).
+  - Checkbox: "Delete files after archiving" (Move to archive).
   - Validation: real-time check for destination writability and existing archive overwrite warning.
-- [ ] Preferences Dialog Integration:
+- [x] Preferences Dialog Integration:
   - Settings section in `PreferencesDialog` (`Ctrl+,`) listing detected archivers and default preferred compression format.
 
 #### [ ] Phase 11.2: Archive Creation Engine & Non-Blocking Queue Execution

@@ -26,6 +26,7 @@ namespace VCommander {
         private GenericArray<OperationProgressDialog> background_tasks;
         private Gtk.Entry cmd_entry;
         private Gtk.Box fn_bar;
+        private Gtk.Label fn_f2_label;
         private Gtk.Label fn_f5_label;
         private Gtk.Label fn_f6_label;
         private bool fn_shift_active = false;
@@ -194,6 +195,12 @@ row * {
 
 .fn-item {
     padding: 2px 4px;
+    border-radius: 4px;
+    transition: background-color 100ms ease-in-out;
+}
+
+.fn-item:hover {
+    background-color: alpha(@accent_color, 0.15);
 }
 
 .fn-key-badge {
@@ -1268,6 +1275,8 @@ row:selected .file-item-tagged {
             parent_box.append(command_bar);
         }
 
+        private delegate void FnItemCallback();
+
         private void build_function_bar(Gtk.Box parent_box) {
             var config = ConfigManager.get_instance();
             fn_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
@@ -1276,19 +1285,20 @@ row:selected .file-item-tagged {
             fn_bar.visible = config.show_function_bar;
 
             Gtk.Label dummy;
-            fn_bar.append(create_fn_item("F1", "Help", out dummy));
-            fn_bar.append(create_fn_item("F3", "View", out dummy));
-            fn_bar.append(create_fn_item("F4", "Edit", out dummy));
-            fn_bar.append(create_fn_item("F5", "Copy", out fn_f5_label));
-            fn_bar.append(create_fn_item("F6", "Move", out fn_f6_label));
-            fn_bar.append(create_fn_item("F7", "Mkdir", out dummy));
-            fn_bar.append(create_fn_item("F8", "Delete", out dummy));
-            fn_bar.append(create_fn_item("F10", "Quit", out dummy));
+            fn_bar.append(create_fn_item("F1", "Help", out dummy, () => { ShortcutsDialog.show(this); }));
+            fn_bar.append(create_fn_item("F2", "Connect", out fn_f2_label, () => { on_fn_f2_clicked(); }));
+            fn_bar.append(create_fn_item("F3", "View", out dummy, () => { on_f3_view(); }));
+            fn_bar.append(create_fn_item("F4", "Edit", out dummy, () => { on_f4_edit(); }));
+            fn_bar.append(create_fn_item("F5", "Copy", out fn_f5_label, () => { on_fn_f5_clicked(); }));
+            fn_bar.append(create_fn_item("F6", "Move", out fn_f6_label, () => { on_fn_f6_clicked(); }));
+            fn_bar.append(create_fn_item("F7", "Mkdir", out dummy, () => { on_f7_mkdir(); }));
+            fn_bar.append(create_fn_item("F8", "Delete", out dummy, () => { on_delete(fn_shift_active); }));
+            fn_bar.append(create_fn_item("F10", "Quit", out dummy, () => { close(); }));
 
             parent_box.append(fn_bar);
         }
 
-        private Gtk.Widget create_fn_item(string key_badge, string label_text, out Gtk.Label out_label) {
+        private Gtk.Widget create_fn_item(string key_badge, string label_text, out Gtk.Label out_label, owned FnItemCallback? on_click = null) {
             var item_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
             item_box.add_css_class("fn-item");
             item_box.hexpand = true;
@@ -1308,12 +1318,49 @@ row:selected .file-item-tagged {
             content_box.append(lbl);
             item_box.append(content_box);
 
+            if (on_click != null) {
+                var gesture = new Gtk.GestureClick();
+                gesture.pressed.connect(() => {
+                    on_click();
+                });
+                item_box.add_controller(gesture);
+            }
+
             return item_box;
+        }
+
+        private void on_fn_f2_clicked() {
+            if (fn_shift_active) {
+                on_pack_archive();
+            } else if (active_panel != null) {
+                ConnectDialog.show(this, active_panel);
+            }
+        }
+
+        private void on_fn_f5_clicked() {
+            if (fn_shift_active) {
+                on_shift_f5_symlink();
+            } else {
+                on_f5_copy();
+            }
+        }
+
+        private void on_fn_f6_clicked() {
+            if (active_panel != null && active_panel.is_trash_location) {
+                prompt_restore_trash(active_panel);
+            } else if (fn_shift_active) {
+                on_shift_f6_rename();
+            } else {
+                on_f6_move();
+            }
         }
 
         private void update_function_bar_shift_state(bool shift_pressed) {
             if (fn_shift_active == shift_pressed) return;
             fn_shift_active = shift_pressed;
+            if (fn_f2_label != null) {
+                fn_f2_label.label = shift_pressed ? "Pack" : "Connect";
+            }
             if (fn_f5_label != null) {
                 fn_f5_label.label = shift_pressed ? "Symlink" : "Copy";
             }
@@ -1677,6 +1724,12 @@ row:selected .file-item-tagged {
                 // F1: show Shortcuts Dialog
                 if (keyval == Gdk.Key.F1 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
                     ShortcutsDialog.show(this);
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Shift+F2: Pack / Compress Selected Files
+                if (keyval == Gdk.Key.F2 && (state & Gdk.ModifierType.SHIFT_MASK) != 0 && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                    on_pack_archive();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -3044,6 +3097,44 @@ row:selected .file-item-tagged {
                 }
             }
             return null;
+        }
+
+        private void on_pack_archive() {
+            if (active_panel == null) return;
+
+            if (active_panel.is_trash_location) {
+                show_error_dialog("Archive Error", "Cannot create archives from Trash items. Please restore them first.");
+                return;
+            }
+
+            var tagged_items = active_panel.get_tagged_items();
+            var items_to_pack = new GenericArray<FileItem>();
+
+            if (tagged_items.length > 0) {
+                for (uint i = 0; i < tagged_items.length; i++) {
+                    items_to_pack.add(tagged_items.get(i));
+                }
+            } else {
+                var sel = active_panel.get_selected_item();
+                if (sel == null || sel.is_parent_dir) {
+                    show_error_dialog("Pack Archive", "Please select or tag one or more files or folders to archive.");
+                    return;
+                }
+                items_to_pack.add(sel);
+            }
+
+            var opp = get_opposite_panel();
+            ArchivePackDialog.show(this, active_panel, opp, items_to_pack, (request) => {
+                on_archive_pack_confirmed(request);
+            });
+        }
+
+        private void on_archive_pack_confirmed(ArchivePackRequest request) {
+            AppLogger.info("Archive", @"Pack requested: $(request.destination_archive.get_path()) [$(request.format.id), level=$(request.compression_level), items=$(request.source_items.length)]");
+            var toast = new Adw.Toast(@"Archive ready to create: $(request.destination_archive.get_basename())");
+            if (toast_overlay != null) {
+                toast_overlay.add_toast(toast);
+            }
         }
 
         private void on_f5_copy() {

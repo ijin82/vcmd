@@ -423,6 +423,30 @@ namespace VCommander {
 
             page.add(dialog_sizes_group);
 
+            var archive_group = new Adw.PreferencesGroup();
+            archive_group.title = "Archivers &amp; ExtFS Plugins";
+            archive_group.description = "Detected system archivers and Midnight Commander ExtFS plugins (Shift+F2 to pack)";
+
+            var registry = ArchiverRegistry.get_instance();
+            var pack_fmts = registry.get_available_pack_formats();
+            var detected_tools_row = new Adw.ActionRow();
+            detected_tools_row.title = "Available Compression Formats";
+            var sb = new StringBuilder();
+            for (uint i = 0; i < pack_fmts.length; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(pack_fmts.get(i).primary_extension);
+            }
+            detected_tools_row.subtitle = sb.str.length > 0 ? sb.str : "None found";
+            archive_group.add(detected_tools_row);
+
+            var extfs_row = new Adw.ActionRow();
+            extfs_row.title = "ExtFS Plugins";
+            var helpers = registry.get_extfs_helpers();
+            extfs_row.subtitle = @"$(helpers.length) helpers detected (/usr/lib/mc/extfs.d and ~/.config/vcmd/extfs)";
+            archive_group.add(extfs_row);
+
+            page.add(archive_group);
+
             dialog.add(page);
             dialog.present(parent);
         }

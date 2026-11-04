@@ -21,6 +21,7 @@ namespace VCommander {
             add_item(fn_section, "Help & Shortcuts", "F1");
             add_item(fn_section, "Drives & Locations", "<Control>F1");
             add_item(fn_section, "Connect to Server", "F2", "SSH, SFTP, FTP, or SMB. Reopen later from bookmarks");
+            add_item(fn_section, "Pack / Compress to Archive", "<Shift>F2", "Create ZIP, Tarball, 7z archive");
             add_item(fn_section, "View File", "F3");
             add_item(fn_section, "Edit File", "F4");
             add_item(fn_section, "Copy Selected File(s)", "F5");
