@@ -245,6 +245,8 @@ Open=%cd %p/mycontainer://
 * `libvte-2.91-gtk4` (VTE terminal widget for GTK4)
 * `libglib2.0-dev` (GLib / GIO)
 * `make` and `gcc`
+* **GNU Binutils (`as`)**:
+  * If building with **GCC 15+**, `binutils` >= **2.43** is required (GCC 15 emits `.base64` assembler directives for UTF-8 string literals, which requires GNU Assembler 2.43 or newer).
 
 ### Installing Dependencies
 
@@ -263,9 +265,9 @@ Open=%cd %p/mycontainer://
   sudo pacman -S --needed git make gcc vala gtk4 libadwaita vte4 glib2
   ```
 
-* **ALT Linux (p10 / p11):**
+* **ALT Linux (p10 / p11 / Sisyphus):**
   ```bash
-  sudo apt-get update && sudo apt-get install -y git make gcc vala libgtk4-devel libadwaita-devel libvte3-devel libgio-devel
+  sudo apt-get update && sudo apt-get install -y git make gcc binutils vala libgtk4-devel libadwaita-devel libvte3-devel libgio-devel
   ```
 
 ### Compilation
