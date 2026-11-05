@@ -44,6 +44,32 @@ namespace VCommander {
 
             panel_group.add(fn_bar_row);
 
+            var always_cmd_row = new Adw.SwitchRow();
+            always_cmd_row.title = "Always show command line";
+            always_cmd_row.subtitle = "Show command bar permanently, or hide and show dynamically when typing";
+            always_cmd_row.active = config.always_show_command_line;
+
+            always_cmd_row.notify["active"].connect(() => {
+                config.always_show_command_line = always_cmd_row.active;
+                config.save();
+                main_win.apply_preferences();
+            });
+
+            panel_group.add(always_cmd_row);
+
+            var focus_mode_row = new Adw.SwitchRow();
+            focus_mode_row.title = "Focus mode (distraction-free)";
+            focus_mode_row.subtitle = "Hide header bar, command bar, and function keys bar (Ctrl+Shift+H)";
+            focus_mode_row.active = config.focus_mode;
+
+            focus_mode_row.notify["active"].connect(() => {
+                config.focus_mode = focus_mode_row.active;
+                config.save();
+                main_win.apply_preferences();
+            });
+
+            panel_group.add(focus_mode_row);
+
             var column_width_row = new Adw.SpinRow.with_range(100, 800, 10);
             column_width_row.title = "Brief view column width (px)";
             column_width_row.subtitle = "Width in pixels for columns in brief view mode (100 - 800 px)";

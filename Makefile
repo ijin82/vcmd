@@ -23,7 +23,7 @@ SOURCES = \
 	src/thumbnail_service.vala \
 	src/file_item.vala \
 	src/volume_service.vala \
-	src/drives_popover.vala \
+	src/drives_dialog.vala \
 	src/file_panel_page.vala \
 	src/file_panel.vala \
 	src/file_operation_service.vala \
@@ -40,6 +40,7 @@ SOURCES = \
 	src/remote_mount.vala \
 	src/connect_dialog.vala \
 	src/filesystem_repair_dialog.vala \
+	src/wallpaper_service.vala \
 	src/extfs_runner.vala \
 	src/archive_registry.vala \
 	src/archive_tree.vala \

@@ -103,7 +103,7 @@ namespace VCommander {
             add_item(app_section, "About Vala Commander", "<Shift>F1");
             add_item(app_section, "Preferences Dialog", "<Control>comma");
             add_item(app_section, "View Application Log", "", "Button on the left of Header Bar");
-            add_item(app_section, "Toggle Header Bar", "<Control><Shift>h");
+            add_item(app_section, "Toggle Focus Mode", "<Control><Shift>h", "Hide/show header bar, command bar, and hint bar");
             add_item(app_section, "Reset Splitter to 50/50", "Return", "Double click pane divider handle");
             add_item(app_section, "Quit Vala Commander", "<Control>q", "or F10");
             dialog.add(app_section);

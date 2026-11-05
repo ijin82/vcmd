@@ -1,7 +1,20 @@
 namespace VCommander {
 
-    public class ThumbnailTask : Object {
+    public class ThumbnailListener : Object {
         public GLib.WeakRef item_ref;
+
+        public ThumbnailListener(FileItem item) {
+            this.item_ref = GLib.WeakRef(item);
+        }
+
+        public FileItem? get_item() {
+            var obj = item_ref.get();
+            return (obj != null) ? (FileItem) obj : null;
+        }
+    }
+
+    public class ThumbnailTask : Object {
+        public GenericArray<ThumbnailListener> listeners;
         public string filepath;
         public string cache_path;
         public string tmp_path;
@@ -9,7 +22,8 @@ namespace VCommander {
         public bool is_cancelled;
 
         public ThumbnailTask(FileItem item, string filepath, string cache_path, string tmp_path, string key) {
-            this.item_ref = GLib.WeakRef(item);
+            this.listeners = new GenericArray<ThumbnailListener>();
+            this.listeners.add(new ThumbnailListener(item));
             this.filepath = filepath;
             this.cache_path = cache_path;
             this.tmp_path = tmp_path;
@@ -17,9 +31,39 @@ namespace VCommander {
             this.is_cancelled = false;
         }
 
-        public FileItem? get_item() {
-            var obj = item_ref.get();
-            return (obj != null) ? (FileItem) obj : null;
+        public void add_item(FileItem item) {
+            for (int i = 0; i < listeners.length; i++) {
+                var it = listeners[i].get_item();
+                if (it == item) return;
+            }
+            listeners.add(new ThumbnailListener(item));
+        }
+
+        public bool remove_item(FileItem item) {
+            for (int i = 0; i < listeners.length; i++) {
+                var it = listeners[i].get_item();
+                if (it == item || it == null) {
+                    listeners.remove_index(i);
+                    i--;
+                }
+            }
+            return listeners.length == 0;
+        }
+
+        public bool has_valid_items() {
+            for (int i = 0; i < listeners.length; i++) {
+                if (listeners[i].get_item() != null) return true;
+            }
+            return false;
+        }
+
+        public void deliver(Gdk.Texture tex) {
+            for (int i = 0; i < listeners.length; i++) {
+                var it = listeners[i].get_item();
+                if (it != null) {
+                    ThumbnailService.enqueue_ready_thumbnail(it, tex);
+                }
+            }
         }
     }
 
@@ -264,10 +308,13 @@ namespace VCommander {
             queue_mutex.lock();
             if (in_flight_tasks != null && in_flight_tasks.contains(key)) {
                 var existing_task = in_flight_tasks.lookup(key);
-                if (existing_task != null && !existing_task.is_cancelled && pending_queue != null) {
-                    // Re-prioritize to the head of the queue (LIFO boost)
-                    pending_queue.remove(existing_task);
-                    pending_queue.push_head(existing_task);
+                if (existing_task != null && !existing_task.is_cancelled) {
+                    existing_task.add_item(item);
+                    if (pending_queue != null) {
+                        // Re-prioritize to the head of the queue (LIFO boost)
+                        pending_queue.remove(existing_task);
+                        pending_queue.push_head(existing_task);
+                    }
                 }
                 queue_mutex.unlock();
                 return;
@@ -298,15 +345,49 @@ namespace VCommander {
             if (in_flight_tasks != null) {
                 var task = in_flight_tasks.lookup(key);
                 if (task != null) {
-                    task.is_cancelled = true;
-                    if (pending_queue != null) {
-                        pending_queue.remove(task);
+                    bool no_more_listeners = task.remove_item(item);
+                    if (no_more_listeners) {
+                        task.is_cancelled = true;
+                        if (pending_queue != null) {
+                            pending_queue.remove(task);
+                        }
+                        in_flight_tasks.remove(key);
                     }
-                    in_flight_tasks.remove(key);
-                    item.is_thumbnail_requested = false;
                 }
             }
             queue_mutex.unlock();
+            item.is_thumbnail_requested = false;
+        }
+
+        public static void handle_file_rename(string old_path, string new_path, int64 mtime, int64 size) {
+            string old_key = compute_cache_key(old_path, mtime, size);
+            string new_key = compute_cache_key(new_path, mtime, size);
+
+            // 1. Update in-memory RAM cache if present
+            if (ram_cache != null) {
+                var tex = ram_cache.get(old_key);
+                if (tex != null) {
+                    ram_cache.put(new_key, tex);
+                }
+            }
+
+            // 2. Duplicate on-disk cache if present
+            string old_cache_file = get_cache_file_path(old_key);
+            var old_f = File.new_for_path(old_cache_file);
+            if (old_f.query_exists()) {
+                string new_cache_file = get_cache_file_path(new_key);
+                string new_bucket = Path.get_dirname(new_cache_file);
+                var nb_dir = File.new_for_path(new_bucket);
+                if (!nb_dir.query_exists()) {
+                    try {
+                        nb_dir.make_directory_with_parents(null);
+                    } catch (Error e) {}
+                }
+                var new_f = File.new_for_path(new_cache_file);
+                try {
+                    old_f.copy(new_f, FileCopyFlags.OVERWRITE, null, null);
+                } catch (Error e) {}
+            }
         }
 
         private static void dispatch_workers_locked() {
@@ -316,7 +397,7 @@ namespace VCommander {
                 var candidate = pending_queue.pop_head();
                 if (candidate == null) break;
 
-                if (candidate.is_cancelled || candidate.get_item() == null) {
+                if (candidate.is_cancelled || !candidate.has_valid_items()) {
                     if (in_flight_tasks != null) {
                         in_flight_tasks.remove(candidate.key);
                     }
@@ -355,7 +436,7 @@ namespace VCommander {
         private static void process_task(owned ThumbnailTask task) {
             string key = task.key;
 
-            if (task.is_cancelled || task.get_item() == null) {
+            if (task.is_cancelled || !task.has_valid_items()) {
                 finish_task(key);
                 return;
             }
@@ -377,7 +458,7 @@ namespace VCommander {
             }
 
             // Early abort if cancelled
-            if (tex == null && (task.is_cancelled || task.get_item() == null)) {
+            if (tex == null && (task.is_cancelled || !task.has_valid_items())) {
                 finish_task(key);
                 return;
             }
@@ -438,7 +519,7 @@ namespace VCommander {
 
                         var final_pb = new Gdk.Pixbuf.subpixbuf(pb, crop_x, crop_y, crop_w, crop_h);
 
-                        if (!task.is_cancelled && task.get_item() != null) {
+                        if (!task.is_cancelled && task.has_valid_items()) {
                             final_pb.save(task.tmp_path, "png");
 
                             string bucket_dir_path = Path.get_dirname(task.cache_path);
@@ -464,7 +545,7 @@ namespace VCommander {
             }
 
             // Early abort if cancelled before delivery
-            if (task.is_cancelled || task.get_item() == null) {
+            if (task.is_cancelled || !task.has_valid_items()) {
                 finish_task(key);
                 return;
             }
@@ -475,16 +556,13 @@ namespace VCommander {
                     ram_cache.put(key, tex);
                 }
 
-                var target_item = task.get_item();
-                if (target_item != null) {
-                    enqueue_ready_thumbnail(target_item, tex);
-                }
+                task.deliver(tex);
             }
 
             finish_task(key);
         }
 
-        private static void enqueue_ready_thumbnail(FileItem item, Gdk.Texture tex) {
+        public static void enqueue_ready_thumbnail(FileItem item, Gdk.Texture tex) {
             ready_mutex.lock();
             if (ready_queue == null) {
                 ready_queue = new GLib.Queue<ReadyThumbnail>();

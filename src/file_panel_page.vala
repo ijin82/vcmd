@@ -63,6 +63,10 @@ namespace VCommander {
         private FileItem? calculating_item = null;
         private uint shift_anchor_pos = Gtk.INVALID_LIST_POSITION;
         private bool is_shift_navigating = false;
+        private Gtk.PopoverMenu? item_context_popover = null;
+        private GLib.Menu? item_context_menu = null;
+        private SimpleActionGroup? item_context_action_group = null;
+        private FileItem? item_context_target = null;
 
         // Detailed view columns (no Type column)
         private Gtk.ColumnViewColumn name_col;
@@ -1910,10 +1914,6 @@ namespace VCommander {
         private void cleanup_grid_item_binding(Gtk.ListItem list_item) {
             var bound_item = list_item.get_data<FileItem?>("grid_bound_item");
             if (bound_item != null) {
-                if (bound_item.thumbnail_paintable == null) {
-                    ThumbnailService.cancel_request(bound_item);
-                }
-
                 ulong thumb_handler_id = list_item.get_data<ulong>("grid_thumb_id");
                 if (thumb_handler_id != 0) {
                     bound_item.disconnect(thumb_handler_id);
@@ -2439,8 +2439,8 @@ namespace VCommander {
 
             var right_click = new Gtk.GestureClick();
             right_click.button = 3;
-            right_click.pressed.connect(() => {
-                on_item_right_clicked(list_item);
+            right_click.pressed.connect((n_press, x, y) => {
+                on_item_right_clicked(list_item, widget, x, y);
             });
             widget.add_controller(right_click);
         }
@@ -2516,7 +2516,70 @@ namespace VCommander {
             shift_anchor_pos = pos;
         }
 
-        private void on_item_right_clicked(Gtk.ListItem list_item) {
+        private void setup_item_context_menu() {
+            if (item_context_action_group != null) return;
+
+            item_context_action_group = new SimpleActionGroup();
+
+            var act_copy_name = new SimpleAction("copy_name", null);
+            act_copy_name.activate.connect(() => {
+                if (item_context_target != null) {
+                    var clip = Gdk.Display.get_default().get_clipboard();
+                    clip.set_text(item_context_target.name);
+                    var root = get_root() as MainWindow;
+                    if (root != null) {
+                        root.show_command_toast(@"Copied to clipboard: $(item_context_target.name)");
+                    }
+                }
+            });
+            item_context_action_group.add_action(act_copy_name);
+
+            var act_copy_path = new SimpleAction("copy_path", null);
+            act_copy_path.activate.connect(() => {
+                if (item_context_target != null) {
+                    string? path = item_context_target.file.get_path();
+                    if (path == null) path = item_context_target.file.get_uri();
+                    var clip = Gdk.Display.get_default().get_clipboard();
+                    clip.set_text(path);
+                    var root = get_root() as MainWindow;
+                    if (root != null) {
+                        root.show_command_toast(@"Copied full path: $path");
+                    }
+                }
+            });
+            item_context_action_group.add_action(act_copy_path);
+
+            var act_rename = new SimpleAction("rename", null);
+            act_rename.activate.connect(() => {
+                if (item_context_target != null) {
+                    var root = get_root() as MainWindow;
+                    if (root != null) {
+                        root.prompt_rename_item(item_context_target);
+                    }
+                }
+            });
+            item_context_action_group.add_action(act_rename);
+
+            var act_wallpaper = new SimpleAction("set_wallpaper", null);
+            act_wallpaper.activate.connect(() => {
+                if (item_context_target != null) {
+                    var root = get_root() as MainWindow;
+                    if (root != null) {
+                        WallpaperService.set_as_wallpaper.begin(root, item_context_target.file);
+                    }
+                }
+            });
+            item_context_action_group.add_action(act_wallpaper);
+
+            this.insert_action_group("itemcontext", item_context_action_group);
+
+            item_context_menu = new GLib.Menu();
+            item_context_popover = new Gtk.PopoverMenu.from_model(item_context_menu);
+            item_context_popover.has_arrow = true;
+            item_context_popover.set_parent(this);
+        }
+
+        private void on_item_right_clicked(Gtk.ListItem list_item, Gtk.Widget widget, double x, double y) {
             page_activated();
             grab_focus_to_list();
 
@@ -2525,7 +2588,6 @@ namespace VCommander {
                 return;
             }
 
-            file_item.is_tagged = !file_item.is_tagged;
             uint pos = list_item.position;
             if (pos != Gtk.INVALID_LIST_POSITION && pos < sort_model.get_n_items()) {
                 selection_model.selected = pos;
@@ -2533,6 +2595,37 @@ namespace VCommander {
                 shift_anchor_pos = pos;
             }
             update_status_bar();
+
+            item_context_target = file_item;
+
+            if (item_context_menu == null || item_context_popover == null) {
+                setup_item_context_menu();
+            }
+
+            item_context_menu.remove_all();
+            item_context_menu.append("Copy File Name", "itemcontext.copy_name");
+            item_context_menu.append("Copy Full Path", "itemcontext.copy_path");
+            item_context_menu.append("Rename…", "itemcontext.rename");
+
+            if (WallpaperService.is_wallpaper_supported(file_item.name)) {
+                var wp_section = new GLib.Menu();
+                wp_section.append("Set as Wallpaper…", "itemcontext.set_wallpaper");
+                item_context_menu.append_section(null, wp_section);
+            }
+
+            Graphene.Point src_pt = Graphene.Point();
+            src_pt.init((float)x, (float)y);
+            Graphene.Point dst_pt = Graphene.Point();
+            if (widget.compute_point(this, src_pt, out dst_pt)) {
+                Gdk.Rectangle rect = Gdk.Rectangle();
+                rect.x = (int)dst_pt.x;
+                rect.y = (int)dst_pt.y;
+                rect.width = 1;
+                rect.height = 1;
+                item_context_popover.set_pointing_to(rect);
+            }
+
+            item_context_popover.popup();
         }
 
         private uint get_grid_columns() {
@@ -3045,10 +3138,26 @@ namespace VCommander {
                 array[i] = items[i];
             }
             uint old_count = store.get_n_items();
-            for (uint i = 0; i < old_count; i++) {
-                var old_item = (FileItem) store.get_item(i);
-                if (old_item != null) {
-                    old_item.thumbnail_paintable = null;
+            if (old_count > 0) {
+                var old_items_map = new HashTable<string, FileItem>(str_hash, str_equal);
+                for (uint i = 0; i < old_count; i++) {
+                    var old_item = (FileItem) store.get_item(i);
+                    if (old_item != null && old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
+                        old_items_map.insert(old_item.name, old_item);
+                    }
+                }
+
+                for (int i = 0; i < items.length; i++) {
+                    var ni = items[i];
+                    if (!ni.is_dir && !ni.is_parent_dir) {
+                        var oi = old_items_map.lookup(ni.name);
+                        if (oi != null && oi.size == ni.size && 
+                            ((oi.mtime == null && ni.mtime == null) || 
+                             (oi.mtime != null && ni.mtime != null && oi.mtime.equal(ni.mtime)))) {
+                            ni.thumbnail_paintable = oi.thumbnail_paintable;
+                            ni.is_thumbnail_requested = true;
+                        }
+                    }
                 }
             }
             store.splice(0, old_count, array);
@@ -3199,12 +3308,25 @@ namespace VCommander {
                 array[i] = items[i];
             }
             uint old_count = store.get_n_items();
-            for (uint i = 0; i < old_count; i++) {
-                var old_item = (FileItem) store.get_item(i);
-                if (old_item != null) {
-                    old_item.thumbnail_paintable = null;
-                    if (old_item.is_thumbnail_requested) {
-                        ThumbnailService.cancel_request(old_item);
+            if (old_count > 0) {
+                var old_items_map = new HashTable<string, FileItem>(str_hash, str_equal);
+                for (uint i = 0; i < old_count; i++) {
+                    var old_item = (FileItem) store.get_item(i);
+                    if (old_item != null && old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
+                        old_items_map.insert(old_item.name, old_item);
+                    }
+                }
+
+                for (int i = 0; i < items.length; i++) {
+                    var ni = items[i];
+                    if (!ni.is_dir && !ni.is_parent_dir) {
+                        var oi = old_items_map.lookup(ni.name);
+                        if (oi != null && oi.size == ni.size && 
+                            ((oi.mtime == null && ni.mtime == null) || 
+                             (oi.mtime != null && ni.mtime != null && oi.mtime.equal(ni.mtime)))) {
+                            ni.thumbnail_paintable = oi.thumbnail_paintable;
+                            ni.is_thumbnail_requested = true;
+                        }
                     }
                 }
             }
@@ -3290,6 +3412,10 @@ namespace VCommander {
             }
             store.remove_all();
             ThumbnailService.malloc_trim(0);
+            if (item_context_popover != null) {
+                item_context_popover.unparent();
+                item_context_popover = null;
+            }
         }
 
         ~FilePanelPage() {

@@ -65,28 +65,70 @@ namespace VCommander {
         }
     }
 
-    public class DrivesPopover : Gtk.Popover {
+    public class DrivesDialog : Adw.Dialog {
+        private static DrivesDialog? active_dialog = null;
+
         private unowned MainWindow window;
         private Gtk.ListBox list_box;
         private ulong changed_handler_id = 0;
 
-        public DrivesPopover(MainWindow window) {
+        public static void show(MainWindow window) {
+            if (active_dialog != null) {
+                active_dialog.present(window);
+                return;
+            }
+            var dlg = new DrivesDialog(window);
+            dlg.present(window);
+        }
+
+        public static void toggle(MainWindow window) {
+            if (active_dialog != null) {
+                active_dialog.close();
+            } else {
+                show(window);
+            }
+        }
+
+        public static bool is_open() {
+            return active_dialog != null;
+        }
+
+        private DrivesDialog(MainWindow window) {
             Object();
             this.window = window;
-            this.has_arrow = true;
-            this.autohide = true;
-            this.width_request = 360;
+            active_dialog = this;
+
+            this.title = "Drives & Locations";
+            this.content_width = 480;
+
+            this.closed.connect(() => {
+                if (changed_handler_id != 0) {
+                    VolumeService.get_instance().disconnect(changed_handler_id);
+                    changed_handler_id = 0;
+                }
+                active_dialog = null;
+                if (window.active_panel != null) {
+                    window.active_panel.grab_focus_to_list();
+                }
+            });
+
+            var toolbar_view = new Adw.ToolbarView();
+
+            var header_bar = new Adw.HeaderBar();
+            header_bar.show_title = true;
+            toolbar_view.add_top_bar(header_bar);
 
             var scrolled = new Gtk.ScrolledWindow();
-            scrolled.max_content_height = 440;
             scrolled.propagate_natural_height = true;
+            scrolled.max_content_height = 480;
+            scrolled.min_content_height = 140;
             scrolled.hscrollbar_policy = Gtk.PolicyType.NEVER;
 
             list_box = new Gtk.ListBox();
             list_box.selection_mode = Gtk.SelectionMode.SINGLE;
             list_box.add_css_class("boxed-list");
-            list_box.margin_start = 8;
-            list_box.margin_end = 8;
+            list_box.margin_start = 12;
+            list_box.margin_end = 12;
             list_box.margin_top = 8;
             list_box.margin_bottom = 8;
 
@@ -115,13 +157,14 @@ namespace VCommander {
             });
 
             var key_ctrl = new Gtk.EventControllerKey();
+            key_ctrl.propagation_phase = Gtk.PropagationPhase.CAPTURE;
             key_ctrl.key_pressed.connect((keyval, keycode, state) => {
                 if (keyval == Gdk.Key.Escape) {
-                    popdown();
+                    close();
                     return Gdk.EVENT_STOP;
                 }
                 if (keyval == Gdk.Key.F1 && (state & Gdk.ModifierType.CONTROL_MASK) != 0 && (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
-                    popdown();
+                    close();
                     return Gdk.EVENT_STOP;
                 }
                 if (keyval == Gdk.Key.Delete || keyval == Gdk.Key.e || keyval == Gdk.Key.E) {
@@ -143,22 +186,38 @@ namespace VCommander {
             list_box.add_controller(key_ctrl);
 
             scrolled.set_child(list_box);
-            set_child(scrolled);
+            toolbar_view.set_content(scrolled);
 
-            populate_items(false);
+            // Bottom bar with action hints & close button
+            var bottom_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            bottom_bar.margin_start = 14;
+            bottom_bar.margin_end = 14;
+            bottom_bar.margin_top = 6;
+            bottom_bar.margin_bottom = 6;
+
+            var hints_label = new Gtk.Label("↵ Open  •  e Eject  •  r Repair");
+            hints_label.add_css_class("dim-label");
+            hints_label.add_css_class("caption");
+            bottom_bar.append(hints_label);
+
+            var spacer = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            spacer.hexpand = true;
+            bottom_bar.append(spacer);
+
+            var close_btn = new Gtk.Button.with_label("Close");
+            close_btn.clicked.connect(() => {
+                close();
+            });
+            bottom_bar.append(close_btn);
+
+            toolbar_view.add_bottom_bar(bottom_bar);
+            set_child(toolbar_view);
+
+            populate_items(true);
 
             changed_handler_id = VolumeService.get_instance().changed.connect(() => {
-                if (this.visible) {
-                    populate_items(false);
-                }
+                populate_items(false);
             });
-        }
-
-        ~DrivesPopover() {
-            if (changed_handler_id != 0) {
-                VolumeService.get_instance().disconnect(changed_handler_id);
-                changed_handler_id = 0;
-            }
         }
 
         private string category_title(LocationCategory cat) {
@@ -219,9 +278,6 @@ namespace VCommander {
             }
 
             Idle.add(() => {
-                if (!this.visible) {
-                    return Source.REMOVE;
-                }
                 int target_idx = focus_first ? 0 : (prev_idx >= 0 ? prev_idx : 0);
                 var target_row = list_box.get_row_at_index(target_idx);
                 if (target_row == null && target_idx > 0) {
@@ -279,12 +335,12 @@ namespace VCommander {
         }
 
         private void handle_repair(LocationItem item) {
-            popdown();
+            close();
             window.prompt_filesystem_repair(item);
         }
 
         private void on_item_activated(LocationItem item) {
-            popdown();
+            close();
 
             if (item.category == LocationCategory.ACTION) {
                 if (window.active_panel != null) {

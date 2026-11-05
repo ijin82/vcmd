@@ -17,9 +17,9 @@ namespace VCommander {
         public FilePanel active_panel { get; private set; }
 
         private Adw.HeaderBar header_bar;
+        private bool is_focus_mode = false;
         private Gtk.Label title_label;
-        private Gtk.MenuButton drives_button;
-        private DrivesPopover drives_popover;
+        private Gtk.Button drives_button;
         private Gtk.MenuButton operations_button;
         private Gtk.Label operations_label;
         private OperationsPopover operations_popover;
@@ -494,24 +494,11 @@ row:selected .file-item-tagged {
             });
             header_bar.pack_end(bookmarks_button);
 
-            drives_popover = new DrivesPopover(this);
-
-            drives_button = new Gtk.MenuButton();
-            drives_button.icon_name = "drive-harddisk-symbolic";
-            drives_button.always_show_arrow = false;
+            drives_button = new Gtk.Button.from_icon_name("drive-harddisk-symbolic");
             drives_button.focusable = false;
             drives_button.tooltip_text = "Drives & Locations (Ctrl+F1)";
-            drives_button.set_popover(drives_popover);
-            drives_button.notify["active"].connect(() => {
-                if (drives_button.active) {
-                    drives_popover.populate_items(true);
-                } else {
-                    if (console_drawer.visible && vte_terminal != null) {
-                        vte_terminal.grab_focus();
-                    } else if (active_panel != null) {
-                        active_panel.grab_focus_to_list();
-                    }
-                }
+            drives_button.clicked.connect(() => {
+                toggle_drives_menu();
             });
             header_bar.pack_end(drives_button);
 
@@ -746,6 +733,9 @@ row:selected .file-item-tagged {
             // Bottom MC-style Function Key Bar
             build_function_bar(root_box);
 
+            is_focus_mode = config.focus_mode;
+            apply_focus_mode();
+
             toast_overlay = new Adw.ToastOverlay();
             toast_overlay.child = root_box;
             content = toast_overlay;
@@ -834,6 +824,56 @@ row:selected .file-item-tagged {
             console_drawer.append(console_scrolled);
         }
 
+        public void toggle_focus_mode() {
+            is_focus_mode = !is_focus_mode;
+            var config = ConfigManager.get_instance();
+            config.focus_mode = is_focus_mode;
+            config.save();
+            apply_focus_mode();
+
+            if (is_focus_mode) {
+                show_command_toast("Focus mode enabled (Ctrl+Shift+H to exit)");
+            } else {
+                show_command_toast("Focus mode disabled");
+            }
+
+            if (active_panel != null) {
+                active_panel.grab_focus_to_list();
+            }
+        }
+
+        public void apply_focus_mode() {
+            if (header_bar != null) {
+                header_bar.visible = !is_focus_mode;
+            }
+            update_bottom_bars_visibility();
+        }
+
+        private bool should_auto_hide_command_bar {
+            get {
+                var config = ConfigManager.get_instance();
+                return is_focus_mode || !config.always_show_command_line;
+            }
+        }
+
+        public void update_bottom_bars_visibility() {
+            var config = ConfigManager.get_instance();
+
+            if (fn_bar != null) {
+                fn_bar.visible = is_focus_mode ? false : config.show_function_bar;
+            }
+
+            if (command_bar != null) {
+                if (console_drawer != null && console_drawer.visible) {
+                    command_bar.visible = false;
+                } else if (should_auto_hide_command_bar) {
+                    command_bar.visible = (cmd_entry != null && (cmd_entry.has_focus || cmd_entry.text.length > 0));
+                } else {
+                    command_bar.visible = true;
+                }
+            }
+        }
+
         public void toggle_console_drawer() {
             set_console_visible(!console_drawer.visible);
         }
@@ -847,9 +887,7 @@ row:selected .file-item-tagged {
             }
 
             console_drawer.visible = visible;
-            if (command_bar != null) {
-                command_bar.visible = !visible;
-            }
+            update_bottom_bars_visibility();
 
             if (visible) {
                 string? cwd = null;
@@ -1315,6 +1353,14 @@ row:selected .file-item-tagged {
             entry_key_controller.key_pressed.connect(on_command_entry_key_pressed);
             cmd_entry.add_controller(entry_key_controller);
 
+            var focus_controller = new Gtk.EventControllerFocus();
+            focus_controller.leave.connect(() => {
+                if (should_auto_hide_command_bar && cmd_entry.text.length == 0) {
+                    update_bottom_bars_visibility();
+                }
+            });
+            cmd_entry.add_controller(focus_controller);
+
             command_bar.append(cmd_entry);
             parent_box.append(command_bar);
         }
@@ -1565,11 +1611,11 @@ row:selected .file-item-tagged {
                     }
                 }
 
-                // Ctrl+Shift+H: toggle window header bar visibility
+                // Ctrl+Shift+H: toggle Focus Mode (header bar, command bar, hint bar)
                 if (latin_key == Gdk.Key.h &&
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
                     (state & Gdk.ModifierType.SHIFT_MASK) != 0) {
-                    header_bar.visible = !header_bar.visible;
+                    toggle_focus_mode();
                     return Gdk.EVENT_STOP;
                 }
 
@@ -1987,6 +2033,9 @@ row:selected .file-item-tagged {
         }
 
         private void on_command_char_typed(string ch) {
+            if (should_auto_hide_command_bar && command_bar != null) {
+                command_bar.visible = true;
+            }
             cmd_entry.text = cmd_entry.text + ch;
             cmd_entry.grab_focus();
             cmd_entry.set_position(-1);
@@ -2008,6 +2057,10 @@ row:selected .file-item-tagged {
                 formatted_name = @"\"$escaped\"";
             } else {
                 formatted_name = name;
+            }
+
+            if (should_auto_hide_command_bar && command_bar != null) {
+                command_bar.visible = true;
             }
 
             string current_text = cmd_entry.text;
@@ -2156,13 +2209,15 @@ row:selected .file-item-tagged {
 
         private void on_command_entered() {
             var cmd = cmd_entry.text.strip();
+            cmd_entry.text = "";
+            update_bottom_bars_visibility();
+
             if (cmd.length > 0) {
                 if (command_history.length == 0 || command_history[command_history.length - 1] != cmd) {
                     command_history.add(cmd);
                 }
                 history_index = -1;
                 saved_input = "";
-                cmd_entry.text = "";
 
                 if (active_panel != null && active_panel.current_directory != null) {
                     if (handle_builtin_cd(cmd)) {
@@ -2306,19 +2361,11 @@ row:selected .file-item-tagged {
         }
 
         public void toggle_drives_menu() {
-            if (drives_button != null) {
-                if (drives_button.active) {
-                    drives_button.popdown();
-                } else {
-                    drives_button.popup();
-                }
-            }
+            DrivesDialog.toggle(this);
         }
 
         public void show_drives_menu() {
-            if (drives_button != null && !drives_button.active) {
-                drives_button.popup();
-            }
+            DrivesDialog.show(this);
         }
 
         public void toggle_operations_menu() {
@@ -2342,6 +2389,7 @@ row:selected .file-item-tagged {
                 cmd_entry.text = "";
                 history_index = -1;
                 saved_input = "";
+                update_bottom_bars_visibility();
                 if (active_panel != null) {
                     active_panel.grab_focus_to_list();
                 }
@@ -4379,7 +4427,10 @@ row:selected .file-item-tagged {
 
         private void on_shift_f6_rename() {
             if (active_panel == null) return;
-            var item = active_panel.get_selected_item();
+            prompt_rename_item(active_panel.get_selected_item());
+        }
+
+        public void prompt_rename_item(FileItem? item) {
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Rename", "Please select a file or folder to rename.");
                 return;
@@ -4507,6 +4558,13 @@ row:selected .file-item-tagged {
                 }
 
                 item.rename_in_place(new_name, dest_target, new_icon);
+
+                string? old_p = old_file.get_path();
+                string? new_p = dest_target.get_path();
+                if (old_p != null && new_p != null) {
+                    int64 mtime_val = (item.mtime != null) ? item.mtime.to_unix() : 0;
+                    ThumbnailService.handle_file_rename(old_p, new_p, mtime_val, item.size);
+                }
 
                 // If opposite panel has the same folder open, update matching item there too
                 var other_panel = (active_panel == left_panel) ? right_panel : left_panel;
@@ -5068,9 +5126,8 @@ row:selected .file-item-tagged {
 
         public void apply_preferences() {
             var config = ConfigManager.get_instance();
-            if (fn_bar != null) {
-                fn_bar.visible = config.show_function_bar;
-            }
+            is_focus_mode = config.focus_mode;
+            apply_focus_mode();
             left_panel.update_brief_column_width();
             right_panel.update_brief_column_width();
             left_panel.update_grid_tile_size();
