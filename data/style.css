@@ -151,6 +151,15 @@ tab.pinned-tab button.tab-close-button {
     color: inherit;
 }
 
+.file-item-symlink-broken {
+    color: #e01b24; /* Libadwaita red for broken symlinks */
+    font-style: italic;
+}
+
+:selected .file-item-symlink-broken {
+    color: inherit;
+}
+
 .command-bar {
     padding: 0;
 }
@@ -212,13 +221,15 @@ row * {
     }
 }
 
-.file-item-symlink.file-item-tagged {
+.file-item-symlink.file-item-tagged,
+.file-item-symlink-broken.file-item-tagged {
     color: #c67c00;
     font-weight: bold;
 }
 
 @media (prefers-color-scheme: dark) {
-    .file-item-symlink.file-item-tagged {
+    .file-item-symlink.file-item-tagged,
+    .file-item-symlink-broken.file-item-tagged {
         color: #f6d32d;
         font-weight: bold;
     }

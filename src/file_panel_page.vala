@@ -255,11 +255,16 @@ namespace VCommander {
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
                 label.remove_css_class("file-item-symlink");
+                label.remove_css_class("file-item-symlink-broken");
 
                 if (file_item.is_parent_dir) {
                     label.add_css_class("file-item-parent");
                 } else if (file_item.is_symlink) {
-                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_symlink_broken) {
+                        label.add_css_class("file-item-symlink-broken");
+                    } else {
+                        label.add_css_class("file-item-symlink");
+                    }
                     if (file_item.is_dir) {
                         label.add_css_class("file-item-dir");
                     }
@@ -582,11 +587,16 @@ namespace VCommander {
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
                 label.remove_css_class("file-item-symlink");
+                label.remove_css_class("file-item-symlink-broken");
 
                 if (file_item.is_parent_dir) {
                     label.add_css_class("file-item-parent");
                 } else if (file_item.is_symlink) {
-                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_symlink_broken) {
+                        label.add_css_class("file-item-symlink-broken");
+                    } else {
+                        label.add_css_class("file-item-symlink");
+                    }
                     if (file_item.is_dir) {
                         label.add_css_class("file-item-dir");
                     }
@@ -966,6 +976,7 @@ namespace VCommander {
                     }
                 }
                 update_trash_restore_button();
+                update_status_bar();
             });
 
             column_view.model = null;
@@ -1678,11 +1689,16 @@ namespace VCommander {
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
                 label.remove_css_class("file-item-symlink");
+                label.remove_css_class("file-item-symlink-broken");
 
                 if (file_item.is_parent_dir) {
                     label.add_css_class("file-item-parent");
                 } else if (file_item.is_symlink) {
-                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_symlink_broken) {
+                        label.add_css_class("file-item-symlink-broken");
+                    } else {
+                        label.add_css_class("file-item-symlink");
+                    }
                     if (file_item.is_dir) {
                         label.add_css_class("file-item-dir");
                     }
@@ -1816,11 +1832,16 @@ namespace VCommander {
                 label.remove_css_class("file-item-parent");
                 label.remove_css_class("file-item-dir");
                 label.remove_css_class("file-item-symlink");
+                label.remove_css_class("file-item-symlink-broken");
 
                 if (file_item.is_parent_dir) {
                     label.add_css_class("file-item-parent");
                 } else if (file_item.is_symlink) {
-                    label.add_css_class("file-item-symlink");
+                    if (file_item.is_symlink_broken) {
+                        label.add_css_class("file-item-symlink-broken");
+                    } else {
+                        label.add_css_class("file-item-symlink");
+                    }
                     if (file_item.is_dir) {
                         label.add_css_class("file-item-dir");
                     }
@@ -2819,21 +2840,42 @@ namespace VCommander {
             int64 tagged_bytes = 0;
             uint n = sort_model.get_n_items();
             for (uint i = 0; i < n; i++) {
-                var item = (FileItem) sort_model.get_item(i);
-                if (item != null && item.is_tagged && !item.is_parent_dir) {
+                var it = (FileItem) sort_model.get_item(i);
+                if (it != null && it.is_tagged && !it.is_parent_dir) {
                     tagged_count++;
-                    if (!item.is_dir) {
-                        tagged_bytes += item.size;
-                    } else if (item.custom_size >= 0) {
-                        tagged_bytes += item.custom_size;
+                    if (!it.is_dir) {
+                        tagged_bytes += it.size;
+                    } else if (it.custom_size >= 0) {
+                        tagged_bytes += it.custom_size;
                     }
                 }
             }
 
-            if (tagged_count > 0) {
-                status_label.label = @"$current_dir_stats | Selected: $tagged_count ($(format_size(tagged_bytes)))";
+            string item_info = "";
+            var item = get_selected_item();
+            if (item != null && !item.is_parent_dir) {
+                if (item.is_symlink) {
+                    string target = (item.symlink_target != null && item.symlink_target.length > 0) ? item.symlink_target : "(unknown)";
+                    item_info = @"Symlink: $(item.display_name) -> $target";
+                } else if (!item.is_dir) {
+                    item_info = @"File: '$(item.name)' | Size: $(format_size(item.size)) ($(item.size) bytes)";
+                } else {
+                    if (item.is_calculating_size) {
+                        item_info = @"Directory '$(item.display_name)': [Counting...]";
+                    } else if (item.custom_size >= 0) {
+                        item_info = @"Directory '$(item.display_name)': $(format_size(item.custom_size))";
+                    } else {
+                        item_info = current_dir_stats;
+                    }
+                }
             } else {
-                status_label.label = current_dir_stats;
+                item_info = current_dir_stats;
+            }
+
+            if (tagged_count > 0) {
+                status_label.label = @"$item_info | Selected: $tagged_count ($(format_size(tagged_bytes)))";
+            } else {
+                status_label.label = item_info;
             }
         }
 

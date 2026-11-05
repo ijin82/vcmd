@@ -10,6 +10,7 @@ namespace VCommander {
         public bool is_parent_dir { get; construct set; default = false; }
         public bool is_symlink { get; construct set; default = false; }
         public string? symlink_target { get; construct set; default = null; }
+        public bool is_symlink_broken { get; construct set; default = false; }
         public bool is_hidden { get; construct set; default = false; }
         public Icon? icon { get; construct set; default = null; }
         public string file_type { get; construct set; default = ""; }
@@ -173,12 +174,36 @@ namespace VCommander {
 
             bool symlink = info.get_is_symlink();
             string? link_target = null;
+            bool symlink_broken = false;
             if (symlink) {
                 link_target = info.get_symlink_target();
                 if (link_target == null && file.get_path() != null) {
                     try {
                         link_target = GLib.FileUtils.read_link(file.get_path());
                     } catch (Error e) {}
+                }
+
+                if (link_target != null && link_target.length > 0) {
+                    File? target_file = null;
+                    if (Path.is_absolute(link_target)) {
+                        target_file = File.new_for_path(link_target);
+                    } else {
+                        var parent = file.get_parent();
+                        if (parent != null) {
+                            target_file = parent.resolve_relative_path(link_target);
+                        }
+                    }
+                    if (target_file != null) {
+                        if (target_file.get_path() != null) {
+                            symlink_broken = !FileUtils.test(target_file.get_path(), FileTest.EXISTS);
+                        } else {
+                            symlink_broken = !target_file.query_exists(null);
+                        }
+                    } else {
+                        symlink_broken = true;
+                    }
+                } else {
+                    symlink_broken = true;
                 }
             }
 
@@ -229,6 +254,7 @@ namespace VCommander {
                 is_parent_dir: false,
                 is_symlink: symlink,
                 symlink_target: link_target,
+                is_symlink_broken: symlink_broken,
                 is_hidden: hidden,
                 icon: item_icon,
                 file_type: ftype,
@@ -254,7 +280,8 @@ namespace VCommander {
             string file_type = "",
             string owner = "",
             string group = "",
-            uint32 mode = 0
+            uint32 mode = 0,
+            bool is_symlink_broken = false
         ) {
             Object(
                 file: file,
@@ -266,6 +293,7 @@ namespace VCommander {
                 is_parent_dir: false,
                 is_symlink: is_symlink,
                 symlink_target: symlink_target,
+                is_symlink_broken: is_symlink_broken,
                 is_hidden: is_hidden,
                 icon: icon,
                 file_type: file_type,

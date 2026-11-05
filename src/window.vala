@@ -1,5 +1,45 @@
 namespace VCommander {
 
+    public class DialogConflictResolver : Object, ConflictResolver {
+        private weak MainWindow window;
+        private ConflictResolution remembered_action = ConflictResolution.OVERWRITE;
+        private bool has_remembered = false;
+
+        public DialogConflictResolver(MainWindow window) {
+            this.window = window;
+        }
+
+        public async ConflictResolution resolve_conflict(File source, File dest) {
+            if (has_remembered) {
+                if (remembered_action == ConflictResolution.OVERWRITE_ALL) {
+                    return ConflictResolution.OVERWRITE;
+                }
+                if (remembered_action == ConflictResolution.SKIP_ALL) {
+                    return ConflictResolution.SKIP;
+                }
+                if (remembered_action == ConflictResolution.CANCEL) {
+                    return ConflictResolution.CANCEL;
+                }
+            }
+
+            var chosen = yield window.prompt_conflict_dialog(source, dest);
+            if (chosen == ConflictResolution.OVERWRITE_ALL) {
+                has_remembered = true;
+                remembered_action = ConflictResolution.OVERWRITE_ALL;
+                return ConflictResolution.OVERWRITE;
+            } else if (chosen == ConflictResolution.SKIP_ALL) {
+                has_remembered = true;
+                remembered_action = ConflictResolution.SKIP_ALL;
+                return ConflictResolution.SKIP;
+            } else if (chosen == ConflictResolution.CANCEL) {
+                has_remembered = true;
+                remembered_action = ConflictResolution.CANCEL;
+                return ConflictResolution.CANCEL;
+            }
+            return chosen;
+        }
+    }
+
     public class MainWindow : Adw.ApplicationWindow {
         private Gtk.Paned paned;
         private Gtk.Paned vertical_paned;
@@ -162,6 +202,15 @@ paned > separator:hover {
     color: inherit;
 }
 
+.file-item-symlink-broken {
+    color: #e01b24;
+    font-style: italic;
+}
+
+:selected .file-item-symlink-broken {
+    color: inherit;
+}
+
 .command-bar {
     padding: 0;
 }
@@ -226,13 +275,15 @@ row * {
     }
 }
 
-.file-item-symlink.file-item-tagged {
+.file-item-symlink.file-item-tagged,
+.file-item-symlink-broken.file-item-tagged {
     color: #c67c00;
     font-weight: bold;
 }
 
 @media (prefers-color-scheme: dark) {
-    .file-item-symlink.file-item-tagged {
+    .file-item-symlink.file-item-tagged,
+    .file-item-symlink-broken.file-item-tagged {
         color: #f6d32d;
         font-weight: bold;
     }
@@ -2444,6 +2495,141 @@ row:selected .file-item-tagged {
             safe_present_alert.begin(dialog);
         }
 
+        public async ConflictResolution prompt_conflict_dialog(File source, File dest) {
+            string heading = "File Already Exists";
+            string body = @"A file named '$(dest.get_basename())' already exists in the destination folder.\nDo you want to overwrite it?";
+
+            var dialog = new Adw.AlertDialog(heading, body);
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("skip_all", "Skip All");
+            dialog.add_response("skip", "Skip");
+            dialog.add_response("overwrite_all", "Overwrite All");
+            dialog.add_response("overwrite", "Overwrite");
+            dialog.set_default_response("cancel");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.set_response_appearance("overwrite_all", Adw.ResponseAppearance.DESTRUCTIVE);
+
+            int64 src_size = -1;
+            int64 dest_size = -1;
+            string src_time_str = "Unknown";
+            string dest_time_str = "Unknown";
+
+            try {
+                var s_info = yield source.query_info_async(
+                    FileAttribute.STANDARD_SIZE + "," + FileAttribute.TIME_MODIFIED,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    null
+                );
+                src_size = s_info.get_size();
+                var s_mtime = s_info.get_modification_date_time();
+                if (s_mtime != null) {
+                    src_time_str = s_mtime.format("%Y-%m-%d %H:%M:%S");
+                }
+            } catch (Error e) {}
+
+            try {
+                var d_info = yield dest.query_info_async(
+                    FileAttribute.STANDARD_SIZE + "," + FileAttribute.TIME_MODIFIED,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    null
+                );
+                dest_size = d_info.get_size();
+                var d_mtime = d_info.get_modification_date_time();
+                if (d_mtime != null) {
+                    dest_time_str = d_mtime.format("%Y-%m-%d %H:%M:%S");
+                }
+            } catch (Error e) {}
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 6);
+            box.margin_start = 12;
+            box.margin_end = 12;
+            box.margin_top = 4;
+            box.margin_bottom = 4;
+
+            string dest_size_str = dest_size >= 0 ? GLib.format_size(dest_size) : "Unknown";
+            var dest_label = new Gtk.Label(@"Existing: $(dest.get_basename()) ($(dest_size_str), modified $dest_time_str)");
+            dest_label.xalign = 0;
+            dest_label.add_css_class("dim-label");
+            dest_label.wrap = true;
+
+            string src_size_str = src_size >= 0 ? GLib.format_size(src_size) : "Unknown";
+            var src_label = new Gtk.Label(@"New: $(source.get_basename()) ($(src_size_str), modified $src_time_str)");
+            src_label.xalign = 0;
+            src_label.wrap = true;
+
+            box.append(dest_label);
+            box.append(src_label);
+            dialog.set_extra_child(box);
+
+            Gtk.Widget parent_widget = this;
+            var visible_dlg = get_visible_dialog();
+            if (visible_dlg != null) {
+                parent_widget = visible_dlg;
+            }
+
+            string chosen_response = "";
+            SourceFunc resume = prompt_conflict_dialog.callback;
+            dialog.choose.begin(parent_widget, null, (obj, res) => {
+                chosen_response = dialog.choose.end(res);
+                Idle.add((owned) resume);
+            });
+            yield;
+
+            if (chosen_response == "overwrite") return ConflictResolution.OVERWRITE;
+            if (chosen_response == "overwrite_all") return ConflictResolution.OVERWRITE_ALL;
+            if (chosen_response == "skip") return ConflictResolution.SKIP;
+            if (chosen_response == "skip_all") return ConflictResolution.SKIP_ALL;
+            return ConflictResolution.CANCEL;
+        }
+
+        public void show_skipped_items_dialog(string op_title, GenericArray<SkippedItem> skipped) {
+            if (skipped == null || skipped.length == 0) return;
+
+            string heading = @"$op_title Completed with Warnings";
+            string body = @"The following $(skipped.length) item(s) could not be processed and were skipped:";
+
+            var dialog = new Adw.AlertDialog(heading, body);
+            dialog.add_response("ok", "OK");
+            dialog.set_default_response("ok");
+            dialog.set_close_response("ok");
+            dialog.set_response_appearance("ok", Adw.ResponseAppearance.DEFAULT);
+
+            var scrolled = new Gtk.ScrolledWindow();
+            scrolled.min_content_height = 120;
+            scrolled.max_content_height = 240;
+            scrolled.propagate_natural_height = true;
+            scrolled.hscrollbar_policy = Gtk.PolicyType.AUTOMATIC;
+            scrolled.vscrollbar_policy = Gtk.PolicyType.AUTOMATIC;
+
+            var list_box = new Gtk.ListBox();
+            list_box.selection_mode = Gtk.SelectionMode.NONE;
+            list_box.add_css_class("boxed-list");
+
+            for (int i = 0; i < skipped.length; i++) {
+                var it = skipped[i];
+                var row = new Adw.ActionRow();
+                row.title = Path.get_basename(it.path);
+                row.subtitle = @"$(it.path)\n$(it.reason)";
+                row.subtitle_lines = 2;
+                var icon = new Gtk.Image.from_icon_name("dialog-warning-symbolic");
+                row.add_prefix(icon);
+                list_box.append(row);
+            }
+
+            scrolled.child = list_box;
+            dialog.set_extra_child(scrolled);
+
+            dialog.response.connect(() => {
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
+            });
+            safe_present_alert.begin(dialog);
+        }
+
         private async void wait_for_dialogs_to_clear() {
             int attempts = 0;
             while (get_visible_dialog() != null && attempts < 25) {
@@ -3965,39 +4151,18 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
-            if (dest_exists) {
-                yield wait_for_dialogs_to_clear();
-                var conflict_dlg = new Adw.AlertDialog(
-                    "File Already Exists",
-                    @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
-                );
-                conflict_dlg.add_response("cancel", "Cancel");
-                conflict_dlg.add_response("overwrite", "Overwrite");
-                conflict_dlg.set_default_response("cancel");
-                conflict_dlg.set_close_response("cancel");
-                conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
-
-                conflict_dlg.choose.begin(this, null, (obj, res) => {
-                    string resp = conflict_dlg.choose.end(res);
-                    if (resp == "overwrite") {
-                        do_copy_file.begin(item.file, dest_target, true);
-                    } else {
-                        if (active_panel != null) active_panel.grab_focus_to_list();
-                    }
-                });
-            } else {
-                yield do_copy_file(item.file, dest_target, false);
-            }
+            yield do_copy_file(item.file, dest_target);
         }
 
-        private async void do_copy_file(File source, File dest, bool overwrite) {
+        private async void do_copy_file(File source, File dest, ConflictResolver? resolver = null) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(source.get_basename())", cancellable);
             var disks = DriveQueueManager.get_required_disks(source, dest);
             register_operation(dlg, disks);
 
             var tracker = new CopyProgressTracker();
+            var conf_resolver = (resolver != null) ? resolver : new DialogConflictResolver(this);
+            bool copy_succeeded = false;
             AppLogger.info("FileOperation", @"Copy requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
@@ -4010,13 +4175,14 @@ row:selected .file-item-tagged {
                 yield FileOperationService.copy_file_or_dir(
                     source,
                     dest,
-                    overwrite,
+                    conf_resolver,
                     cancellable,
                     (cur_filename, current_b, total_b) => {
                         dlg.update_progress(cur_filename, current_b, total_b);
                     },
                     tracker
                 );
+                copy_succeeded = true;
                 AppLogger.info("FileOperation", @"Copy completed successfully: '$(source.get_basename())'");
             } catch (Error e) {
                 if (e.matches(IOError.quark(), IOError.CANCELLED)) {
@@ -4031,6 +4197,9 @@ row:selected .file-item-tagged {
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
+                if (copy_succeeded && !cancellable.is_cancelled() && tracker.has_skipped_items) {
+                    show_skipped_items_dialog("Copy", tracker.skipped_items);
+                }
             }
         }
 
@@ -4040,6 +4209,8 @@ row:selected .file-item-tagged {
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
             register_operation(dlg, disks);
             var tracker = new CopyProgressTracker();
+            var conf_resolver = new DialogConflictResolver(this);
+            bool copy_succeeded = false;
             AppLogger.info("FileOperation", @"Multi-copy requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
@@ -4064,7 +4235,7 @@ row:selected .file-item-tagged {
                     yield FileOperationService.copy_file_or_dir(
                         it.file,
                         dest_child,
-                        true,
+                        conf_resolver,
                         cancellable,
                         (cur_filename, current_b, total_b) => {
                             dlg.update_progress(cur_filename, current_b, total_b);
@@ -4074,6 +4245,7 @@ row:selected .file-item-tagged {
                 }
 
                 if (!cancellable.is_cancelled()) {
+                    copy_succeeded = true;
                     AppLogger.info("FileOperation", @"Multi-copy completed successfully: $(items.length) items");
                     if (active_panel != null) {
                         active_panel.clear_tags();
@@ -4092,6 +4264,9 @@ row:selected .file-item-tagged {
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
+                if (copy_succeeded && !cancellable.is_cancelled() && tracker.has_skipped_items) {
+                    show_skipped_items_dialog("Copy", tracker.skipped_items);
+                }
             }
         }
 
@@ -4537,7 +4712,7 @@ row:selected .file-item-tagged {
             File? parent_dir = old_file.get_parent();
 
             try {
-                yield FileOperationService.move_file_or_dir(old_file, dest_target, overwrite, null);
+                yield FileOperationService.move_file_or_dir(old_file, dest_target, new SimpleConflictResolver(overwrite ? ConflictResolution.OVERWRITE : ConflictResolution.SKIP), null);
 
                 Icon? new_icon = null;
                 try {
@@ -4601,39 +4776,18 @@ row:selected .file-item-tagged {
                 return;
             }
 
-            bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
-            if (dest_exists) {
-                yield wait_for_dialogs_to_clear();
-                var conflict_dlg = new Adw.AlertDialog(
-                    "File Already Exists",
-                    @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
-                );
-                conflict_dlg.add_response("cancel", "Cancel");
-                conflict_dlg.add_response("overwrite", "Overwrite");
-                conflict_dlg.set_default_response("cancel");
-                conflict_dlg.set_close_response("cancel");
-                conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
-
-                conflict_dlg.choose.begin(this, null, (obj, res) => {
-                    string resp = conflict_dlg.choose.end(res);
-                    if (resp == "overwrite") {
-                        do_move_file.begin(item.file, dest_target, true);
-                    } else {
-                        if (active_panel != null) active_panel.grab_focus_to_list();
-                    }
-                });
-            } else {
-                yield do_move_file(item.file, dest_target, false);
-            }
+            yield do_move_file(item.file, dest_target);
         }
 
-        private async void do_move_file(File source, File dest, bool overwrite) {
+        private async void do_move_file(File source, File dest, ConflictResolver? resolver = null) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(source.get_basename())", cancellable);
             var disks = DriveQueueManager.get_required_disks(source, dest);
             register_operation(dlg, disks);
 
             var tracker = new CopyProgressTracker();
+            var conf_resolver = (resolver != null) ? resolver : new DialogConflictResolver(this);
+            bool move_succeeded = false;
             AppLogger.info("FileOperation", @"Move requested: '$(source.get_basename())' -> '$(dest.get_path() ?? dest.get_uri())'");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
@@ -4645,13 +4799,14 @@ row:selected .file-item-tagged {
                 yield FileOperationService.move_file_or_dir(
                     source,
                     dest,
-                    overwrite,
+                    conf_resolver,
                     cancellable,
                     (cur_filename, current_b, total_b) => {
                         dlg.update_progress(cur_filename, current_b, total_b);
                     },
                     tracker
                 );
+                move_succeeded = true;
                 AppLogger.info("FileOperation", @"Move completed successfully: '$(source.get_basename())'");
             } catch (Error e) {
                 if (e.matches(IOError.quark(), IOError.CANCELLED)) {
@@ -4666,6 +4821,9 @@ row:selected .file-item-tagged {
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
+                if (move_succeeded && !cancellable.is_cancelled() && tracker.has_skipped_items) {
+                    show_skipped_items_dialog("Move", tracker.skipped_items);
+                }
             }
         }
 
@@ -4675,6 +4833,8 @@ row:selected .file-item-tagged {
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
             register_operation(dlg, disks);
             var tracker = new CopyProgressTracker();
+            var conf_resolver = new DialogConflictResolver(this);
+            bool move_succeeded = false;
             AppLogger.info("FileOperation", @"Multi-move requested: $(items.length) items -> '$(dest_dir.get_path() ?? dest_dir.get_uri())'");
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
@@ -4699,7 +4859,7 @@ row:selected .file-item-tagged {
                     yield FileOperationService.move_file_or_dir(
                         it.file,
                         dest_child,
-                        true,
+                        conf_resolver,
                         cancellable,
                         (cur_filename, current_b, total_b) => {
                             dlg.update_progress(cur_filename, current_b, total_b);
@@ -4709,6 +4869,7 @@ row:selected .file-item-tagged {
                 }
 
                 if (!cancellable.is_cancelled()) {
+                    move_succeeded = true;
                     AppLogger.info("FileOperation", @"Multi-move completed successfully: $(items.length) items");
                     if (active_panel != null) {
                         active_panel.clear_tags();
@@ -4727,6 +4888,9 @@ row:selected .file-item-tagged {
                 left_panel.refresh();
                 right_panel.refresh();
                 if (active_panel != null) active_panel.grab_focus_to_list();
+                if (move_succeeded && !cancellable.is_cancelled() && tracker.has_skipped_items) {
+                    show_skipped_items_dialog("Move", tracker.skipped_items);
+                }
             }
         }
 

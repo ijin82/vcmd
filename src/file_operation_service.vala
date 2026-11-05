@@ -2,8 +2,36 @@ namespace VCommander {
 
     public enum ConflictResolution {
         OVERWRITE,
+        OVERWRITE_ALL,
         SKIP,
+        SKIP_ALL,
         CANCEL
+    }
+
+    public interface ConflictResolver : Object {
+        public abstract async ConflictResolution resolve_conflict(File source, File dest);
+    }
+
+    public class SimpleConflictResolver : Object, ConflictResolver {
+        private ConflictResolution default_resolution;
+
+        public SimpleConflictResolver(ConflictResolution resolution = ConflictResolution.OVERWRITE) {
+            this.default_resolution = resolution;
+        }
+
+        public async ConflictResolution resolve_conflict(File source, File dest) {
+            return default_resolution;
+        }
+    }
+
+    public class SkippedItem : Object {
+        public string path { get; set; }
+        public string reason { get; set; }
+
+        public SkippedItem(string path, string reason) {
+            this.path = path;
+            this.reason = reason;
+        }
     }
 
     public delegate void OperationProgressCallback(string current_file, int64 current_num, int64 total_num);
@@ -11,6 +39,26 @@ namespace VCommander {
     public class CopyProgressTracker : Object {
         public int64 total_bytes { get; set; default = 0; }
         public int64 copied_bytes { get; set; default = 0; }
+        private GenericArray<SkippedItem>? _skipped_items;
+
+        public GenericArray<SkippedItem> skipped_items {
+            get {
+                if (_skipped_items == null) {
+                    _skipped_items = new GenericArray<SkippedItem>();
+                }
+                return _skipped_items;
+            }
+        }
+
+        public void add_skipped_item(string path, string reason) {
+            skipped_items.add(new SkippedItem(path, reason));
+        }
+
+        public bool has_skipped_items {
+            get {
+                return _skipped_items != null && _skipped_items.length > 0;
+            }
+        }
     }
 
     public class FileOperationService : Object {
@@ -182,7 +230,8 @@ namespace VCommander {
                 yield trash_file.move_async(dest_file, flags, Priority.DEFAULT, cancellable, null);
             } catch (Error e) {
                 if (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || e.matches(IOError.quark(), IOError.WOULD_RECURSE)) {
-                    yield copy_file_or_dir(trash_file, dest_file, overwrite, cancellable);
+                    var resolver = new SimpleConflictResolver(overwrite ? ConflictResolution.OVERWRITE : ConflictResolution.SKIP);
+                    yield copy_file_or_dir(trash_file, dest_file, resolver, cancellable);
                     yield trash_file.delete_async(Priority.DEFAULT, cancellable);
                 } else {
                     throw e;
@@ -260,7 +309,7 @@ namespace VCommander {
         public static async void copy_file_or_dir(
             File source,
             File dest,
-            bool overwrite,
+            ConflictResolver? resolver = null,
             Cancellable? cancellable = null,
             OperationProgressCallback? progress_cb = null,
             CopyProgressTracker? tracker = null
@@ -276,6 +325,30 @@ namespace VCommander {
                 bool dest_exists = yield file_exists_async(dest, cancellable);
                 if (!dest_exists) {
                     yield dest.make_directory_async(Priority.DEFAULT, cancellable);
+                } else {
+                    var dest_info = yield dest.query_info_async(
+                        FileAttribute.STANDARD_TYPE,
+                        FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                        Priority.DEFAULT,
+                        cancellable
+                    );
+                    if (dest_info.get_file_type() != FileType.DIRECTORY) {
+                        ConflictResolution decision = ConflictResolution.OVERWRITE;
+                        if (resolver != null) {
+                            decision = yield resolver.resolve_conflict(source, dest);
+                        }
+                        if (decision == ConflictResolution.CANCEL) {
+                            throw new IOError.CANCELLED("Operation cancelled");
+                        } else if (decision == ConflictResolution.SKIP) {
+                            if (tracker != null) {
+                                tracker.add_skipped_item(source.get_parse_name(), "Skipped (destination file already exists)");
+                            }
+                            return;
+                        } else if (decision == ConflictResolution.OVERWRITE) {
+                            yield dest.delete_async(Priority.DEFAULT, cancellable);
+                            yield dest.make_directory_async(Priority.DEFAULT, cancellable);
+                        }
+                    }
                 }
 
                 if (progress_cb != null && tracker != null) {
@@ -300,15 +373,34 @@ namespace VCommander {
                     foreach (var child_info in file_list) {
                         var child_src = source.get_child(child_info.get_name());
                         var child_dest = dest.get_child(child_info.get_name());
-                        yield copy_file_or_dir(child_src, child_dest, overwrite, cancellable, progress_cb, tracker);
+                        yield copy_file_or_dir(child_src, child_dest, resolver, cancellable, progress_cb, tracker);
                     }
                 }
             } else {
-                if (overwrite) {
-                    bool dest_exists = yield file_exists_async(dest, cancellable);
-                    if (dest_exists) {
-                        // Pre-delete destination file to avoid GIO creating temporary .goutputstream-XXXXXX files
-                        // and to free storage space immediately prior to copying large files.
+                bool is_symlink = (src_info.get_file_type() == FileType.SYMBOLIC_LINK);
+                int64 current_file_bytes_done = 0;
+                int64 file_start_copied = (tracker != null) ? tracker.copied_bytes : 0;
+                int64 total_bytes = (tracker != null) ? tracker.total_bytes : 0;
+                string filename = source.get_basename();
+
+                bool dest_exists = yield file_exists_async(dest, cancellable);
+                if (dest_exists) {
+                    ConflictResolution decision = ConflictResolution.OVERWRITE;
+                    if (resolver != null) {
+                        decision = yield resolver.resolve_conflict(source, dest);
+                    }
+                    if (decision == ConflictResolution.CANCEL) {
+                        throw new IOError.CANCELLED("Operation cancelled");
+                    } else if (decision == ConflictResolution.SKIP) {
+                        if (tracker != null) {
+                            tracker.add_skipped_item(source.get_parse_name(), "Skipped (already exists)");
+                            tracker.copied_bytes = file_start_copied + src_info.get_size();
+                            if (progress_cb != null) {
+                                progress_cb(filename, tracker.copied_bytes, total_bytes);
+                            }
+                        }
+                        return;
+                    } else if (decision == ConflictResolution.OVERWRITE) {
                         try {
                             yield dest.delete_async(Priority.DEFAULT, cancellable);
                         } catch (Error e) {
@@ -318,11 +410,6 @@ namespace VCommander {
                 }
 
                 FileCopyFlags flags = FileCopyFlags.ALL_METADATA | FileCopyFlags.NOFOLLOW_SYMLINKS;
-
-                int64 current_file_bytes_done = 0;
-                int64 file_start_copied = (tracker != null) ? tracker.copied_bytes : 0;
-                int64 total_bytes = (tracker != null) ? tracker.total_bytes : 0;
-                string filename = source.get_basename();
 
                 try {
                     yield source.copy_async(dest, flags, Priority.DEFAULT, cancellable, (cur, total) => {
@@ -337,6 +424,19 @@ namespace VCommander {
                     try {
                         yield dest.delete_async(Priority.DEFAULT, null);
                     } catch (Error ignored) {}
+
+                    if (is_symlink && (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || (e.message != null && ("symlink" in e.message.down() || "symbolic link" in e.message.down() || "not supported" in e.message.down())))) {
+                        AppLogger.warn("FileOperation", @"Skipping unsupported symlink '$(source.get_parse_name())': $(e.message)");
+                        if (tracker != null) {
+                            tracker.add_skipped_item(source.get_parse_name(), e.message);
+                            tracker.copied_bytes = file_start_copied + src_info.get_size();
+                            if (progress_cb != null) {
+                                progress_cb(filename, tracker.copied_bytes, total_bytes);
+                            }
+                        }
+                        return;
+                    }
+
                     throw e;
                 }
 
@@ -352,14 +452,25 @@ namespace VCommander {
         public static async void move_file_or_dir(
             File source,
             File dest,
-            bool overwrite,
+            ConflictResolver? resolver = null,
             Cancellable? cancellable = null,
             OperationProgressCallback? progress_cb = null,
             CopyProgressTracker? tracker = null
         ) throws Error {
-            if (overwrite) {
-                bool dest_exists = yield file_exists_async(dest, cancellable);
-                if (dest_exists) {
+            bool dest_exists = yield file_exists_async(dest, cancellable);
+            if (dest_exists) {
+                ConflictResolution decision = ConflictResolution.OVERWRITE;
+                if (resolver != null) {
+                    decision = yield resolver.resolve_conflict(source, dest);
+                }
+                if (decision == ConflictResolution.CANCEL) {
+                    throw new IOError.CANCELLED("Operation cancelled");
+                } else if (decision == ConflictResolution.SKIP) {
+                    if (tracker != null) {
+                        tracker.add_skipped_item(source.get_parse_name(), "Skipped (already exists)");
+                    }
+                    return;
+                } else if (decision == ConflictResolution.OVERWRITE) {
                     try {
                         yield dest.delete_async(Priority.DEFAULT, cancellable);
                     } catch (Error e) {
@@ -395,8 +506,14 @@ namespace VCommander {
             } catch (Error e) {
                 // If moving across filesystems or not supported directly, fall back to copy + delete
                 if (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || e.matches(IOError.quark(), IOError.WOULD_RECURSE)) {
-                    yield copy_file_or_dir(source, dest, overwrite, cancellable, progress_cb, tracker);
-                    yield delete_recursive(source, cancellable);
+                    int prev_skipped = (tracker != null) ? (int) tracker.skipped_items.length : 0;
+                    yield copy_file_or_dir(source, dest, resolver, cancellable, progress_cb, tracker);
+                    int new_skipped = (tracker != null) ? (int) tracker.skipped_items.length : 0;
+                    if (new_skipped == prev_skipped) {
+                        yield delete_recursive(source, cancellable);
+                    } else {
+                        AppLogger.warn("FileOperation", @"Move: not deleting source '$(source.get_parse_name())' because some items were skipped");
+                    }
                 } else {
                     throw e;
                 }
