@@ -128,6 +128,19 @@ namespace VCommander {
             return (FilePanelPage) selected.child;
         }
 
+        public bool has_grid_tab() {
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                if (p != null) {
+                    var pw = p.child as FilePanelPage;
+                    if (pw != null && pw.view_mode == PanelViewMode.GRID) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         public File? current_directory {
             get {
                 var page = get_current_page();

@@ -641,18 +641,22 @@ row:selected .file-item-tagged {
 
             left_panel.tabs_state_changed.connect(() => {
                 save_state();
+                check_and_trim_thumbnail_memory();
             });
             right_panel.tabs_state_changed.connect(() => {
                 save_state();
+                check_and_trim_thumbnail_memory();
             });
 
             left_panel.view_mode_changed.connect((p) => {
                 update_super_view_layout();
                 update_window_title();
+                check_and_trim_thumbnail_memory();
             });
             right_panel.view_mode_changed.connect((p) => {
                 update_super_view_layout();
                 update_window_title();
+                check_and_trim_thumbnail_memory();
             });
 
             left_panel.toggle_hidden_requested.connect(() => {
@@ -2031,6 +2035,16 @@ row:selected .file-item-tagged {
                 if (p != null) {
                     sync_terminal_directory(p);
                 }
+            }
+        }
+
+        private void check_and_trim_thumbnail_memory() {
+            bool has_grid = (left_panel != null && left_panel.has_grid_tab()) ||
+                            (right_panel != null && right_panel.has_grid_tab());
+            if (!has_grid) {
+                ThumbnailService.clear_cache();
+            } else {
+                ThumbnailService.trim_cache(40);
             }
         }
 

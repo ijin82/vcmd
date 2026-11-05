@@ -1507,6 +1507,7 @@ namespace VCommander {
         }
 
         public void switch_view_mode(PanelViewMode mode) {
+            bool was_grid = (view_mode == PanelViewMode.GRID);
             view_mode = mode;
             update_active_view_model();
             view_stack.visible_child_name = (view_mode == PanelViewMode.DETAILED) ? "full" : view_mode.to_string_id();
@@ -1518,6 +1519,20 @@ namespace VCommander {
             }
             if (mode == PanelViewMode.GRID && thumbnail_grid_view != null) {
                 thumbnail_grid_view.factory = create_grid_factory();
+            } else if (was_grid && mode != PanelViewMode.GRID) {
+                // Free all thumbnails when switching away from thumbnail grid mode
+                uint count = store.get_n_items();
+                for (uint i = 0; i < count; i++) {
+                    var it = (FileItem) store.get_item(i);
+                    if (it != null) {
+                        if (it.is_thumbnail_requested && it.thumbnail_paintable == null) {
+                            ThumbnailService.cancel_request(it);
+                        }
+                        it.thumbnail_paintable = null;
+                        it.is_thumbnail_requested = false;
+                    }
+                }
+                ThumbnailService.malloc_trim(0);
             }
             grab_focus_to_list();
             scroll_to_selected();
@@ -1935,6 +1950,12 @@ namespace VCommander {
         private void cleanup_grid_item_binding(Gtk.ListItem list_item) {
             var bound_item = list_item.get_data<FileItem?>("grid_bound_item");
             if (bound_item != null) {
+                if (bound_item.is_thumbnail_requested && bound_item.thumbnail_paintable == null) {
+                    ThumbnailService.cancel_request(bound_item);
+                }
+                bound_item.thumbnail_paintable = null;
+                bound_item.is_thumbnail_requested = false;
+
                 ulong thumb_handler_id = list_item.get_data<ulong>("grid_thumb_id");
                 if (thumb_handler_id != 0) {
                     bound_item.disconnect(thumb_handler_id);
@@ -3184,8 +3205,13 @@ namespace VCommander {
                 var old_items_map = new HashTable<string, FileItem>(str_hash, str_equal);
                 for (uint i = 0; i < old_count; i++) {
                     var old_item = (FileItem) store.get_item(i);
-                    if (old_item != null && old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
-                        old_items_map.insert(old_item.name, old_item);
+                    if (old_item != null) {
+                        if (old_item.is_thumbnail_requested && old_item.thumbnail_paintable == null) {
+                            ThumbnailService.cancel_request(old_item);
+                        }
+                        if (old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
+                            old_items_map.insert(old_item.name, old_item);
+                        }
                     }
                 }
 
@@ -3199,6 +3225,14 @@ namespace VCommander {
                             ni.thumbnail_paintable = oi.thumbnail_paintable;
                             ni.is_thumbnail_requested = true;
                         }
+                    }
+                }
+
+                for (uint i = 0; i < old_count; i++) {
+                    var old_item = (FileItem) store.get_item(i);
+                    if (old_item != null) {
+                        old_item.thumbnail_paintable = null;
+                        old_item.is_thumbnail_requested = false;
                     }
                 }
             }
@@ -3354,8 +3388,13 @@ namespace VCommander {
                 var old_items_map = new HashTable<string, FileItem>(str_hash, str_equal);
                 for (uint i = 0; i < old_count; i++) {
                     var old_item = (FileItem) store.get_item(i);
-                    if (old_item != null && old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
-                        old_items_map.insert(old_item.name, old_item);
+                    if (old_item != null) {
+                        if (old_item.is_thumbnail_requested && old_item.thumbnail_paintable == null) {
+                            ThumbnailService.cancel_request(old_item);
+                        }
+                        if (old_item.thumbnail_paintable != null && !old_item.is_parent_dir && !old_item.is_dir) {
+                            old_items_map.insert(old_item.name, old_item);
+                        }
                     }
                 }
 
@@ -3369,6 +3408,14 @@ namespace VCommander {
                             ni.thumbnail_paintable = oi.thumbnail_paintable;
                             ni.is_thumbnail_requested = true;
                         }
+                    }
+                }
+
+                for (uint i = 0; i < old_count; i++) {
+                    var old_item = (FileItem) store.get_item(i);
+                    if (old_item != null) {
+                        old_item.thumbnail_paintable = null;
+                        old_item.is_thumbnail_requested = false;
                     }
                 }
             }

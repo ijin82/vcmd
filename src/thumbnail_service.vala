@@ -88,7 +88,7 @@ namespace VCommander {
         private GLib.Queue<string> order;
         private GLib.Mutex mutex;
 
-        public LruTextureCache(int max_entries = 300) {
+        public LruTextureCache(int max_entries = 80) {
             this.max_entries = max_entries;
             this.map = new GLib.HashTable<string, Gdk.Texture>(GLib.str_hash, GLib.str_equal);
             this.order = new GLib.Queue<string>();
@@ -113,6 +113,17 @@ namespace VCommander {
                 order.push_tail(key);
             }
             map.insert(key, tex);
+            mutex.unlock();
+        }
+
+        public void trim(int keep) {
+            mutex.lock();
+            while ((int)order.get_length() > keep) {
+                string? oldest = order.pop_head();
+                if (oldest != null) {
+                    map.remove(oldest);
+                }
+            }
             mutex.unlock();
         }
 
@@ -207,11 +218,30 @@ namespace VCommander {
             } catch (Error e) {}
         }
 
+        public static void clear_cache() {
+            if (ram_cache != null) {
+                ram_cache.clear();
+            }
+            ready_mutex.lock();
+            if (ready_queue != null) {
+                ready_queue.clear();
+            }
+            ready_mutex.unlock();
+            malloc_trim(0);
+        }
+
+        public static void trim_cache(int keep = 40) {
+            if (ram_cache != null) {
+                ram_cache.trim(keep);
+            }
+            malloc_trim(0);
+        }
+
         public static void init() {
             get_cache_dir();
             pending_queue = new Queue<ThumbnailTask>();
             in_flight_tasks = new HashTable<string, ThumbnailTask>(str_hash, str_equal);
-            ram_cache = new LruTextureCache(300);
+            ram_cache = new LruTextureCache(80);
             ready_queue = new GLib.Queue<ReadyThumbnail>();
 
             // 1. Clean up only lingering temporary files from .tmp directory
@@ -430,6 +460,10 @@ namespace VCommander {
 
             if (is_empty) {
                 malloc_trim(0);
+                Idle.add(() => {
+                    malloc_trim(0);
+                    return Source.REMOVE;
+                });
             }
         }
 
