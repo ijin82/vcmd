@@ -91,6 +91,7 @@ namespace VCommander {
         public bool show_hidden { get; set; default = false; }
         public int brief_column_width { get; set; default = 180; }
         public int grid_tile_size { get; set; default = 120; }
+        public bool thumbnail_full_mode { get; set; default = false; }
         public string app_theme { get; set; default = "system"; }
         public string panel_font_name { get; set; default = "Monospace"; }
         public int panel_font_size { get; set; default = 11; }
@@ -326,6 +327,9 @@ namespace VCommander {
                     grid_tile_size = key_file.get_integer("General", "GridTileSize");
                     if (grid_tile_size < 30) grid_tile_size = 30;
                     if (grid_tile_size > 390) grid_tile_size = 390;
+                }
+                if (key_file.has_key("General", "ThumbnailFullMode")) {
+                    thumbnail_full_mode = key_file.get_boolean("General", "ThumbnailFullMode");
                 }
                 if (key_file.has_key("General", "Theme")) {
                     string th = key_file.get_string("General", "Theme").strip();
@@ -632,6 +636,7 @@ namespace VCommander {
                 key_file.set_boolean("General", "ShowHidden", show_hidden);
                 key_file.set_integer("General", "BriefColumnWidth", brief_column_width);
                 key_file.set_integer("General", "GridTileSize", grid_tile_size);
+                key_file.set_boolean("General", "ThumbnailFullMode", thumbnail_full_mode);
                 key_file.set_string("General", "Theme", app_theme);
                 key_file.set_string("General", "PanelFontName", panel_font_name);
                 key_file.set_integer("General", "PanelFontSize", panel_font_size);

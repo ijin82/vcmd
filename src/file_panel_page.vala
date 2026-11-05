@@ -268,15 +268,41 @@ namespace VCommander {
                     apply_tag_class(label, file_item.is_tagged);
                 });
                 list_item.set_data<ulong>("name_tag_id", tag_handler_id);
+
+                unowned FileItem cur_item = file_item;
+                unowned Gtk.Label cur_label = label;
+                unowned Gtk.Image cur_image = image;
+
+                ulong name_handler_id = file_item.notify["display-name"].connect(() => {
+                    cur_label.label = cur_item.display_name;
+                });
+                list_item.set_data<ulong>("name_notify_id", name_handler_id);
+
+                ulong icon_handler_id = file_item.notify["icon"].connect(() => {
+                    cur_image.gicon = cur_item.icon;
+                });
+                list_item.set_data<ulong>("name_icon_id", icon_handler_id);
             });
 
             name_factory.unbind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
                 var file_item = (FileItem) list_item.item;
-                ulong tag_handler_id = list_item.get_data<ulong>("name_tag_id");
-                if (tag_handler_id != 0 && file_item != null) {
-                    file_item.disconnect(tag_handler_id);
-                    list_item.set_data<ulong>("name_tag_id", 0);
+                if (file_item != null) {
+                    ulong tag_handler_id = list_item.get_data<ulong>("name_tag_id");
+                    if (tag_handler_id != 0) {
+                        file_item.disconnect(tag_handler_id);
+                        list_item.set_data<ulong>("name_tag_id", 0);
+                    }
+                    ulong name_handler_id = list_item.get_data<ulong>("name_notify_id");
+                    if (name_handler_id != 0) {
+                        file_item.disconnect(name_handler_id);
+                        list_item.set_data<ulong>("name_notify_id", 0);
+                    }
+                    ulong icon_handler_id = list_item.get_data<ulong>("name_icon_id");
+                    if (icon_handler_id != 0) {
+                        file_item.disconnect(icon_handler_id);
+                        list_item.set_data<ulong>("name_icon_id", 0);
+                    }
                 }
             });
 
@@ -569,6 +595,27 @@ namespace VCommander {
                     apply_tag_class(label, file_item.is_tagged);
                 });
                 list_item.set_data<ulong>("s_name_tag_id", tag_handler_id);
+
+                unowned FileItem cur_item = file_item;
+                unowned Gtk.Label cur_label = label;
+                unowned Gtk.Image cur_image = image;
+                unowned Gtk.Box cur_box = box;
+
+                ulong name_handler_id = file_item.notify["display-name"].connect(() => {
+                    if (cur_item.is_symlink && cur_item.symlink_target != null && cur_item.symlink_target.length > 0) {
+                        cur_label.label = @"$(cur_item.display_name) -> $(cur_item.symlink_target)";
+                        cur_box.tooltip_text = @"$(cur_item.display_name) -> $(cur_item.symlink_target)";
+                    } else {
+                        cur_label.label = cur_item.display_name;
+                        cur_box.tooltip_text = null;
+                    }
+                });
+                list_item.set_data<ulong>("s_name_notify_id", name_handler_id);
+
+                ulong icon_handler_id = file_item.notify["icon"].connect(() => {
+                    cur_image.gicon = cur_item.icon;
+                });
+                list_item.set_data<ulong>("s_name_icon_id", icon_handler_id);
             });
 
             super_name_factory.unbind.connect((item) => {
@@ -578,10 +625,22 @@ namespace VCommander {
                 if (box != null) {
                     box.tooltip_text = null;
                 }
-                ulong tag_handler_id = list_item.get_data<ulong>("s_name_tag_id");
-                if (tag_handler_id != 0 && file_item != null) {
-                    file_item.disconnect(tag_handler_id);
-                    list_item.set_data<ulong>("s_name_tag_id", 0);
+                if (file_item != null) {
+                    ulong tag_handler_id = list_item.get_data<ulong>("s_name_tag_id");
+                    if (tag_handler_id != 0) {
+                        file_item.disconnect(tag_handler_id);
+                        list_item.set_data<ulong>("s_name_tag_id", 0);
+                    }
+                    ulong name_handler_id = list_item.get_data<ulong>("s_name_notify_id");
+                    if (name_handler_id != 0) {
+                        file_item.disconnect(name_handler_id);
+                        list_item.set_data<ulong>("s_name_notify_id", 0);
+                    }
+                    ulong icon_handler_id = list_item.get_data<ulong>("s_name_icon_id");
+                    if (icon_handler_id != 0) {
+                        file_item.disconnect(icon_handler_id);
+                        list_item.set_data<ulong>("s_name_icon_id", 0);
+                    }
                 }
             });
 
@@ -1632,20 +1691,46 @@ namespace VCommander {
                     apply_tag_class(label, file_item.is_tagged);
                 });
                 list_item.set_data<ulong>("brief_tag_id", tag_handler_id);
+
+                unowned FileItem cur_item = file_item;
+                unowned Gtk.Label cur_label = label;
+                unowned Gtk.Image cur_image = image;
+
+                ulong name_handler_id = file_item.notify["display-name"].connect(() => {
+                    update_brief_item_label(cur_item, cur_label);
+                });
+                list_item.set_data<ulong>("brief_name_id", name_handler_id);
+
+                ulong icon_handler_id = file_item.notify["icon"].connect(() => {
+                    cur_image.gicon = cur_item.icon;
+                });
+                list_item.set_data<ulong>("brief_icon_id", icon_handler_id);
             });
 
             brief_factory.unbind.connect((item) => {
                 var list_item = (Gtk.ListItem) item;
                 var file_item = (FileItem) list_item.item;
-                ulong handler_id = list_item.get_data<ulong>("brief_notify_id");
-                if (handler_id != 0 && file_item != null) {
-                    file_item.disconnect(handler_id);
-                    list_item.set_data<ulong>("brief_notify_id", 0);
-                }
-                ulong tag_handler_id = list_item.get_data<ulong>("brief_tag_id");
-                if (tag_handler_id != 0 && file_item != null) {
-                    file_item.disconnect(tag_handler_id);
-                    list_item.set_data<ulong>("brief_tag_id", 0);
+                if (file_item != null) {
+                    ulong handler_id = list_item.get_data<ulong>("brief_notify_id");
+                    if (handler_id != 0) {
+                        file_item.disconnect(handler_id);
+                        list_item.set_data<ulong>("brief_notify_id", 0);
+                    }
+                    ulong tag_handler_id = list_item.get_data<ulong>("brief_tag_id");
+                    if (tag_handler_id != 0) {
+                        file_item.disconnect(tag_handler_id);
+                        list_item.set_data<ulong>("brief_tag_id", 0);
+                    }
+                    ulong name_handler_id = list_item.get_data<ulong>("brief_name_id");
+                    if (name_handler_id != 0) {
+                        file_item.disconnect(name_handler_id);
+                        list_item.set_data<ulong>("brief_name_id", 0);
+                    }
+                    ulong icon_handler_id = list_item.get_data<ulong>("brief_icon_id");
+                    if (icon_handler_id != 0) {
+                        file_item.disconnect(icon_handler_id);
+                        list_item.set_data<ulong>("brief_icon_id", 0);
+                    }
                 }
             });
 
@@ -1768,6 +1853,19 @@ namespace VCommander {
                 });
                 list_item.set_data<ulong>("grid_tag_id", tag_handler_id);
 
+                ulong name_handler_id = file_item.notify["display-name"].connect(() => {
+                    target_label.label = target_item.display_name;
+                    box.tooltip_text = target_item.display_name;
+                });
+                list_item.set_data<ulong>("grid_name_id", name_handler_id);
+
+                ulong icon_handler_id = file_item.notify["icon"].connect(() => {
+                    if (target_item.thumbnail_paintable == null) {
+                        target_icon.gicon = target_item.icon;
+                    }
+                });
+                list_item.set_data<ulong>("grid_icon_id", icon_handler_id);
+
                 if (file_item.thumbnail_paintable != null) {
                     picture.paintable = file_item.thumbnail_paintable;
                     picture.visible = true;
@@ -1826,6 +1924,18 @@ namespace VCommander {
                 if (tag_handler_id != 0) {
                     bound_item.disconnect(tag_handler_id);
                     list_item.set_data<ulong>("grid_tag_id", 0);
+                }
+
+                ulong name_handler_id = list_item.get_data<ulong>("grid_name_id");
+                if (name_handler_id != 0) {
+                    bound_item.disconnect(name_handler_id);
+                    list_item.set_data<ulong>("grid_name_id", 0);
+                }
+
+                ulong icon_handler_id = list_item.get_data<ulong>("grid_icon_id");
+                if (icon_handler_id != 0) {
+                    bound_item.disconnect(icon_handler_id);
+                    list_item.set_data<ulong>("grid_icon_id", 0);
                 }
                 list_item.set_data<FileItem?>("grid_bound_item", null);
             }
@@ -2117,6 +2227,29 @@ namespace VCommander {
 
             return null;
         }
+
+        public void remove_item_by_name(string target_name, FileItem? exclude_item = null) {
+            uint n = store.get_n_items();
+            for (uint i = 0; i < n; i++) {
+                var it = (FileItem) store.get_item(i);
+                if (it != exclude_item && it.name == target_name) {
+                    store.remove(i);
+                    break;
+                }
+            }
+        }
+
+        public void rename_matching_item(string old_name, File new_file, string new_name, Icon? new_icon = null) {
+            uint n = store.get_n_items();
+            for (uint i = 0; i < n; i++) {
+                var it = (FileItem) store.get_item(i);
+                if (it.name == old_name) {
+                    it.rename_in_place(new_name, new_file, new_icon);
+                    break;
+                }
+            }
+        }
+
         public void update_columns_for_current_location() {
             bool in_trash = is_trash_location();
             if (in_trash == currently_in_trash_columns) {

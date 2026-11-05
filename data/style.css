@@ -81,6 +81,15 @@ tab button.tab-indicator {
     color: alpha(@accent_color, 0.8);
 }
 
+.tab-mode-icon.full-mode {
+    color: @accent_color;
+    opacity: 1.0;
+}
+
+.tab-mode-icon.full-mode:hover {
+    color: alpha(@accent_color, 0.8);
+}
+
 tab.pinned-tab button.tab-close-button {
     opacity: 0;
     min-width: 0px;

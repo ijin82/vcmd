@@ -275,6 +275,37 @@ namespace VCommander {
             );
         }
 
+        public void rename_in_place(string new_name, File new_file, Icon? new_icon = null) {
+            this.name = new_name;
+            this.display_name = new_name;
+            this.file = new_file;
+            this.is_hidden = new_name.has_prefix(".");
+
+            if (!is_dir) {
+                int dot_idx = new_name.last_index_of_char('.');
+                if (dot_idx > 0 && dot_idx < new_name.length - 1) {
+                    this.file_type = new_name.substring(dot_idx + 1).up();
+                } else {
+                    this.file_type = "File";
+                }
+            }
+
+            if (new_icon != null) {
+                this.icon = new_icon;
+            } else if (!is_dir) {
+                string content_type = ContentType.guess(new_name, null, null);
+                this.icon = ContentType.get_icon(content_type);
+            }
+
+            if (!ThumbnailService.is_supported_image(new_name)) {
+                this.thumbnail_paintable = null;
+                this.is_thumbnail_requested = false;
+            } else if (this.thumbnail_paintable == null) {
+                this.is_thumbnail_requested = false;
+                ThumbnailService.request_thumbnail(this);
+            }
+        }
+
         public static int compare_by_name(FileItem a, FileItem b) {
             // Parent directory ".." always stays at the top
             if (a.is_parent_dir) return -1;

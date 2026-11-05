@@ -18,6 +18,7 @@ namespace VCommander {
         public signal void restore_requested(FilePanel panel);
         public signal void empty_trash_requested(FilePanel panel);
         public signal void restore_item_requested(FilePanel panel, FileItem item);
+        public signal void toggle_thumbnail_full_requested();
 
         public FilePanel(string[] initial_dirs, string[]? initial_titles = null, int active_index = 0, bool brief = false, bool hidden = false, string[]? sort_cols = null, string[]? sort_orders = null, string[]? view_modes = null, bool[]? initial_pinned = null) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
@@ -295,6 +296,7 @@ namespace VCommander {
                 tab_sort_changed(this);
             });
             page_widget.view_mode_changed.connect(() => {
+                sync_tab_bar_pins();
                 tabs_state_changed(this);
                 view_mode_changed(this);
             });
@@ -564,6 +566,13 @@ namespace VCommander {
             var page = get_current_page();
             if (page != null) {
                 page.toggle_view_mode();
+            }
+        }
+
+        public void switch_view_mode(PanelViewMode mode) {
+            var page = get_current_page();
+            if (page != null) {
+                page.switch_view_mode(mode);
             }
         }
 
@@ -856,9 +865,25 @@ namespace VCommander {
                 if (ind_btn != null) {
                     var actions_box = ind_btn.get_child() as Gtk.Box;
                     Gtk.Box? pin_box = null;
+                    Gtk.Box? mode_box = null;
                     Gtk.Box? up_box = null;
 
-                    if (actions_box == null || !actions_box.has_css_class("tab-actions-box")) {
+                    bool needs_rebuild = (actions_box == null || !actions_box.has_css_class("tab-actions-box"));
+                    if (!needs_rebuild) {
+                        pin_box = actions_box.get_first_child() as Gtk.Box;
+                        if (pin_box != null) {
+                            var second = pin_box.get_next_sibling() as Gtk.Box;
+                            if (second != null && second.has_css_class("tab-mode-icon")) {
+                                mode_box = second;
+                                up_box = second.get_next_sibling() as Gtk.Box;
+                            }
+                        }
+                        if (pin_box == null || mode_box == null || up_box == null) {
+                            needs_rebuild = true;
+                        }
+                    }
+
+                    if (needs_rebuild) {
                         actions_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 1);
                         actions_box.add_css_class("tab-actions-box");
 
@@ -881,10 +906,33 @@ namespace VCommander {
                         });
                         pin_box.add_controller(pin_click);
 
+                        mode_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+                        mode_box.add_css_class("tab-action-icon");
+                        mode_box.add_css_class("tab-mode-icon");
+                        var mode_img = new Gtk.Image.from_icon_name("view-fullscreen-symbolic");
+                        mode_box.append(mode_img);
+
+                        var mode_click = new Gtk.GestureClick();
+                        mode_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+                        mode_click.pressed.connect((n, x, y) => {
+                            mode_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
+                            tab_widget.get_property("page", ref cur_val);
+                            var cur_p = (Adw.TabPage) cur_val.get_object();
+                            if (cur_p != null) {
+                                tab_view.set_selected_page(cur_p);
+                            }
+                            if (!is_active) {
+                                panel_activated(this);
+                            }
+                            toggle_thumbnail_full_requested();
+                        });
+                        mode_box.add_controller(mode_click);
+
                         up_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
                         up_box.add_css_class("tab-action-icon");
                         up_box.add_css_class("tab-up-icon");
-                        var up_img = new Gtk.Image.from_icon_name("go-up-symbolic");
+                        var up_img = new Gtk.Image.from_icon_name("pan-up-symbolic");
                         up_box.append(up_img);
 
                         var up_click = new Gtk.GestureClick();
@@ -901,14 +949,12 @@ namespace VCommander {
                         });
                         up_box.add_controller(up_click);
 
+                        // tab header layout: 
+                        // [pin icon] [up icon] [mode icon] [tab title] [close button]
                         actions_box.append(pin_box);
                         actions_box.append(up_box);
+                        actions_box.append(mode_box);
                         ind_btn.set_child(actions_box);
-                    } else {
-                        pin_box = actions_box.get_first_child() as Gtk.Box;
-                        if (pin_box != null) {
-                            up_box = pin_box.get_next_sibling() as Gtk.Box;
-                        }
                     }
 
                     if (pin_box != null) {
@@ -926,6 +972,25 @@ namespace VCommander {
                                           (page_widget.current_directory != null && page_widget.current_directory.get_parent() != null) ||
                                           page_widget.is_showing_search_results);
                         up_box.sensitive = can_go_up;
+                    }
+
+                    if (mode_box != null) {
+                        bool is_grid = page_widget.is_grid_view;
+                        mode_box.set_visible(is_grid);
+                        if (is_grid) {
+                            var cfg = ConfigManager.get_instance();
+                            bool is_full = cfg.thumbnail_full_mode;
+                            mode_box.tooltip_text = is_full ? "Normal mode (Ctrl+Shift+F)" : "Full mode (Ctrl+Shift+F)";
+                            var img = mode_box.get_first_child() as Gtk.Image;
+                            if (img != null) {
+                                img.icon_name = is_full ? "view-restore-symbolic" : "view-fullscreen-symbolic";
+                            }
+                            if (is_full) {
+                                mode_box.add_css_class("full-mode");
+                            } else {
+                                mode_box.remove_css_class("full-mode");
+                            }
+                        }
                     }
                 }
             }

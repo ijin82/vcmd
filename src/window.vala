@@ -483,6 +483,17 @@ row:selected .file-item-tagged {
             });
             header_bar.pack_end(help_button);
 
+            var bookmarks_button = new Gtk.Button.from_icon_name("user-bookmarks-symbolic");
+            bookmarks_button.tooltip_text = "Directory Bookmarks (Ctrl+\\)";
+            bookmarks_button.focusable = false;
+            bookmarks_button.clicked.connect(() => {
+                var target = active_panel ?? left_panel;
+                if (target != null) {
+                    BookmarksDialog.show(this, target);
+                }
+            });
+            header_bar.pack_end(bookmarks_button);
+
             drives_popover = new DrivesPopover(this);
 
             drives_button = new Gtk.MenuButton();
@@ -621,6 +632,13 @@ row:selected .file-item-tagged {
 
             left_panel.restore_item_requested.connect(on_panel_restore_item_requested);
             right_panel.restore_item_requested.connect(on_panel_restore_item_requested);
+
+            left_panel.toggle_thumbnail_full_requested.connect(() => {
+                toggle_thumbnail_full_mode();
+            });
+            right_panel.toggle_thumbnail_full_requested.connect(() => {
+                toggle_thumbnail_full_mode();
+            });
 
             left_panel.columns_layout_changed.connect((origin) => {
                 var cur_page = origin.get_current_page();
@@ -1679,6 +1697,13 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
+                // Ctrl+Shift+F: toggle Full thumbnail / Thumbnail (Normal mode)
+                if ((latin_key == Gdk.Key.f || keyval == Gdk.Key.f || keyval == Gdk.Key.F) && 
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) {
+                    toggle_thumbnail_full_mode();
+                    return Gdk.EVENT_STOP;
+                }
+
                 // Alt+T: cycle view mode (Brief -> Detailed -> Super Detailed) for active panel
                 if (latin_key == Gdk.Key.t && (state & Gdk.ModifierType.ALT_MASK) != 0) {
                     if (active_panel != null) {
@@ -2058,13 +2083,15 @@ row:selected .file-item-tagged {
         public void update_super_view_layout() {
             if (active_panel == null) return;
 
-            if (active_panel.is_super_view || active_panel.is_grid_view) {
+            var cfg = ConfigManager.get_instance();
+            bool is_full_grid = active_panel.is_grid_view && cfg.thumbnail_full_mode;
+
+            if (active_panel.is_super_view || is_full_grid) {
                 // If we haven't saved dual paned position yet, remember it
                 if (saved_dual_paned_position < 0) {
                     if (paned.position > 0) {
                         saved_dual_paned_position = paned.position;
                     } else {
-                        var cfg = ConfigManager.get_instance();
                         saved_dual_paned_position = cfg.paned_position > 0 ? cfg.paned_position : 512;
                     }
                 }
@@ -2077,7 +2104,7 @@ row:selected .file-item-tagged {
                     right_panel.visible = true;
                 }
             } else {
-                // Active panel is not in full-width view (super detailed or grid)
+                // Active panel is not in full-width view (super detailed or full grid)
                 left_panel.visible = true;
                 right_panel.visible = true;
                 if (saved_dual_paned_position > 0) {
@@ -2085,6 +2112,21 @@ row:selected .file-item-tagged {
                     saved_dual_paned_position = -1;
                 }
             }
+        }
+
+        public void toggle_thumbnail_full_mode() {
+            var cfg = ConfigManager.get_instance();
+            if (active_panel != null && !active_panel.is_grid_view) {
+                cfg.thumbnail_full_mode = true;
+                cfg.save();
+                active_panel.switch_view_mode(PanelViewMode.GRID);
+            } else {
+                cfg.thumbnail_full_mode = !cfg.thumbnail_full_mode;
+                cfg.save();
+            }
+            update_super_view_layout();
+            left_panel.sync_tab_bar_pins();
+            right_panel.sync_tab_bar_pins();
         }
 
         public void trigger_paned_reset_to_half() {
@@ -4367,6 +4409,8 @@ row:selected .file-item-tagged {
                 dialog.force_close();
                 if (new_name.length > 0 && new_name != item.display_name) {
                     prompt_execute_rename.begin(item, new_name);
+                } else {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
                 }
             });
 
@@ -4378,6 +4422,8 @@ row:selected .file-item-tagged {
                     string new_name = entry.text.strip();
                     if (new_name.length > 0 && new_name != item.display_name) {
                         prompt_execute_rename.begin(item, new_name);
+                    } else {
+                        if (active_panel != null) active_panel.grab_focus_to_list();
                     }
                 } else {
                     if (active_panel != null) active_panel.grab_focus_to_list();
@@ -4400,6 +4446,7 @@ row:selected .file-item-tagged {
         private async void prompt_execute_rename(FileItem item, string new_name) {
             if (new_name.contains("/")) {
                 show_error_dialog("Rename Error", "File or folder name cannot contain '/' path separators.");
+                if (active_panel != null) active_panel.grab_focus_to_list();
                 return;
             }
 
@@ -4423,13 +4470,67 @@ row:selected .file-item-tagged {
                 conflict_dlg.choose.begin(this, null, (obj, res) => {
                     string resp = conflict_dlg.choose.end(res);
                     if (resp == "overwrite") {
-                        do_move_file.begin(item.file, dest_target, true);
+                        do_rename_file.begin(item, dest_target, new_name, true);
                     } else {
                         if (active_panel != null) active_panel.grab_focus_to_list();
                     }
                 });
             } else {
-                yield do_move_file(item.file, dest_target, false);
+                yield do_rename_file(item, dest_target, new_name, false);
+            }
+        }
+
+        private async void do_rename_file(FileItem item, File dest_target, string new_name, bool overwrite) {
+            string old_name = item.name;
+            File old_file = item.file;
+            File? parent_dir = old_file.get_parent();
+
+            try {
+                yield FileOperationService.move_file_or_dir(old_file, dest_target, overwrite, null);
+
+                Icon? new_icon = null;
+                try {
+                    var info = yield dest_target.query_info_async(
+                        FileAttribute.STANDARD_ICON + "," + FileAttribute.STANDARD_CONTENT_TYPE,
+                        FileQueryInfoFlags.NONE,
+                        Priority.DEFAULT,
+                        null
+                    );
+                    new_icon = info.get_icon();
+                } catch (Error e) {}
+
+                if (overwrite && active_panel != null) {
+                    var cur_page = active_panel.get_current_page();
+                    if (cur_page != null) {
+                        cur_page.remove_item_by_name(new_name, item);
+                    }
+                }
+
+                item.rename_in_place(new_name, dest_target, new_icon);
+
+                // If opposite panel has the same folder open, update matching item there too
+                var other_panel = (active_panel == left_panel) ? right_panel : left_panel;
+                if (other_panel != null) {
+                    var other_page = other_panel.get_current_page();
+                    if (other_page != null && other_page.current_directory != null && parent_dir != null &&
+                        other_page.current_directory.equal(parent_dir)) {
+                        if (overwrite) {
+                            other_page.remove_item_by_name(new_name, null);
+                        }
+                        other_page.rename_matching_item(old_name, dest_target, new_name, new_icon);
+                    }
+                }
+
+                AppLogger.info("FileOperation", @"Rename completed: '$old_name' -> '$new_name'");
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
+            } catch (Error e) {
+                AppLogger.error("FileOperation", @"Rename failed: '$old_name' -> '$new_name'", e.message);
+                show_error_dialog("Rename Error", FileOperationService.format_error(e, "rename"));
+                if (active_panel != null) {
+                    active_panel.grab_focus_to_list();
+                }
             }
         }
 
