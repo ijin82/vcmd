@@ -3288,6 +3288,10 @@ row:selected .file-item-tagged {
                 string? in_path;
                 if (ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_path, out in_path) && arc_path != null && in_path != null) {
                     var temp_file = ArchiveTreeService.get_temp_extracted_file(arc_path, in_path);
+                    if (ArchiveTreeService.is_extracted_file_up_to_date(arc_path, in_path, temp_file)) {
+                        launch_external_file_tool(cmd, temp_file.get_path(), "File Viewer", target_panel, item.name);
+                        return;
+                    }
                     extract_archive_file_and_launch.begin(arc_path, in_path, temp_file, cmd, "File Viewer", target_panel, item.name);
                     return;
                 }

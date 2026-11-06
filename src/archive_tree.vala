@@ -732,6 +732,31 @@ namespace VCommander {
             return File.new_for_path(dest_path);
         }
 
+        public static bool is_extracted_file_up_to_date(string archive_path, string inner_path, File dest_file) {
+            if (!dest_file.query_exists()) return false;
+            try {
+                var arc_file = File.new_for_path(archive_path);
+                var arc_info = arc_file.query_info(FileAttribute.TIME_MODIFIED, FileQueryInfoFlags.NONE, null);
+                var dest_info = dest_file.query_info(FileAttribute.TIME_MODIFIED + "," + FileAttribute.STANDARD_SIZE, FileQueryInfoFlags.NONE, null);
+                var arc_mtime = arc_info.get_modification_date_time();
+                var dest_mtime = dest_info.get_modification_date_time();
+                if (arc_mtime != null && dest_mtime != null && dest_mtime.compare(arc_mtime) < 0) {
+                    return false;
+                }
+                init();
+                var cached = cache.lookup(archive_path);
+                if (cached != null) {
+                    var node = cached.find_node(inner_path);
+                    if (node != null && node.entry != null && node.entry.size > 0 && dest_info.get_size() == 0) {
+                        return false;
+                    }
+                }
+                return true;
+            } catch (Error e) {
+                return false;
+            }
+        }
+
         public static async void extract_single_file_to(string archive_path, string inner_path, File dest_file, Cancellable? cancellable = null) throws Error {
             var parent = dest_file.get_parent();
             if (parent != null && !parent.query_exists()) {

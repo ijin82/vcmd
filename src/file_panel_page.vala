@@ -2930,35 +2930,37 @@ namespace VCommander {
 
         private void open_archive_file(FileItem item) {
             if (is_opening_archive_file) return;
-            is_opening_archive_file = true;
 
             string? archive_path;
             string? inner_path;
             if (!ArchiveTreeService.split_archive_uri(item.file.get_uri(), out archive_path, out inner_path)) {
-                is_opening_archive_file = false;
                 return;
             }
             if (archive_path == null || inner_path == null) {
-                is_opening_archive_file = false;
                 return;
             }
 
-            status_label.label = @"Extracting $(item.name) for preview...";
             var temp_file = ArchiveTreeService.get_temp_extracted_file(archive_path, inner_path);
+            if (ArchiveTreeService.is_extracted_file_up_to_date(archive_path, inner_path, temp_file)) {
+                open_file_target(temp_file, item.display_name);
+                return;
+            }
 
-            extract_and_launch_file.begin(archive_path, inner_path, temp_file, (obj, res) => {
+            is_opening_archive_file = true;
+            status_label.label = @"Extracting $(item.name) for preview...";
+
+            extract_and_launch_file.begin(archive_path, inner_path, temp_file, item.display_name, (obj, res) => {
                 is_opening_archive_file = false;
                 update_status_bar();
             });
         }
 
-        private async void extract_and_launch_file(string archive_path, string inner_path, File temp_file) {
+        private async void extract_and_launch_file(string archive_path, string inner_path, File temp_file, string display_name) {
             bool is_retry = false;
             while (true) {
                 try {
                     yield ArchiveTreeService.extract_single_file_to(archive_path, inner_path, temp_file, null);
-                    var launcher = new Gtk.FileLauncher(temp_file);
-                    yield launcher.launch(get_root() as Gtk.Window, null);
+                    open_file_target(temp_file, display_name);
                     break;
                 } catch (ArchivePasswordError e) {
                     is_retry = (e is ArchivePasswordError.INVALID);
@@ -3028,10 +3030,14 @@ namespace VCommander {
         }
 
         public void open_file_with_default_app(FileItem item) {
+            open_file_target(item.file, item.display_name);
+        }
+
+        public void open_file_target(File file, string display_name) {
             // Determine content type
             string? content_type = null;
             try {
-                var info = item.file.query_info(
+                var info = file.query_info(
                     FileAttribute.STANDARD_CONTENT_TYPE + "," + FileAttribute.STANDARD_FAST_CONTENT_TYPE,
                     FileQueryInfoFlags.NONE,
                     null
@@ -3043,7 +3049,7 @@ namespace VCommander {
 
             if (content_type == null || content_type == "application/octet-stream") {
                 bool uncertain = false;
-                content_type = ContentType.guess(item.display_name, null, out uncertain);
+                content_type = ContentType.guess(display_name, null, out uncertain);
             }
 
             if (content_type == null || content_type.length == 0) {
@@ -3054,16 +3060,19 @@ namespace VCommander {
             if (default_app != null) {
                 try {
                     var files = new GLib.List<File>();
-                    files.append(item.file);
+                    files.append(file);
                     default_app.launch(files, null);
                     return;
                 } catch (Error e) {
-                    warning("Failed to launch default app %s for %s: %s", default_app.get_display_name(), item.name, e.message);
+                    warning("Failed to launch default app %s for %s: %s", default_app.get_display_name(), display_name, e.message);
                 }
             }
 
             // Fallback: If no default app exists or launching failed, open the "Open With..." dialog
-            open_file_with_dialog(item);
+            var root_window = get_root() as Gtk.Window;
+            if (root_window != null) {
+                OpenWithDialog.show(root_window, file, display_name);
+            }
         }
 
         public void open_file_with_dialog(FileItem item) {
