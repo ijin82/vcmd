@@ -303,6 +303,19 @@ namespace VCommander {
             );
         }
 
+        public static FileItem? from_file(File file) {
+            try {
+                var info = file.query_info(
+                    "standard::*,time::*,owner::*,unix::mode",
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    null
+                );
+                return new FileItem(file, info);
+            } catch (Error e) {
+                return null;
+            }
+        }
+
         public void rename_in_place(string new_name, File new_file, Icon? new_icon = null) {
             this.name = new_name;
             this.display_name = new_name;

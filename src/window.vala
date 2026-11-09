@@ -1545,6 +1545,8 @@ row:selected .file-item-tagged {
                 }
 
                 uint latin_key = KeyUtils.to_latin(keyval, keycode);
+                var focused_widget = get_focus();
+                bool is_editable = (focused_widget is Gtk.Editable) || cmd_entry.has_focus || (active_panel != null && active_panel.is_filter_active);
 
                 // When terminal drawer is visible, lock focus & inputs inside terminal except for toggle/close
                 if (console_drawer.visible) {
@@ -1746,13 +1748,102 @@ row:selected .file-item-tagged {
                     return Gdk.EVENT_STOP;
                 }
 
-                // Tab switches active panel (unless user is typing in command line)
-                if (keyval == Gdk.Key.Tab && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)) == 0) {
+                // Alt+1 .. Alt+9: Switch to tab in active panel
+                if ((state & Gdk.ModifierType.ALT_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    int page_idx = -1;
+                    if (keyval >= Gdk.Key.@1 && keyval <= Gdk.Key.@9) {
+                        page_idx = (int)(keyval - Gdk.Key.@1);
+                    } else if (latin_key >= Gdk.Key.@1 && latin_key <= Gdk.Key.@9) {
+                        page_idx = (int)(latin_key - Gdk.Key.@1);
+                    }
+                    if (page_idx >= 0) {
+                        if (active_panel != null && page_idx < active_panel.tab_view.n_pages) {
+                            active_panel.tab_view.selected_page = active_panel.tab_view.get_nth_page(page_idx);
+                            active_panel.grab_focus_to_list();
+                        }
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
+                // Ctrl+Shift+Right: Move current tab to right panel
+                if ((keyval == Gdk.Key.Right || keyval == Gdk.Key.KP_Right) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.SHIFT_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    move_current_tab_to_right();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+Shift+Left: Move current tab to left panel
+                if ((keyval == Gdk.Key.Left || keyval == Gdk.Key.KP_Left) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.SHIFT_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    move_current_tab_to_left();
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+Tab / Ctrl+Page_Down: Next tab in active panel
+                if (((keyval == Gdk.Key.Tab && (state & Gdk.ModifierType.SHIFT_MASK) == 0) ||
+                     keyval == Gdk.Key.Page_Down || keyval == Gdk.Key.KP_Page_Down) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    if (active_panel != null) {
+                        active_panel.select_next_tab();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+Shift+Tab / Ctrl+Page_Up: Previous tab in active panel
+                if (((keyval == Gdk.Key.Tab && (state & Gdk.ModifierType.SHIFT_MASK) != 0) ||
+                     keyval == Gdk.Key.ISO_Left_Tab ||
+                     keyval == Gdk.Key.Page_Up || keyval == Gdk.Key.KP_Page_Up) &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    if (active_panel != null) {
+                        active_panel.select_previous_tab();
+                    }
+                    return Gdk.EVENT_STOP;
+                }
+
+                // Tab switches active panel (unless user is typing in command line or modifier pressed)
+                if (keyval == Gdk.Key.Tab && (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
                     if (cmd_entry.has_focus && cmd_entry.text.length > 0) {
                         return Gdk.EVENT_PROPAGATE;
                     }
                     toggle_active_panel();
                     return Gdk.EVENT_STOP;
+                }
+
+                // Ctrl+C: Copy selected or current item to clipboard (Nautilus format)
+                if (latin_key == Gdk.Key.c &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (!is_editable) {
+                        copy_or_cut_selected_to_clipboard(false);
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
+                // Ctrl+X: Cut selected or current item to clipboard (Nautilus format)
+                if (latin_key == Gdk.Key.x &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (!is_editable) {
+                        copy_or_cut_selected_to_clipboard(true);
+                        return Gdk.EVENT_STOP;
+                    }
+                }
+
+                // Ctrl+V: Paste from clipboard
+                if (latin_key == Gdk.Key.v &&
+                    (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
+                    (state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SHIFT_MASK)) == 0) {
+                    if (!is_editable) {
+                        do_clipboard_paste.begin();
+                        return Gdk.EVENT_STOP;
+                    }
                 }
 
                 // Ctrl+Enter or Ctrl+KP_Enter: Insert selected file or directory name into command line
@@ -1775,11 +1866,14 @@ row:selected .file-item-tagged {
                 // Ctrl+T: open new tab in active panel
                 if (latin_key == Gdk.Key.t && 
                     (state & Gdk.ModifierType.CONTROL_MASK) != 0 &&
-                    (state & Gdk.ModifierType.SHIFT_MASK) == 0) {
-                    if (active_panel != null) {
-                        active_panel.open_new_tab();
+                    (state & Gdk.ModifierType.SHIFT_MASK) == 0 &&
+                    (state & Gdk.ModifierType.ALT_MASK) == 0) {
+                    if (!is_editable) {
+                        if (active_panel != null) {
+                            active_panel.open_new_tab();
+                        }
+                        return Gdk.EVENT_STOP;
                     }
-                    return Gdk.EVENT_STOP;
                 }
 
                 // Ctrl+W: close current tab in active panel
@@ -2180,6 +2274,20 @@ row:selected .file-item-tagged {
             }
         }
 
+        public void move_current_tab_to_right() {
+            if (active_panel == left_panel) {
+                left_panel.move_current_tab_to(right_panel);
+                activate_panel(right_panel, true);
+            }
+        }
+
+        public void move_current_tab_to_left() {
+            if (active_panel == right_panel) {
+                right_panel.move_current_tab_to(left_panel);
+                activate_panel(left_panel, true);
+            }
+        }
+
         public void activate_panel(FilePanel panel, bool focus_list = true) {
             active_panel = panel;
             left_panel.set_active(panel == left_panel);
@@ -2353,11 +2461,8 @@ row:selected .file-item-tagged {
         }
 
         public void show_command_toast(string message) {
-            if (toast_overlay != null) {
-                var toast = new Adw.Toast(message);
-                toast.timeout = 3;
-                toast_overlay.add_toast(toast);
-            }
+            // Toasts disabled per user request
+            AppLogger.info("UI", @"Toast suppressed: $message");
         }
 
         public void handle_mount_removed(File unmounted_root) {
@@ -4221,6 +4326,193 @@ row:selected .file-item-tagged {
             }
         }
 
+        public static File get_unique_copy_target(File dest_dir, string base_name) {
+            var target = dest_dir.get_child(base_name);
+            if (!target.query_exists()) {
+                return target;
+            }
+
+            string name_part = base_name;
+            string ext_part = "";
+            int dot_idx = base_name.last_index_of_char('.');
+            if (dot_idx > 0 && !base_name.has_prefix(".")) {
+                name_part = base_name.substring(0, dot_idx);
+                ext_part = base_name.substring(dot_idx);
+            }
+
+            int count = 1;
+            while (true) {
+                string suffix = (count == 1) ? " (copy)" : @" (copy $count)";
+                string candidate = @"$name_part$suffix$ext_part";
+                target = dest_dir.get_child(candidate);
+                if (!target.query_exists()) {
+                    return target;
+                }
+                count++;
+            }
+        }
+
+        private void copy_or_cut_selected_to_clipboard(bool is_cut) {
+            if (active_panel == null) return;
+            if (active_panel.is_archive_location) {
+                show_error_dialog(is_cut ? "Cut Error" : "Copy Error", "Clipboard operations are not supported inside archives.");
+                return;
+            }
+            if (is_cut && active_panel.is_trash_location) {
+                show_error_dialog("Cut Error", "Cannot cut items from Trash. Use Restore instead.");
+                return;
+            }
+
+            var items = new GenericArray<FileItem>();
+            var tagged = active_panel.get_tagged_items();
+            if (tagged.length > 0) {
+                for (int i = 0; i < tagged.length; i++) {
+                    items.add(tagged[i]);
+                }
+            } else {
+                var cur = active_panel.get_selected_item();
+                if (cur != null && !cur.is_parent_dir) {
+                    items.add(cur);
+                }
+            }
+
+            if (items.length == 0) {
+                show_command_toast("No file or folder selected");
+                return;
+            }
+
+            var nautilus_sb = new StringBuilder();
+            var uri_sb = new StringBuilder();
+            var text_sb = new StringBuilder();
+
+            nautilus_sb.append(is_cut ? "cut\n" : "copy\n");
+
+            for (int i = 0; i < items.length; i++) {
+                string uri = items[i].file.get_uri();
+                nautilus_sb.append(uri).append("\n");
+                uri_sb.append(uri).append("\r\n");
+                text_sb.append(uri).append("\n");
+            }
+
+            var b_nautilus = new Bytes(nautilus_sb.str.data);
+            var cp_nautilus = new Gdk.ContentProvider.for_bytes("x-special/nautilus-clipboard", b_nautilus);
+
+            var b_uri = new Bytes(uri_sb.str.data);
+            var cp_uri = new Gdk.ContentProvider.for_bytes("text/uri-list", b_uri);
+
+            var b_text = new Bytes(text_sb.str.data);
+            var cp_text = new Gdk.ContentProvider.for_bytes("text/plain", b_text);
+
+            var union_cp = new Gdk.ContentProvider.union({cp_nautilus, cp_uri, cp_text});
+            var disp = get_display();
+            if (disp != null) {
+                disp.get_clipboard().set_content(union_cp);
+            }
+
+            string action_msg = is_cut ? "Cut" : "Copied";
+            show_command_toast(@"$action_msg $(items.length) item(s) to clipboard");
+        }
+
+        private async void do_clipboard_paste() {
+            if (active_panel == null) return;
+            var dest_dir = active_panel.current_directory;
+            if (dest_dir == null) {
+                show_command_toast("No destination folder open");
+                return;
+            }
+            if (active_panel.is_archive_location) {
+                show_error_dialog("Paste Error", "Pasting files into an archive is not supported.");
+                return;
+            }
+            if (active_panel.is_trash_location) {
+                show_error_dialog("Paste Error", "Cannot paste files into Trash.");
+                return;
+            }
+
+            var disp = get_display();
+            if (disp == null) return;
+            var clip = disp.get_clipboard();
+
+            string[] mimes = { "x-special/nautilus-clipboard", "text/uri-list" };
+            string out_mime = "";
+            InputStream? stream = null;
+            try {
+                stream = yield clip.read_async(mimes, GLib.Priority.DEFAULT, null, out out_mime);
+            } catch (Error e) {
+                show_command_toast("Nothing to paste from clipboard");
+                return;
+            }
+
+            if (stream == null || out_mime.length == 0) {
+                show_command_toast("Clipboard contains no files");
+                return;
+            }
+
+            bool is_cut = false;
+            var uris = new GenericArray<string>();
+            var data_stream = new DataInputStream(stream);
+
+            try {
+                if (out_mime == "x-special/nautilus-clipboard") {
+                    string? first_line = yield data_stream.read_line_utf8_async(GLib.Priority.DEFAULT, null, null);
+                    if (first_line != null) {
+                        string op = first_line.strip();
+                        is_cut = (op == "cut");
+                    }
+                }
+
+                string? line = null;
+                while ((line = yield data_stream.read_line_utf8_async(GLib.Priority.DEFAULT, null, null)) != null) {
+                    string u = line.strip();
+                    if (u.length > 0 && !u.has_prefix("#")) {
+                        uris.add(u);
+                    }
+                }
+            } catch (Error e) {
+                AppLogger.error("Clipboard", "Failed to read clipboard stream", e.message);
+                return;
+            }
+
+            if (uris.length == 0) {
+                show_command_toast("Clipboard contains no files");
+                return;
+            }
+
+            var items_to_paste = new GenericArray<FileItem>();
+            for (int i = 0; i < uris.length; i++) {
+                File f = File.new_for_uri(uris[i]);
+                if (f.query_exists()) {
+                    var item = FileItem.from_file(f);
+                    if (item != null) {
+                        items_to_paste.add(item);
+                    }
+                }
+            }
+
+            if (items_to_paste.length == 0) {
+                show_command_toast("Source files no longer exist");
+                return;
+            }
+
+            if (is_cut) {
+                var filtered = new GenericArray<FileItem>();
+                for (int i = 0; i < items_to_paste.length; i++) {
+                    var parent = items_to_paste[i].file.get_parent();
+                    if (parent == null || !parent.equal(dest_dir)) {
+                        filtered.add(items_to_paste[i]);
+                    }
+                }
+                if (filtered.length == 0) {
+                    show_command_toast("Items are already in this folder");
+                    return;
+                }
+                clip.set_content(null);
+                do_move_multiple_items.begin(filtered, dest_dir);
+            } else {
+                do_copy_multiple_items.begin(items_to_paste, dest_dir);
+            }
+        }
+
         private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
@@ -4249,6 +4541,9 @@ row:selected .file-item-tagged {
                     if (cancellable.is_cancelled()) break;
                     var it = items[i];
                     var dest_child = dest_dir.get_child(it.name);
+                    if (dest_child.equal(it.file)) {
+                        dest_child = get_unique_copy_target(dest_dir, it.name);
+                    }
 
                     yield FileOperationService.copy_file_or_dir(
                         it.file,
@@ -4873,6 +5168,9 @@ row:selected .file-item-tagged {
                     if (cancellable.is_cancelled()) break;
                     var it = items[i];
                     var dest_child = dest_dir.get_child(it.name);
+                    if (dest_child.equal(it.file)) {
+                        continue;
+                    }
 
                     yield FileOperationService.move_file_or_dir(
                         it.file,

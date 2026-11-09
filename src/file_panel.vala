@@ -43,6 +43,7 @@ namespace VCommander {
             append(tab_view);
 
             tab_view.page_attached.connect(on_tab_page_attached);
+            tab_view.page_detached.connect(on_tab_page_detached);
             tab_view.close_page.connect(on_tab_close_page);
             tab_view.page_reordered.connect((p, pos) => {
                 sync_tab_bar_pins();
@@ -264,67 +265,43 @@ namespace VCommander {
             }
         }
 
-        public void open_new_tab(File? dir = null, string view_mode_str = "detailed", bool hidden = false, string? custom_title = null, string sort_col = "name", string sort_order = "asc", bool defer_load = false, bool is_pinned = false) {
-            File target_dir = dir;
-            string vmode = view_mode_str;
-            if (target_dir == null) {
-                var current = get_current_page();
-                if (current != null && current.current_directory != null) {
+        public void open_new_tab(File? dir = null, string? view_mode_str = null, bool? hidden = null, string? custom_title = null, string? sort_col = null, string? sort_order = null, bool defer_load = false, bool is_pinned = false) {
+            File? target_dir = dir;
+            string? vmode = view_mode_str;
+            string scol = sort_col != null ? sort_col : "name";
+            string sord = sort_order != null ? sort_order : "asc";
+
+            var current = get_current_page();
+            if (current != null) {
+                if (target_dir == null && current.current_directory != null) {
                     target_dir = current.current_directory;
+                }
+                if (vmode == null) {
                     vmode = current.view_mode.to_string_id();
-                } else {
-                    target_dir = File.new_for_path(Environment.get_home_dir());
+                }
+                if (sort_col == null) {
+                    scol = current.sort_column_id;
+                }
+                if (sort_order == null) {
+                    sord = current.sort_order_str;
                 }
             }
-            hidden = ConfigManager.get_instance().show_hidden;
 
-            var page_widget = new FilePanelPage(target_dir, vmode, hidden, sort_col, sort_order, !defer_load);
+            if (target_dir == null) {
+                target_dir = File.new_for_path(Environment.get_home_dir());
+            }
+            if (vmode == null) {
+                vmode = "detailed";
+            }
+            bool show_hid = (hidden != null) ? hidden : ConfigManager.get_instance().show_hidden;
+
+            var page_widget = new FilePanelPage(target_dir, vmode, show_hid, scol, sord, !defer_load);
             page_widget.hexpand = true;
             page_widget.vexpand = true;
             page_widget.is_pinned = is_pinned;
             if (custom_title != null && custom_title.length > 0) {
                 page_widget.custom_title = custom_title;
             }
-
-            // Wire signals
-            page_widget.page_activated.connect(() => {
-                panel_activated(this);
-            });
-            page_widget.error_occurred.connect((title, msg) => {
-                error_occurred(title, msg);
-            });
-            page_widget.directory_changed.connect((d) => {
-                update_tab_title(page_widget);
-                if (get_current_page() == page_widget) {
-                    directory_changed(d);
-                }
-            });
-            page_widget.command_char_typed.connect((ch) => {
-                command_char_typed(ch);
-            });
-            page_widget.columns_layout_changed.connect(() => {
-                columns_layout_changed(this);
-            });
-            page_widget.sort_changed.connect(() => {
-                tab_sort_changed(this);
-            });
-            page_widget.view_mode_changed.connect(() => {
-                sync_tab_bar_pins();
-                tabs_state_changed(this);
-                view_mode_changed(this);
-            });
-            page_widget.toggle_hidden_requested.connect(() => {
-                toggle_hidden_requested();
-            });
-            page_widget.restore_requested.connect(() => {
-                restore_requested(this);
-            });
-            page_widget.empty_trash_requested.connect(() => {
-                empty_trash_requested(this);
-            });
-            page_widget.restore_item_requested.connect((it) => {
-                restore_item_requested(this, it);
-            });
 
             var page = tab_view.append(page_widget);
             update_tab_title(page_widget);
@@ -337,6 +314,86 @@ namespace VCommander {
 
             if (!initializing) {
                 tabs_state_changed(this);
+            }
+        }
+
+        public void move_current_tab_to(FilePanel dest_panel) {
+            var cur_page = tab_view.selected_page;
+            if (cur_page == null) return;
+
+            var page_widget = cur_page.child as FilePanelPage;
+
+            // If this is the only tab in this panel, open a replacement tab first
+            // so this panel is never left empty
+            if (tab_view.n_pages <= 1) {
+                File fallback_dir = (page_widget != null && page_widget.current_directory != null)
+                    ? page_widget.current_directory
+                    : File.new_for_path(Environment.get_home_dir());
+                open_new_tab(fallback_dir);
+            }
+
+            tab_view.transfer_page(cur_page, dest_panel.tab_view, dest_panel.tab_view.n_pages);
+            dest_panel.tab_view.selected_page = cur_page;
+        }
+
+        private void connect_page_signals(FilePanelPage page_widget) {
+            disconnect_page_signals(page_widget);
+
+            var ids = new GenericArray<ulong>();
+            ids.add(page_widget.page_activated.connect(() => {
+                panel_activated(this);
+            }));
+            ids.add(page_widget.error_occurred.connect((title, msg) => {
+                error_occurred(title, msg);
+            }));
+            ids.add(page_widget.directory_changed.connect((d) => {
+                update_tab_title(page_widget);
+                if (get_current_page() == page_widget) {
+                    directory_changed(d);
+                }
+            }));
+            ids.add(page_widget.command_char_typed.connect((ch) => {
+                command_char_typed(ch);
+            }));
+            ids.add(page_widget.columns_layout_changed.connect(() => {
+                columns_layout_changed(this);
+            }));
+            ids.add(page_widget.sort_changed.connect(() => {
+                tab_sort_changed(this);
+            }));
+            ids.add(page_widget.view_mode_changed.connect(() => {
+                sync_tab_bar_pins();
+                tabs_state_changed(this);
+                view_mode_changed(this);
+            }));
+            ids.add(page_widget.toggle_hidden_requested.connect(() => {
+                toggle_hidden_requested();
+            }));
+            ids.add(page_widget.restore_requested.connect(() => {
+                restore_requested(this);
+            }));
+            ids.add(page_widget.empty_trash_requested.connect(() => {
+                empty_trash_requested(this);
+            }));
+            ids.add(page_widget.restore_item_requested.connect((it) => {
+                restore_item_requested(this, it);
+            }));
+
+            ulong[] arr = new ulong[ids.length];
+            for (int i = 0; i < ids.length; i++) {
+                arr[i] = ids[i];
+            }
+            page_widget.panel_signal_ids = arr;
+        }
+
+        private void disconnect_page_signals(FilePanelPage page_widget) {
+            if (page_widget.panel_signal_ids != null) {
+                foreach (ulong id in page_widget.panel_signal_ids) {
+                    if (id != 0) {
+                        GLib.SignalHandler.disconnect(page_widget, id);
+                    }
+                }
+                page_widget.panel_signal_ids = null;
             }
         }
 
@@ -464,6 +521,7 @@ namespace VCommander {
                 return true; // prevent closing last tab
             }
             if (page_widget != null) {
+                disconnect_page_signals(page_widget);
                 page_widget.cleanup();
             }
             tab_view.close_page_finish(page, true);
@@ -476,8 +534,33 @@ namespace VCommander {
         }
 
         private void on_tab_page_attached(Adw.TabPage page, int position) {
-            var page_widget = (FilePanelPage) page.child;
-            update_tab_title(page_widget);
+            var page_widget = page.child as FilePanelPage;
+            if (page_widget != null) {
+                connect_page_signals(page_widget);
+                update_tab_title(page_widget);
+                page_widget.set_active(is_active);
+            }
+            sync_tab_bar_pins();
+            if (!initializing) {
+                tabs_state_changed(this);
+            }
+        }
+
+        private void on_tab_page_detached(Adw.TabPage page, int position) {
+            var page_widget = page.child as FilePanelPage;
+            if (page_widget != null) {
+                disconnect_page_signals(page_widget);
+            }
+            sync_tab_bar_pins();
+            if (!initializing) {
+                tabs_state_changed(this);
+            }
+            if (tab_view.n_pages == 0) {
+                File fallback_dir = (page_widget != null && page_widget.current_directory != null)
+                    ? page_widget.current_directory
+                    : File.new_for_path(Environment.get_home_dir());
+                open_new_tab(fallback_dir);
+            }
         }
 
         private void on_tab_selection_changed() {
@@ -553,7 +636,7 @@ namespace VCommander {
 
         public void set_active(bool active) {
             is_active = active;
-            tab_view.shortcuts = active ? Adw.TabViewShortcuts.ALL_SHORTCUTS : Adw.TabViewShortcuts.NONE;
+            tab_view.shortcuts = Adw.TabViewShortcuts.NONE;
             if (active) {
                 add_css_class("active-panel");
                 remove_css_class("panel-inactive");

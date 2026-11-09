@@ -67,17 +67,27 @@ namespace VCommander {
             add_item(sel_section, "Clear All Tags / Selection", "Escape", "Press Escape twice quickly");
             dialog.add(sel_section);
 
-            // 4. Tabs Management
+            // 4. Clipboard Operations (Nautilus style)
+            var clip_section = new Adw.ShortcutsSection("Clipboard Operations");
+            add_item(clip_section, "Copy File(s) to Clipboard", "<Control>c", "Selected items or item under cursor (Nautilus format)");
+            add_item(clip_section, "Cut File(s) to Clipboard", "<Control>x", "Selected items or item under cursor (Nautilus format)");
+            add_item(clip_section, "Paste File(s) from Clipboard", "<Control>v", "Paste into active directory with auto-collision naming");
+            dialog.add(clip_section);
+
+            // 5. Tabs Management
             var tab_section = new Adw.ShortcutsSection("Tab Management");
-            add_item(tab_section, "New Tab", "<Control>t");
+            add_item(tab_section, "New Tab (Current Path)", "<Control>t");
+            add_item(tab_section, "Move Tab to Right Pane", "<Control><Shift>Right");
+            add_item(tab_section, "Move Tab to Left Pane", "<Control><Shift>Left");
+            add_item(tab_section, "Switch to Tab 1..9", "<Alt>1", "Alt+1 .. Alt+9 in active pane");
+            add_item(tab_section, "Previous Tab", "<Control>Page_Up", "or Ctrl+Shift+Tab");
+            add_item(tab_section, "Next Tab", "<Control>Page_Down", "or Ctrl+Tab");
             add_item(tab_section, "Pin / Unpin Current Tab", "<Control><Shift>p", "Click pin icon or press shortcut to protect tab from closing");
             add_item(tab_section, "Rename Current Tab", "<Control><Shift>t", "Up to 15 characters");
             add_item(tab_section, "Close Current Tab", "<Control>w");
-            add_item(tab_section, "Previous Tab", "<Control>Page_Up", "or Ctrl+Shift+Tab");
-            add_item(tab_section, "Next Tab", "<Control>Page_Down", "or Ctrl+Tab");
             dialog.add(tab_section);
 
-            // 5. Directory Bookmarks (Hotlist)
+            // 6. Directory Bookmarks (Hotlist)
             var bm_section = new Adw.ShortcutsSection("Directory Bookmarks");
             add_item(bm_section, "Open Bookmarks Dialog", "<Control>backslash");
             add_item(bm_section, "Add Current Directory", "<Control>a", "Inside bookmarks dialog");

@@ -101,6 +101,7 @@ namespace VCommander {
         private bool initializing_sort = true;
         private bool showing_search_results = false;
         public bool is_showing_search_results { get { return showing_search_results; } }
+        public ulong[]? panel_signal_ids = null;
 
         public signal void page_activated();
         public signal void error_occurred(string title, string message);
