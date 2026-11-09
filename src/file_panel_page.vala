@@ -2040,6 +2040,7 @@ namespace VCommander {
                         selection_model.selected = (sort_model.get_n_items() > 1 && ((FileItem) sort_model.get_item(0)).is_parent_dir) ? 1 : 0;
                     }
                 }
+                scroll_to_selected();
             } else {
                 remove_css_class("active-page");
                 add_css_class("inactive-page");
@@ -2085,6 +2086,7 @@ namespace VCommander {
             } else {
                 if (column_view != null && !column_view.has_focus) column_view.grab_focus();
             }
+            scroll_to_selected();
         }
 
         public void select_first_item() {

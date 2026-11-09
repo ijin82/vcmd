@@ -536,9 +536,19 @@ namespace VCommander {
         private void on_tab_page_attached(Adw.TabPage page, int position) {
             var page_widget = page.child as FilePanelPage;
             if (page_widget != null) {
+                bool was_transferred = page_widget.get_data<bool>("transferred");
+                page_widget.set_data<bool>("transferred", false);
+
                 connect_page_signals(page_widget);
                 update_tab_title(page_widget);
-                page_widget.set_active(is_active);
+                page_widget.set_active(is_active && (page == tab_view.selected_page));
+
+                if (was_transferred) {
+                    GLib.Idle.add(() => {
+                        panel_activated(this);
+                        return GLib.Source.REMOVE;
+                    });
+                }
             }
             sync_tab_bar_pins();
             if (!initializing) {
@@ -549,6 +559,7 @@ namespace VCommander {
         private void on_tab_page_detached(Adw.TabPage page, int position) {
             var page_widget = page.child as FilePanelPage;
             if (page_widget != null) {
+                page_widget.set_data<bool>("transferred", true);
                 disconnect_page_signals(page_widget);
             }
             sync_tab_bar_pins();
@@ -564,12 +575,16 @@ namespace VCommander {
         }
 
         private void on_tab_selection_changed() {
-            if (!initializing && !is_active) {
-                panel_activated(this);
+            var cur_page = tab_view.selected_page;
+            for (int i = 0; i < tab_view.n_pages; i++) {
+                var p = tab_view.get_nth_page(i);
+                var pw = (FilePanelPage) p.child;
+                if (pw != null) {
+                    pw.set_active(is_active && (p == cur_page));
+                }
             }
             var current = get_current_page();
             if (current != null) {
-                current.set_active(is_active);
                 if (current.current_directory != null) {
                     directory_changed(current.current_directory);
                 }
@@ -579,6 +594,7 @@ namespace VCommander {
             }
             if (!initializing) {
                 view_mode_changed(this);
+                tabs_state_changed(this);
             }
         }
 
@@ -644,10 +660,13 @@ namespace VCommander {
                 remove_css_class("active-panel");
                 add_css_class("panel-inactive");
             }
+            var cur_page = tab_view.selected_page;
             for (int i = 0; i < tab_view.n_pages; i++) {
                 var p = tab_view.get_nth_page(i);
                 var pw = (FilePanelPage) p.child;
-                pw.set_active(active);
+                if (pw != null) {
+                    pw.set_active(active && (p == cur_page));
+                }
             }
         }
 
@@ -966,22 +985,27 @@ namespace VCommander {
 
                     bool needs_rebuild = (actions_box == null || !actions_box.has_css_class("tab-actions-box"));
                     if (!needs_rebuild) {
-                        pin_box = actions_box.get_first_child() as Gtk.Box;
-                        if (pin_box != null) {
-                            var second = pin_box.get_next_sibling() as Gtk.Box;
-                            if (second != null && second.has_css_class("tab-mode-icon")) {
-                                mode_box = second;
-                                up_box = second.get_next_sibling() as Gtk.Box;
-                            }
-                        }
-                        if (pin_box == null || mode_box == null || up_box == null) {
+                        FilePanel? owner = actions_box.get_data<FilePanel>("owner_panel");
+                        if (owner != this) {
                             needs_rebuild = true;
+                        } else {
+                            pin_box = actions_box.get_first_child() as Gtk.Box;
+                            if (pin_box != null) {
+                                up_box = pin_box.get_next_sibling() as Gtk.Box;
+                                if (up_box != null) {
+                                    mode_box = up_box.get_next_sibling() as Gtk.Box;
+                                }
+                            }
+                            if (pin_box == null || up_box == null || mode_box == null) {
+                                needs_rebuild = true;
+                            }
                         }
                     }
 
                     if (needs_rebuild) {
                         actions_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 1);
                         actions_box.add_css_class("tab-actions-box");
+                        actions_box.set_data<FilePanel>("owner_panel", this);
 
                         pin_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
                         pin_box.add_css_class("tab-action-icon");
