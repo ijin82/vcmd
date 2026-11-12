@@ -15,6 +15,7 @@ namespace VCommander {
 
             AppLogger.init();
             ThumbnailService.init();
+            ArchiveTreeService.clean_temporary_directories();
 
             // Disable all audio bells, error beeps, and event sounds application-wide
             var settings = Gtk.Settings.get_default();
@@ -42,6 +43,11 @@ namespace VCommander {
                 main_window = new MainWindow(this);
             }
             main_window.present();
+        }
+
+        protected override void shutdown() {
+            ArchiveTreeService.clean_temporary_directories();
+            base.shutdown();
         }
     }
 }

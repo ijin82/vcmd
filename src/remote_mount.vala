@@ -27,12 +27,12 @@ namespace VCommander {
             if (path.length == 0) {
                 return false;
             }
-            if (path.contains("://") && !path.has_prefix("file://") && !path.has_prefix("archive://")) {
+            if (path.contains("://") && !path.has_prefix("file://") && !path.has_prefix("archive://") && !path.has_prefix("trash://")) {
                 return true;
             }
             var f = File.new_for_commandline_arg(path);
             string? scheme = f.get_uri_scheme();
-            if (scheme != null && scheme != "file" && scheme != "archive") {
+            if (scheme != null && scheme != "file" && scheme != "archive" && scheme != "trash") {
                 return true;
             }
             string ssh_mount_root = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "ssh");
@@ -43,6 +43,33 @@ namespace VCommander {
             string gvfs_mount_root = @"/run/user/$uid_str/gvfs";
             if (path.has_prefix(gvfs_mount_root)) {
                 return true;
+            }
+            return false;
+        }
+
+        public static bool is_remote_file(File? file) {
+            if (file == null) {
+                return false;
+            }
+            string? scheme = file.get_uri_scheme();
+            if (scheme != null && scheme != "file" && scheme != "archive" && scheme != "trash") {
+                return true;
+            }
+            string uri = file.get_uri();
+            if (is_remote_path(uri)) {
+                return true;
+            }
+            string? path = file.get_path();
+            if (path != null && is_remote_path(path)) {
+                return true;
+            }
+            try {
+                var info = file.query_filesystem_info(FileAttribute.FILESYSTEM_REMOTE, null);
+                if (info.has_attribute(FileAttribute.FILESYSTEM_REMOTE)) {
+                    return info.get_attribute_boolean(FileAttribute.FILESYSTEM_REMOTE);
+                }
+            } catch (Error e) {
+                // Ignore query error, assume not remote
             }
             return false;
         }

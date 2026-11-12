@@ -327,10 +327,22 @@ This stage provides full archive management for `vcmd`. It introduces a two-tier
 - [x] In-Archive File Viewing & Editing (`F3` / `F4`):
   - Pressing `F3` or `F4` on a file inside an archive extracts it to a temporary directory (`~/.cache/vcmd/preview/` or `/tmp/vcmd-...`) and opens it in the configured external viewer or editor.
   - For `F4` (Edit): detect file modifications upon editor exit; prompt user to update the archive using `copyin` or backend tool.
-- [x] Extraction to Opposite Pane (`F5` Copy):
-  - Pressing `F5` inside an archive extracts selected files/directories to the opposite panel's current path.
-  - Pressing `F5` on an archive file from outside offers extraction options ("Extract here", "Extract to subdirectory <name>/").
-  - Password prompt dialog for encrypted archives.
-  - Extraction integrated with `DriveQueueManager` with real-time progress and cancel support.
+- [x] Direct Copying into Open Archives (`F5` Copy):
+  - When the opposite panel has an archive open (at the root or any nested subfolder), pressing `F5` copies/adds selected files and directories directly into the open archive at that location.
+  - Supports incremental update for `.zip`, `.7z`, and uncompressed `.tar` archives.
+  - Informative dialogs for unsupported/read-only formats (`.tar.gz`, `.iso`, `.rar`).
+  - Automatic staging with symlinks for zero-copy local additions and asynchronous copying for remote files.
+  - Integrated with `DriveQueueManager`, password prompts for encrypted archives, and automatic panel refresh.
+- [x] Direct Deletion of Files and Folders from Archives (`Delete` / `F8` / `Shift+F8`):
+  - When browsing inside an open archive, pressing `Delete` or `F8` enables direct permanent deletion of selected or tagged files and folders.
+  - Supports `.zip`, `.7z`, and uncompressed `.tar` archives (with clear error dialog for non-updatable stream formats like `.tar.gz`, `.iso`, `.rar`).
+  - Confirmation dialog informs the user that archive deletion is permanent (no Trash support in archives).
+  - Exact directory and item path scoping prevents unintentional deletion of identically named items in other folders.
+  - Non-blocking execution managed by `DriveQueueManager`, `OperationProgressDialog`, password retry loop, cache invalidation, and panel refresh.
+- [x] Secure Ephemeral Storage & In-vcmd Nested Archive Browsing:
+  - Activating a nested archive inside an open archive opens it directly within `vcmd` without launching external tools or Nautilus.
+  - Full parent navigation tracking: pressing `..` or Backspace at root of nested archive navigates back to parent archive and selects the nested archive file.
+  - Temporary preview and staging paths migrated to `/tmp/vcmd-$UID/` with strict `0700` (`rwx------`) permissions to prevent unencrypted leaks from password-protected archives.
+  - Automatic lifecycle cleanup: ephemeral directories and legacy cache (`~/.cache/vcmd/preview`) are cleaned on application startup and shutdown.
 
 

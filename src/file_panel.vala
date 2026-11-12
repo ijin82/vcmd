@@ -198,6 +198,13 @@ namespace VCommander {
             }
         }
 
+        public bool is_remote_location {
+            get {
+                var page = get_current_page();
+                return page != null ? page.is_remote_location() : false;
+            }
+        }
+
         public bool is_filter_active {
             get {
                 var page = get_current_page();

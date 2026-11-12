@@ -321,7 +321,7 @@ namespace VCommander {
                 return;
             }
 
-            string cache_dir = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview", Path.get_basename(archive_path));
+            string cache_dir = ArchiveTreeService.get_preview_archive_dir(archive_path);
             string? pwd = ArchiveTreeService.get_cached_password(archive_path);
             bool has_pwd = (pwd != null && pwd.length > 0);
 
@@ -401,6 +401,357 @@ namespace VCommander {
             throw new IOError.NOT_SUPPORTED(@"Updating files inside $(Path.get_basename(archive_path)) is not supported for this archive format.");
         }
 
+        public static async void add_items_to_archive(
+            string archive_path,
+            string inner_dir,
+            GenericArray<FileItem> items,
+            OperationProgressDialog dlg,
+            Cancellable cancellable
+        ) throws Error {
+            string lower = archive_path.down();
+            var registry = ArchiverRegistry.get_instance();
+            bool is_zip = lower.has_suffix(".zip");
+            bool is_7z = lower.has_suffix(".7z");
+            bool is_tar = lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") && !lower.has_suffix(".tar.xz") &&
+                          !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2");
+
+            if (!is_zip && !is_7z && !is_tar) {
+                throw new IOError.NOT_SUPPORTED(@"Directly adding files to $(Path.get_basename(archive_path)) is not supported.");
+            }
+
+            // 1. Setup staging directory
+            string stage_root = Path.build_filename(
+                ArchiveTreeService.get_staging_root_dir(),
+                @"add_$((int)Posix.getpid())_$((int64)GLib.get_real_time())"
+            );
+            var stage_root_file = File.new_for_path(stage_root);
+            yield FileOperationService.make_directory_with_parents_async(stage_root_file, cancellable);
+
+            string clean_inner = inner_dir.strip();
+            while (clean_inner.has_prefix("/")) clean_inner = clean_inner.substring(1);
+            while (clean_inner.has_suffix("/")) clean_inner = clean_inner.substring(0, clean_inner.length - 1);
+
+            string stage_target = (clean_inner.length > 0)
+                ? Path.build_filename(stage_root, clean_inner)
+                : stage_root;
+
+            var stage_target_file = File.new_for_path(stage_target);
+            if (!stage_target_file.query_exists()) {
+                yield FileOperationService.make_directory_with_parents_async(stage_target_file, cancellable);
+            }
+
+            var rel_items = new GenericArray<string>();
+
+            try {
+                dlg.update_progress("Preparing files to archive...", 0, items.length);
+
+                for (uint i = 0; i < items.length; i++) {
+                    if (cancellable.is_cancelled()) {
+                        throw new IOError.CANCELLED("Operation cancelled");
+                    }
+                    var item = items.get(i);
+                    string dest_item_path = Path.build_filename(stage_target, item.name);
+                    string rel_item = (clean_inner.length > 0) ? clean_inner + "/" + item.name : item.name;
+                    rel_items.add(rel_item);
+
+                    string? local_path = item.file.get_path();
+                    if (local_path != null) {
+                        Posix.unlink(dest_item_path);
+                        if (Posix.symlink(local_path, dest_item_path) != 0) {
+                            yield FileOperationService.copy_file_or_dir(item.file, File.new_for_path(dest_item_path), null, cancellable);
+                        }
+                    } else {
+                        yield FileOperationService.copy_file_or_dir(item.file, File.new_for_path(dest_item_path), null, cancellable);
+                    }
+                    dlg.update_progress(item.name, i + 1, items.length);
+                }
+
+                string? pwd = ArchiveTreeService.get_cached_password(archive_path);
+                bool has_pwd = (pwd != null && pwd.length > 0);
+
+                var cmd_args = new GenericArray<string>();
+
+                if (is_7z || (is_zip && (registry.has_tool("7z") || registry.has_tool("7zz")))) {
+                    string tool = registry.has_tool("7z") ? "7z" : (registry.has_tool("7zz") ? "7zz" : "7z");
+                    cmd_args.add(tool);
+                    cmd_args.add("a");
+                    cmd_args.add("-y");
+                    cmd_args.add("-r");
+                    if (has_pwd) {
+                        cmd_args.add(@"-p$pwd");
+                    }
+                    cmd_args.add(archive_path);
+                    for (uint i = 0; i < rel_items.length; i++) {
+                        cmd_args.add(rel_items.get(i));
+                    }
+                } else if (is_zip && registry.has_tool("zip")) {
+                    cmd_args.add("zip");
+                    cmd_args.add("-r");
+                    if (has_pwd) {
+                        cmd_args.add("-P");
+                        cmd_args.add(pwd);
+                    }
+                    cmd_args.add(archive_path);
+                    for (uint i = 0; i < rel_items.length; i++) {
+                        cmd_args.add(rel_items.get(i));
+                    }
+                } else if (is_tar && registry.has_tool("tar")) {
+                    cmd_args.add("tar");
+                    cmd_args.add("-h");
+                    cmd_args.add("-rf");
+                    cmd_args.add(archive_path);
+                    for (uint i = 0; i < rel_items.length; i++) {
+                        cmd_args.add(rel_items.get(i));
+                    }
+                } else {
+                    throw new IOError.NOT_SUPPORTED("No suitable tool available to update this archive.");
+                }
+
+                var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
+                launcher.set_cwd(stage_root);
+
+                string[] argv = new string[cmd_args.length];
+                for (uint i = 0; i < cmd_args.length; i++) {
+                    argv[i] = cmd_args.get(i);
+                }
+
+                AppLogger.info("Archive", @"Updating archive: $(argv[0]) in $stage_root with $(rel_items.length) item(s)");
+
+                Subprocess proc = launcher.spawnv(argv);
+
+                ulong cancel_handler = 0;
+                if (cancellable != null) {
+                    cancel_handler = cancellable.connect(() => {
+                        proc.force_exit();
+                    });
+                }
+
+                var stderr_stream = new DataInputStream(proc.get_stderr_pipe());
+                var stderr_builder = new StringBuilder();
+
+                drain_stderr_stream.begin(stderr_stream, stderr_builder, cancellable);
+
+                Error? proc_error = null;
+                try {
+                    yield proc.wait_check_async(cancellable);
+                } catch (Error e) {
+                    proc_error = e;
+                }
+
+                if (cancel_handler != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler);
+                }
+
+                if (cancellable.is_cancelled()) {
+                    throw new IOError.CANCELLED("Adding to archive cancelled by user");
+                }
+
+                if (proc_error != null) {
+                    string err_text = stderr_builder.str.strip();
+                    int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+                    string lower_err = err_text.down();
+                    bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
+                                      lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
+                                      exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
+
+                    if (is_pwd_err) {
+                        if (has_pwd) {
+                            ArchiveTreeService.clear_cached_password(archive_path);
+                            throw new ArchivePasswordError.INVALID(@"Incorrect password for $(Path.get_basename(archive_path))");
+                        } else {
+                            throw new ArchivePasswordError.REQUIRED(@"Password required for $(Path.get_basename(archive_path))");
+                        }
+                    }
+
+                    if (err_text.length > 0) {
+                        throw new IOError.FAILED(@"Failed to update archive: $err_text (exit code $exit_code)");
+                    }
+                    throw proc_error;
+                }
+            } finally {
+                try {
+                    if (stage_root_file.query_exists()) {
+                        yield FileOperationService.delete_recursive(stage_root_file);
+                    }
+                } catch (Error ignored) {}
+            }
+        }
+
+        public static async void delete_archive_items(
+            string archive_path,
+            GenericArray<FileItem> items,
+            OperationProgressDialog dlg,
+            Cancellable cancellable
+        ) throws Error {
+            if (items.length == 0) return;
+
+            string lower = archive_path.down();
+            var registry = ArchiverRegistry.get_instance();
+            bool is_zip = lower.has_suffix(".zip");
+            bool is_7z = lower.has_suffix(".7z");
+            bool is_tar = lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") && !lower.has_suffix(".tar.xz") &&
+                          !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2");
+
+            if (!is_zip && !is_7z && !is_tar) {
+                throw new IOError.NOT_SUPPORTED(@"Deleting files from $(Path.get_basename(archive_path)) is not supported.");
+            }
+
+            var target_items = new GenericArray<FileItem>();
+            var rel_paths = new GenericArray<string>();
+            string expected_prefix = @"archive://$archive_path/";
+
+            for (uint i = 0; i < items.length; i++) {
+                var item = items.get(i);
+                string? in_path = null;
+                string uri = item.file.get_uri();
+                if (uri.has_prefix(expected_prefix)) {
+                    in_path = Uri.unescape_string(uri.substring(expected_prefix.length));
+                }
+                if (in_path == null || in_path.length == 0) {
+                    string? arc_p = null;
+                    if (!ArchiveTreeService.split_archive_uri(uri, out arc_p, out in_path)) continue;
+                }
+                if (in_path == null || in_path.length == 0) continue;
+
+                while (in_path.has_prefix("/")) in_path = in_path.substring(1);
+                while (in_path.has_suffix("/")) in_path = in_path.substring(0, in_path.length - 1);
+                if (in_path.length == 0) continue;
+
+                target_items.add(item);
+                rel_paths.add(in_path);
+            }
+
+            if (rel_paths.length == 0) {
+                return;
+            }
+
+            dlg.update_progress(@"Deleting $(rel_paths.length) item(s)...", 0, rel_paths.length);
+
+            string? pwd = ArchiveTreeService.get_cached_password(archive_path);
+            bool has_pwd = (pwd != null && pwd.length > 0);
+
+            var cmd_args = new GenericArray<string>();
+            bool has_7z = registry.has_tool("7z") || registry.has_tool("7zz");
+
+            if (has_7z && (is_7z || is_zip || is_tar)) {
+                string tool = registry.has_tool("7z") ? "7z" : "7zz";
+                cmd_args.add(tool);
+                cmd_args.add("d");
+                cmd_args.add("-y");
+                if (has_pwd) {
+                    cmd_args.add(@"-p$pwd");
+                } else {
+                    cmd_args.add("-p-");
+                }
+                cmd_args.add(archive_path);
+                for (uint i = 0; i < rel_paths.length; i++) {
+                    string path_arg = rel_paths.get(i);
+                    bool is_dir = target_items.get(i).is_dir;
+                    if (is_dir) {
+                        cmd_args.add(path_arg + "/");
+                        cmd_args.add(path_arg);
+                    } else {
+                        cmd_args.add(path_arg);
+                    }
+                }
+            } else if (is_zip && registry.has_tool("zip")) {
+                cmd_args.add("zip");
+                cmd_args.add("-d");
+                if (has_pwd) {
+                    cmd_args.add("-P");
+                    cmd_args.add(pwd);
+                }
+                cmd_args.add(archive_path);
+                for (uint i = 0; i < rel_paths.length; i++) {
+                    string path_arg = rel_paths.get(i);
+                    bool is_dir = target_items.get(i).is_dir;
+                    if (is_dir) {
+                        cmd_args.add(path_arg + "/*");
+                        cmd_args.add(path_arg + "/");
+                    } else {
+                        cmd_args.add(path_arg);
+                    }
+                }
+            } else if (is_tar && registry.has_tool("tar")) {
+                cmd_args.add("tar");
+                cmd_args.add("--delete");
+                cmd_args.add("-f");
+                cmd_args.add(archive_path);
+                for (uint i = 0; i < rel_paths.length; i++) {
+                    cmd_args.add(rel_paths.get(i));
+                }
+            } else {
+                throw new IOError.NOT_SUPPORTED("No suitable tool available to delete items from this archive.");
+            }
+
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
+            string? arc_dir = Path.get_dirname(archive_path);
+            if (arc_dir != null && arc_dir.length > 0) {
+                launcher.set_cwd(arc_dir);
+            }
+
+            string[] argv = new string[cmd_args.length];
+            for (uint i = 0; i < cmd_args.length; i++) {
+                argv[i] = cmd_args.get(i);
+            }
+
+            AppLogger.info("Archive", @"Deleting $(rel_paths.length) items from archive: $(argv[0]) in $(archive_path)");
+
+            Subprocess proc = launcher.spawnv(argv);
+
+            ulong cancel_handler = 0;
+            if (cancellable != null) {
+                cancel_handler = cancellable.connect(() => {
+                    proc.force_exit();
+                });
+            }
+
+            var stderr_stream = new DataInputStream(proc.get_stderr_pipe());
+            var stderr_builder = new StringBuilder();
+
+            drain_stderr_stream.begin(stderr_stream, stderr_builder, cancellable);
+
+            Error? proc_error = null;
+            try {
+                yield proc.wait_check_async(cancellable);
+            } catch (Error e) {
+                proc_error = e;
+            }
+
+            if (cancel_handler != 0 && cancellable != null) {
+                cancellable.disconnect(cancel_handler);
+            }
+
+            if (cancellable.is_cancelled()) {
+                throw new IOError.CANCELLED("Archive deletion cancelled by user");
+            }
+
+            if (proc_error != null) {
+                string err_text = stderr_builder.str.strip();
+                int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+                string lower_err = err_text.down();
+                bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
+                                  lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
+                                  exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
+
+                if (is_pwd_err) {
+                    if (has_pwd) {
+                        ArchiveTreeService.clear_cached_password(archive_path);
+                        throw new ArchivePasswordError.INVALID(@"Incorrect password for $(Path.get_basename(archive_path))");
+                    } else {
+                        throw new ArchivePasswordError.REQUIRED(@"Password required for $(Path.get_basename(archive_path))");
+                    }
+                }
+
+                if (err_text.length > 0) {
+                    throw new IOError.FAILED(@"Failed to delete from archive: $err_text (exit code $exit_code)");
+                }
+                throw proc_error;
+            }
+
+            dlg.update_progress("Deletion complete", rel_paths.length, rel_paths.length);
+        }
+
         public static async void extract_vfs_items(
             string archive_path,
             GenericArray<FileItem> items,
@@ -416,11 +767,20 @@ namespace VCommander {
             var targets = new GenericArray<VfsExtractionTarget>();
             int64 total_size = 0;
 
+            string expected_prefix = @"archive://$archive_path/";
+
             for (uint i = 0; i < items.length; i++) {
                 var item = items.get(i);
-                string? arc_p, in_p;
-                if (!ArchiveTreeService.split_archive_uri(item.file.get_uri(), out arc_p, out in_p)) continue;
-                if (in_p == null) continue;
+                string? in_p = null;
+                string uri = item.file.get_uri();
+                if (uri.has_prefix(expected_prefix)) {
+                    in_p = Uri.unescape_string(uri.substring(expected_prefix.length));
+                }
+                if (in_p == null || in_p.length == 0) {
+                    string? arc_p = null;
+                    if (!ArchiveTreeService.split_archive_uri(uri, out arc_p, out in_p)) continue;
+                }
+                if (in_p == null || in_p.length == 0) continue;
 
                 if (!item.is_dir) {
                     File target_file = dest_dir.get_child(item.name);

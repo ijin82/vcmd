@@ -123,6 +123,10 @@ namespace VCommander {
             return current_directory != null && current_directory.get_uri_scheme() == "archive";
         }
 
+        public bool is_remote_location() {
+            return current_directory != null && RemoteMount.is_remote_file(current_directory);
+        }
+
         public FilePanelPage(File initial_dir, string view_mode_str = "detailed", bool hidden = false, string sort_col = "name", string sort_order = "asc", bool start_load = true) {
             Object(orientation: Gtk.Orientation.VERTICAL, spacing: 0);
 
@@ -2916,7 +2920,11 @@ namespace VCommander {
             } else if (item.is_dir) {
                 load_directory(item.file);
             } else if (is_archive_location()) {
-                open_archive_file(item);
+                if (ArchiverRegistry.get_instance().is_archive_filename(item.name)) {
+                    open_nested_archive(item);
+                } else {
+                    open_archive_file(item);
+                }
             } else if (ArchiverRegistry.get_instance().is_archive_filename(item.name)) {
                 string? p = item.file.get_path();
                 if (p != null) {
@@ -2930,6 +2938,63 @@ namespace VCommander {
         }
 
         private bool is_opening_archive_file = false;
+
+        private void open_nested_archive(FileItem item) {
+            if (is_opening_archive_file) return;
+
+            string? archive_path;
+            string? inner_path;
+            if (!ArchiveTreeService.split_archive_uri(item.file.get_uri(), out archive_path, out inner_path)) {
+                return;
+            }
+            if (archive_path == null || inner_path == null) {
+                return;
+            }
+
+            var temp_file = ArchiveTreeService.get_temp_extracted_file(archive_path, inner_path);
+            if (ArchiveTreeService.is_extracted_file_up_to_date(archive_path, inner_path, temp_file)) {
+                string? temp_path = temp_file.get_path();
+                if (temp_path != null) {
+                    ArchiveTreeService.register_nested_archive_origin(temp_path, current_directory, item.name);
+                    load_directory(File.new_for_uri(@"archive://$temp_path"));
+                }
+                return;
+            }
+
+            is_opening_archive_file = true;
+            status_label.label = @"Extracting nested archive $(item.name)...";
+
+            extract_and_open_nested_archive.begin(archive_path, inner_path, temp_file, item.name, (obj, res) => {
+                is_opening_archive_file = false;
+                update_status_bar();
+            });
+        }
+
+        private async void extract_and_open_nested_archive(string archive_path, string inner_path, File temp_file, string item_name) {
+            bool is_retry = false;
+            while (true) {
+                try {
+                    yield ArchiveTreeService.extract_single_file_to(archive_path, inner_path, temp_file, null);
+                    string? temp_path = temp_file.get_path();
+                    if (temp_path != null) {
+                        ArchiveTreeService.register_nested_archive_origin(temp_path, current_directory, item_name);
+                        load_directory(File.new_for_uri(@"archive://$temp_path"));
+                    }
+                    break;
+                } catch (ArchivePasswordError e) {
+                    is_retry = (e is ArchivePasswordError.INVALID);
+                    string? pwd = yield ArchivePasswordDialog.prompt_async(get_root() as Gtk.Window, Path.get_basename(archive_path), is_retry);
+                    if (pwd == null) {
+                        status_label.label = "Extraction cancelled";
+                        break;
+                    }
+                    ArchiveTreeService.set_cached_password(archive_path, pwd);
+                } catch (Error e) {
+                    error_occurred("Archive Error", @"Cannot extract $(Path.get_basename(inner_path)): $(e.message)");
+                    break;
+                }
+            }
+        }
 
         private void open_archive_file(FileItem item) {
             if (is_opening_archive_file) return;
@@ -2990,6 +3055,12 @@ namespace VCommander {
                 string? inner_path;
                 if (ArchiveTreeService.split_archive_uri(current_directory.get_uri(), out archive_path, out inner_path)) {
                     if (inner_path == null || inner_path.length == 0) {
+                        File? origin_dir = null;
+                        string? origin_name = null;
+                        if (archive_path != null && ArchiveTreeService.get_nested_archive_origin(archive_path, out origin_dir, out origin_name) && origin_dir != null) {
+                            load_directory(origin_dir, origin_name);
+                            return;
+                        }
                         // At root of archive, go up to host directory on disk and select the archive file
                         var parent_dir = File.new_for_path(Path.get_dirname(archive_path));
                         string archive_name = Path.get_basename(archive_path);
@@ -3173,8 +3244,14 @@ namespace VCommander {
 
             // Add parent ".." entry
             if (inner_path == null || inner_path.length == 0) {
-                var parent_disk = File.new_for_path(Path.get_dirname(archive_path));
-                items.add(new FileItem.for_parent(parent_disk));
+                File? origin_dir = null;
+                string? origin_name = null;
+                if (archive_path != null && ArchiveTreeService.get_nested_archive_origin(archive_path, out origin_dir, out origin_name) && origin_dir != null) {
+                    items.add(new FileItem.for_parent(origin_dir));
+                } else {
+                    var parent_disk = File.new_for_path(Path.get_dirname(archive_path));
+                    items.add(new FileItem.for_parent(parent_disk));
+                }
             } else {
                 int last_slash = inner_path.last_index_of_char('/');
                 string parent_inner = (last_slash >= 0) ? inner_path.substring(0, last_slash) : "";

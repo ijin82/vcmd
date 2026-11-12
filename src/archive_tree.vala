@@ -139,9 +139,19 @@ namespace VCommander {
         }
     }
 
+    public class NestedArchiveOrigin : Object {
+        public File origin_directory { get; construct set; }
+        public string origin_item_name { get; construct set; }
+
+        public NestedArchiveOrigin(File origin_directory, string origin_item_name) {
+            Object(origin_directory: origin_directory, origin_item_name: origin_item_name);
+        }
+    }
+
     public class ArchiveTreeService : Object {
         private static HashTable<string, ArchiveTree>? cache = null;
         private static HashTable<string, string>? password_cache = null;
+        private static HashTable<string, NestedArchiveOrigin>? nested_origins = null;
 
         public static void init() {
             if (cache == null) {
@@ -150,6 +160,27 @@ namespace VCommander {
             if (password_cache == null) {
                 password_cache = new HashTable<string, string>(str_hash, str_equal);
             }
+            if (nested_origins == null) {
+                nested_origins = new HashTable<string, NestedArchiveOrigin>(str_hash, str_equal);
+            }
+        }
+
+        public static void register_nested_archive_origin(string temp_archive_path, File origin_directory, string origin_item_name) {
+            init();
+            nested_origins.insert(temp_archive_path, new NestedArchiveOrigin(origin_directory, origin_item_name));
+        }
+
+        public static bool get_nested_archive_origin(string temp_archive_path, out File? origin_directory, out string? origin_item_name) {
+            origin_directory = null;
+            origin_item_name = null;
+            if (nested_origins == null) return false;
+            var origin = nested_origins.lookup(temp_archive_path);
+            if (origin != null) {
+                origin_directory = origin.origin_directory;
+                origin_item_name = origin.origin_item_name;
+                return true;
+            }
+            return false;
         }
 
         public static string? get_cached_password(string archive_path) {
@@ -196,7 +227,10 @@ namespace VCommander {
             string[] parts = raw_path.split("/");
             var registry = ArchiverRegistry.get_instance();
 
-            for (int i = parts.length; i > 0; i--) {
+            // Pass 1: Find the shortest candidate (from root to leaf) that is an archive filename
+            // AND actually exists on the filesystem. This prevents files inside archives with archive extensions
+            // (e.g. nested .zip or .tar.gz) from being mistakenly parsed as the outer archive.
+            for (int i = 1; i <= parts.length; i++) {
                 var sb = new StringBuilder();
                 for (int j = 0; j < i; j++) {
                     if (parts[j].length == 0) continue;
@@ -205,7 +239,32 @@ namespace VCommander {
                 }
                 string candidate = sb.str;
 
-                if (registry.is_archive_filename(candidate)) {
+                if (registry.is_archive_filename(candidate) &&
+                    FileUtils.test(candidate, FileTest.EXISTS) &&
+                    !FileUtils.test(candidate, FileTest.IS_DIR)) {
+                    var inner_sb = new StringBuilder();
+                    for (int j = i; j < parts.length; j++) {
+                        if (parts[j].length == 0) continue;
+                        if (inner_sb.len > 0) inner_sb.append("/");
+                        inner_sb.append(parts[j]);
+                    }
+                    archive_path = candidate;
+                    inner_path = inner_sb.str;
+                    return true;
+                }
+            }
+
+            // Pass 2: Fallback if file doesn't exist on disk, take the first matching candidate from left to right.
+            for (int i = 1; i <= parts.length; i++) {
+                var sb = new StringBuilder();
+                for (int j = 0; j < i; j++) {
+                    if (parts[j].length == 0) continue;
+                    sb.append("/");
+                    sb.append(parts[j]);
+                }
+                string candidate = sb.str;
+
+                if (registry.is_archive_filename(candidate) && !FileUtils.test(candidate, FileTest.IS_DIR)) {
                     var inner_sb = new StringBuilder();
                     for (int j = i; j < parts.length; j++) {
                         if (parts[j].length == 0) continue;
@@ -726,10 +785,90 @@ namespace VCommander {
             return items;
         }
 
+        public static string get_secure_tmp_dir() {
+            string tmp = Environment.get_tmp_dir();
+            string root = Path.build_filename(tmp, @"vcmd-$((int)Posix.getuid())");
+            DirUtils.create_with_parents(root, 0700);
+            Posix.chmod(root, 0700);
+            return root;
+        }
+
+        public static string get_preview_root_dir() {
+            string preview_root = Path.build_filename(get_secure_tmp_dir(), "preview");
+            DirUtils.create_with_parents(preview_root, 0700);
+            Posix.chmod(preview_root, 0700);
+            return preview_root;
+        }
+
+        public static string get_staging_root_dir() {
+            string staging_root = Path.build_filename(get_secure_tmp_dir(), "staging");
+            DirUtils.create_with_parents(staging_root, 0700);
+            Posix.chmod(staging_root, 0700);
+            return staging_root;
+        }
+
+        public static string get_preview_archive_dir(string archive_path) {
+            string hash_prefix = Checksum.compute_for_string(ChecksumType.SHA1, archive_path).substring(0, 8);
+            string clean_name = Path.get_basename(archive_path).replace(".", "_");
+            string arc_folder = hash_prefix + "_" + clean_name + "_preview";
+            string base_dir = Path.build_filename(get_preview_root_dir(), arc_folder);
+            DirUtils.create_with_parents(base_dir, 0700);
+            Posix.chmod(base_dir, 0700);
+            return base_dir;
+        }
+
         public static File get_temp_extracted_file(string archive_path, string inner_path) {
-            string cache_dir = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview", Path.get_basename(archive_path));
-            string dest_path = Path.build_filename(cache_dir, inner_path);
+            string base_dir = get_preview_archive_dir(archive_path);
+            string dest_path = Path.build_filename(base_dir, inner_path);
             return File.new_for_path(dest_path);
+        }
+
+        public static void clean_temporary_directories() {
+            try {
+                string tmp = Environment.get_tmp_dir();
+                string root = Path.build_filename(tmp, @"vcmd-$((int)Posix.getuid())");
+                var root_file = File.new_for_path(root);
+                if (root_file.query_exists()) {
+                    delete_recursive_sync(root_file);
+                }
+            } catch (Error e) {
+                AppLogger.warn("Archive", @"Failed to clean temp directory: $(e.message)");
+            }
+
+            try {
+                string legacy_preview = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview");
+                var preview_file = File.new_for_path(legacy_preview);
+                if (preview_file.query_exists()) {
+                    delete_recursive_sync(preview_file);
+                }
+                string legacy_staging = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "staging");
+                var staging_file = File.new_for_path(legacy_staging);
+                if (staging_file.query_exists()) {
+                    delete_recursive_sync(staging_file);
+                }
+            } catch (Error e) {
+                AppLogger.warn("Archive", @"Failed to clean legacy cache: $(e.message)");
+            }
+        }
+
+        private static void delete_recursive_sync(File file) {
+            try {
+                var enumerator = file.enumerate_children(
+                    FileAttribute.STANDARD_NAME + "," + FileAttribute.STANDARD_TYPE,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    null
+                );
+                FileInfo? info = null;
+                while ((info = enumerator.next_file(null)) != null) {
+                    var child = file.get_child(info.get_name());
+                    if (info.get_file_type() == FileType.DIRECTORY) {
+                        delete_recursive_sync(child);
+                    } else {
+                        child.delete(null);
+                    }
+                }
+                file.delete(null);
+            } catch (Error ignored) {}
         }
 
         public static bool is_extracted_file_up_to_date(string archive_path, string inner_path, File dest_file) {
@@ -860,6 +999,11 @@ namespace VCommander {
                     } else {
                         throw new ArchivePasswordError.REQUIRED(@"Password required for $(Path.get_basename(archive_path))");
                     }
+                }
+
+                string err_msg = err_text.strip();
+                if (err_msg.length > 0) {
+                    throw new IOError.FAILED(@"Failed to extract '$member_path' from $(Path.get_basename(archive_path)): $err_msg (exit code $exit_code)");
                 }
 
                 throw e;

@@ -25,12 +25,13 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
   * **Resilient Startup:** If a previously saved path is unavailable or removed (e.g., unmounted drive), the tab is skipped; if all tabs are unavailable, the panel automatically opens the current user's home folder.
   * **Panel Synchronization:** Press <kbd>Alt</kbd> + <kbd>I</kbd> or <kbd>Esc</kbd> > <kbd>i</kbd> to immediately synchronize the opposite panel to the active panel's directory.
 
-### 👁️ Triple View Modes (<kbd>Alt</kbd> + <kbd>T</kbd>)
+### 👁️ Multiple View Modes (<kbd>Alt</kbd> + <kbd>T</kbd>) & Thumbnail Grid
 * **Full / Detailed View (`Gtk.ColumnView`):** Detailed list with Name, Type, Size, and Date Modified.
   * Resizable columns with column header click-to-sort (ascending and descending).
   * Parent directory `..` is strictly pinned to the top of the file list under any sort order or direction.
 * **Brief View (`Gtk.GridView`):** Midnight Commander-style multi-column layout filling the pane height with horizontal columns. Configurable column width (100–800 px) with live adjustments (<kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd>).
 * **Super Detailed View:** Single-pane maximized view with deep metadata display and enhanced layout, ideal for focused inspecting or working on smaller displays.
+* **Thumbnail Grid View:** Fast background image and video thumbnail generation with zoom (<kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> or mouse wheel zoom from 30px to 300px).
 
 ### 🏷️ Multi-Selection & Item Tagging
 * **Item Tagging:** Press <kbd>Insert</kbd> or <kbd>KP_Insert</kbd> to toggle tag on the current file or folder and automatically advance the cursor down.
@@ -51,24 +52,29 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 * **Built-in `cd` Navigation:** Typing `cd <path>` navigates the active panel immediately without opening a shell.
 * **Command History:** Browse previous commands with <kbd>↑</kbd> and <kbd>↓</kbd>.
 * **Insert File Name:** Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to insert the focused file/folder name (properly shell-escaped) into the command entry.
-* **Function Key Bar (F1..F10):** Midnight Commander-style bottom bar (<kbd>F1</kbd> Help, <kbd>F3</kbd> View, <kbd>F4</kbd> Edit, <kbd>F5</kbd> Copy, <kbd>F6</kbd> Move, <kbd>F7</kbd> Mkdir, <kbd>F8</kbd> Delete, <kbd>F10</kbd> Quit). Can be toggled on/off in Preferences.
+* **Function Key Bar (F1..F10):** Midnight Commander-style bottom bar (<kbd>F1</kbd> Help, <kbd>F2</kbd> Connect / <kbd>Shift</kbd> + <kbd>F2</kbd> Pack, <kbd>F3</kbd> View, <kbd>F4</kbd> Edit, <kbd>F5</kbd> Copy, <kbd>F6</kbd> Move, <kbd>F7</kbd> Mkdir, <kbd>F8</kbd> Delete, <kbd>F10</kbd> Quit). Can be toggled on/off in Preferences.
 
-### 📁 Robust Asynchronous File Operations
+### 📁 Asynchronous File Operations & Drive Queue
 * **Non-blocking Execution:** All copying, moving, deletion, and directory scanning run asynchronously via GIO APIs (`GFile.copy_async`, `GFile.move_async`, `GFileEnumerator`).
-* **Progress Dialog:** Informative dialog displaying operation progress, item counts, and status.
+* **Drive Queue Management (`DriveQueueManager`):** Operations acquire per-drive locks to serialize access to the same physical disk, preventing disk thrashing on HDDs and maximizing SSD throughput.
+* **Minimizable Progress Dialog:** Operations can be minimized into a non-blocking toolbar progress indicator and popover with Cancel and progress reporting.
 * **Unified Conflict Resolution:** Centralized handling for overwrite, skip, or retry when encountering existing files or permissions issues.
-* **Trash & Direct Delete:** Support for both FreeDesktop Trash and direct permanent deletion.
+* **Trash & Remote Safe Deletion:** Support for FreeDesktop Trash with recovery. Network filesystems (SFTP, SMB, FTP, SSHFS) automatically enforce permanent deletion safeguards since remote storage does not support Trash.
 
-### 📦 Archive Virtual File System & Packing (<kbd>Shift</kbd> + <kbd>F2</kbd>)
-* **Virtual Archive VFS (`archive:///`):** Press <kbd>Enter</kbd> or double-click any archive or container file (`.zip`, `.tar.*`, `.7z`, `.rar`, `.deb`, `.rpm`, `.iso`, etc.) to enter and navigate it as a virtual directory.
-* **Instant Navigation & In-Archive Viewing:** Fast in-memory tree browsing with accurate dates, sizes, permissions, and directory hierarchies. Press <kbd>Enter</kbd>, <kbd>F3</kbd>, or <kbd>F4</kbd> to inspect or edit files directly from within the archive.
-* **Password & Encryption Support:** Seamless password prompting dialog (`Adw.AlertDialog`) with session caching and peek toggle for password-protected `.zip` and `.7z` archives.
-* **Archive Pack Dialog (<kbd>Shift</kbd> + <kbd>F2</kbd>):** Pack selected files into `.zip`, `.tar.gz`, `.7z`, `.tar.xz`, `.tar.zst`, `.tar.bz2`, or `.tar` with configurable compression levels (Store, Fast, Normal, Maximum, Ultra), optional password encryption, and "Delete files after archiving" (move to archive).
+### 📦 Complete Archive Virtual File System & Operations
+* **Virtual Archive Browsing (`archive:///`):** Press <kbd>Enter</kbd> or double-click any archive or container file (`.zip`, `.tar.*`, `.7z`, `.rar`, `.deb`, `.rpm`, `.iso`, etc.) to enter and navigate it as a virtual directory with instant in-memory tree browsing.
+* **In-vcmd Nested Archive Browsing:** Pressing <kbd>Enter</kbd> on an archive nested inside another archive opens it directly as an archive tab within `vcmd` without spawning external applications. Pressing <kbd>..</kbd> or <kbd>Backspace</kbd> seamlessly returns to the outer archive with the nested archive selected.
+* **Direct Copying into Open Archives (<kbd>F5</kbd>):** When the opposite panel has an archive open (`.zip`, `.7z`, or uncompressed `.tar`), pressing <kbd>F5</kbd> copies/adds selected files or folders directly into that archive location with automatic zero-copy symlink staging.
+* **Direct Deletion from Archives (<kbd>F8</kbd> / <kbd>Delete</kbd>):** Permanently remove files and folders directly from inside open `.zip`, `.7z`, and `.tar` archives with exact path scoping.
+* **Secure Ephemeral Storage (`/tmp/vcmd-$UID/`):** All preview extractions and staging operations are kept in private temporary directories with strict `0700` (`rwx------`) permissions. Decrypted files from password-protected archives never touch permanent disk storage and are wiped on application startup and shutdown.
+* **In-Archive Viewing & Editing (<kbd>F3</kbd> / <kbd>F4</kbd>):** Press <kbd>F3</kbd> to inspect or <kbd>F4</kbd> to edit files directly inside archives, with automatic update prompt upon saving.
+* **Password & Encryption Support:** Seamless password dialog with session caching and peek toggle for password-protected `.zip` and `.7z` archives.
+* **Archive Pack Dialog (<kbd>Shift</kbd> + <kbd>F2</kbd>):** Pack selected files into `.zip`, `.tar.gz`, `.7z`, `.tar.xz`, `.tar.zst`, `.tar.bz2`, or `.tar` with configurable compression levels, optional password encryption, and "Delete files after archiving".
 
 ### 🌐 Remote Connections (<kbd>F2</kbd>)
-* Connect to SSH, SFTP, FTP, or SMB through GVfs. SSH and SFTP first try the SSH agent from the built-in terminal (`SSH_AUTH_SOCK`) via `sshfs`. If that key is not available, the system asks for a password.
-* The address can be saved as a bookmark without the password. Opening that bookmark mounts the location again.
-* Copy, move, delete, and navigation use the same file operations as local folders.
+* Connect to SSH, SFTP, FTP, or SMB through GVfs. SSH and SFTP first try the SSH agent from the built-in terminal (`SSH_AUTH_SOCK`) via `sshfs`. If that key is not available, the system prompts for credentials.
+* Save remote connections as bookmarks without storing passwords.
+* Copy, move, delete, and navigation use the same asynchronous file operations as local folders.
 
 ### 🔖 Directory Bookmarks / Hotlist (<kbd>Ctrl</kbd> + <kbd>\</kbd>)
 * Fast access to frequently visited directories and virtual GVfs URIs.
@@ -77,18 +83,16 @@ We are all familiar with classic file managers like Midnight Commander (`mc`), N
 
 ### 🔎 File Search (<kbd>Alt</kbd> + <kbd>F7</kbd>)
 * Search the active tab's directory, or any chosen start folder, without blocking the interface.
-* Match file and folder names by mask (`*` and `?`). A word without wildcards matches anywhere in the name.
-* Optionally search text inside files. Directories are matched by name only.
-* Case sensitivity and hidden files can be toggled. The name, content, and those toggles are restored the next time the dialog opens. The start path always comes from the active tab.
-* Matches open in a new **Search** tab in Super Detailed view, with the relative path in the name column and the cursor on the first match.
-* <kbd>Backspace</kbd>, <kbd>Alt</kbd> + <kbd>↑</kbd>, or `..` leaves the results and opens the folder that was searched. Viewing or editing a match keeps the results tab.
+* Match file and folder names by wildcard mask (`*` and `?`).
+* Optionally search text inside files with case sensitivity and hidden file toggles.
+* Matches open in a new **Search** tab in Super Detailed view. Pressing <kbd>Backspace</kbd>, <kbd>Alt</kbd> + <kbd>↑</kbd>, or `..` returns to the searched folder.
 
 ### 🚀 "Open With..." Dialog (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>)
 * Search and launch any registered desktop application for the selected file with instant filtering.
 
 ### ⚙️ Preferences Window (<kbd>Ctrl</kbd> + <kbd>,</kbd>)
 * Built with native **Libadwaita Preferences** (`Adw.PreferencesWindow`).
-* **Appearance & Typography:** Choose font family, size, weight, and style for file lists and the built-in terminal. Bold and italic faces from the font dialog are applied live.
+* **Appearance & Typography:** Choose font family, size, weight, and style for file lists and the built-in terminal with live preview.
 * **Layout & Visibility:** Toggle path toolbar, function key bar, and customize brief view column width.
 * **Dialog Sizes:** Customize default width and height for dialogs (Bookmarks, Shortcuts, Open With).
 * **Shell & Console:** Configure preferred shell interpreter (`/bin/bash`, `/bin/zsh`, `/usr/bin/fish`) and terminal scrollback history limit.
@@ -194,8 +198,8 @@ Open=%cd %p/mycontainer://
 | Shortcut | Action |
 | :--- | :--- |
 | <kbd>Tab</kbd> | Switch active pane (Left ⇄ Right) |
-| <kbd>Enter</kbd> | Open directory / launch file with default app |
-| <kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>↑</kbd> | Navigate up to parent directory; leave search results |
+| <kbd>Enter</kbd> | Open directory / enter archive (including nested archives) / launch file |
+| <kbd>Backspace</kbd> / <kbd>Alt</kbd> + <kbd>↑</kbd> | Navigate up to parent directory or parent archive; leave search results |
 | <kbd>Left Arrow</kbd> | Jump to start / top item (<kbd>Home</kbd>) |
 | <kbd>Right Arrow</kbd> | Jump to end / last item (<kbd>End</kbd>) |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Calculate directory or file size |
@@ -213,7 +217,7 @@ Open=%cd %p/mycontainer://
 | <kbd>Ctrl</kbd> + <kbd>Page Up</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> | Switch to previous tab in active panel |
 | <kbd>Ctrl</kbd> + <kbd>Page Down</kbd> / <kbd>Ctrl</kbd> + <kbd>Tab</kbd> | Switch to next tab in active panel |
 | <kbd>Alt</kbd> + <kbd>T</kbd> | Cycle view mode (Brief ⇄ Detailed ⇄ Super Detailed) |
-| <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> | Increase / decrease brief view column width |
+| <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>-</kbd> | Increase / decrease brief view column width or thumbnail size |
 | <kbd>Ctrl</kbd> + <kbd>H</kbd> | Toggle hidden files visibility |
 | <kbd>Ctrl</kbd> + <kbd>L</kbd> | Focus path entry bar |
 | <kbd>Ctrl</kbd> + <kbd>,</kbd> | Open Preferences window |
@@ -223,12 +227,13 @@ Open=%cd %p/mycontainer://
 | <kbd>F2</kbd> | Connect to a remote server (SSH, SFTP, FTP, SMB) |
 | <kbd>Shift</kbd> + <kbd>F2</kbd> | Pack selected files to archive (`ArchivePackDialog`) |
 | <kbd>F3</kbd> | View selected file in external viewer |
-| <kbd>F4</kbd> | Edit selected file in external editor |
-| <kbd>F5</kbd> | Copy selected / tagged items |
+| <kbd>F4</kbd> | Edit selected file in external editor (in-place archive editing supported) |
+| <kbd>F5</kbd> | Copy selected / tagged items (adds to archive if opposite pane is an archive, extracts if inside archive) |
 | <kbd>F6</kbd> | Move / rename selected / tagged items |
 | <kbd>F7</kbd> | Create new directory |
 | <kbd>Alt</kbd> + <kbd>F7</kbd> | Search files by name and content |
-| <kbd>F8</kbd> | Delete selected / tagged items |
+| <kbd>F8</kbd> / <kbd>Delete</kbd> | Delete selected / tagged items (deletes permanently from inside archives) |
+| <kbd>Shift</kbd> + <kbd>F8</kbd> / <kbd>Shift</kbd> + <kbd>Delete</kbd> | Delete permanently (bypass Trash) |
 | <kbd>F10</kbd> / <kbd>Ctrl</kbd> + <kbd>Q</kbd> | Quit application |
 | *Type characters* | Start typing shell command in bottom CLI |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Command line history |

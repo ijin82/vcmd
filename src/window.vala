@@ -3159,7 +3159,7 @@ row:selected .file-item-tagged {
         private void on_delete(bool permanent_default = false) {
             if (active_panel == null) return;
             if (active_panel.is_archive_location) {
-                show_error_dialog("Delete Error", "Deleting files from archives is not supported.");
+                prompt_delete_from_archive(active_panel);
                 return;
             }
 
@@ -3190,6 +3190,9 @@ row:selected .file-item-tagged {
                     return;
                 }
 
+                bool is_remote = target_panel.is_remote_location ||
+                    (tagged_items.length > 0 && RemoteMount.is_remote_file(tagged_items.get(0).file));
+
                 var dialog = new Adw.AlertDialog(
                     "Delete Items",
                     @"Delete $(tagged_items.length) selected items?"
@@ -3204,8 +3207,17 @@ row:selected .file-item-tagged {
                 box.halign = Gtk.Align.CENTER;
                 box.margin_top = 8;
                 box.margin_bottom = 4;
-                var perm_check = new Gtk.CheckButton.with_label("Delete permanently (bypass Trash)");
-                perm_check.active = permanent_default;
+                string perm_label = is_remote
+                    ? "Delete permanently (remote storage does not support Trash)"
+                    : "Delete permanently (bypass Trash)";
+                var perm_check = new Gtk.CheckButton.with_label(perm_label);
+                if (is_remote) {
+                    perm_check.active = true;
+                    perm_check.sensitive = false;
+                    perm_check.tooltip_text = "Remote filesystems do not support Trash";
+                } else {
+                    perm_check.active = permanent_default;
+                }
                 box.append(perm_check);
                 dialog.set_extra_child(box);
 
@@ -3250,6 +3262,8 @@ row:selected .file-item-tagged {
                 return;
             }
 
+            bool is_remote = target_panel.is_remote_location || RemoteMount.is_remote_file(item.file);
+
             string desc = item.is_dir ?
                 @"Delete folder '$item_name' and all its contents?" :
                 @"Delete file '$item_name'?";
@@ -3265,8 +3279,17 @@ row:selected .file-item-tagged {
             box.halign = Gtk.Align.CENTER;
             box.margin_top = 8;
             box.margin_bottom = 4;
-            var perm_check = new Gtk.CheckButton.with_label("Delete permanently (bypass Trash)");
-            perm_check.active = permanent_default;
+            string perm_label = is_remote
+                ? "Delete permanently (remote storage does not support Trash)"
+                : "Delete permanently (bypass Trash)";
+            var perm_check = new Gtk.CheckButton.with_label(perm_label);
+            if (is_remote) {
+                perm_check.active = true;
+                perm_check.sensitive = false;
+                perm_check.tooltip_text = "Remote filesystems do not support Trash";
+            } else {
+                perm_check.active = permanent_default;
+            }
             box.append(perm_check);
             dialog.set_extra_child(box);
 
@@ -3359,6 +3382,139 @@ row:selected .file-item-tagged {
                 activate_panel(panel, true);
                 var opp = (panel == left_panel) ? right_panel : left_panel;
                 if (opp.current_directory != null && panel.current_directory != null && opp.current_directory.equal(panel.current_directory)) {
+                    opp.refresh();
+                }
+                panel.grab_focus_to_list();
+            }
+        }
+
+        private void prompt_delete_from_archive(FilePanel panel) {
+            string? select_above_name = panel.get_item_above_selection_or_first_tag();
+
+            var tagged_items = panel.get_tagged_items();
+            var items_to_delete = new GenericArray<FileItem>();
+
+            if (tagged_items.length > 0) {
+                for (uint i = 0; i < tagged_items.length; i++) {
+                    items_to_delete.add(tagged_items.get(i));
+                }
+            } else {
+                var item = panel.get_selected_item();
+                if (item == null || item.is_parent_dir) {
+                    show_error_dialog("Delete Error", "Cannot delete parent directory '..'.");
+                    return;
+                }
+                items_to_delete.add(item);
+            }
+
+            if (items_to_delete.length == 0) return;
+
+            string? arc_path = null;
+            string? in_path = null;
+            if (panel.current_directory != null) {
+                ArchiveTreeService.split_archive_uri(panel.current_directory.get_uri(), out arc_path, out in_path);
+            }
+            if (arc_path == null) {
+                ArchiveTreeService.split_archive_uri(items_to_delete.get(0).file.get_uri(), out arc_path, out in_path);
+            }
+
+            if (arc_path == null || !File.new_for_path(arc_path).query_exists()) {
+                show_error_dialog("Archive Error", "Cannot locate target archive on disk.");
+                return;
+            }
+
+            string lower = arc_path.down();
+            bool is_supported = lower.has_suffix(".zip") || lower.has_suffix(".7z") ||
+                (lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") && !lower.has_suffix(".tar.xz") &&
+                 !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2"));
+
+            if (!is_supported) {
+                string base_name = Path.get_basename(arc_path);
+                show_error_dialog(
+                    "Archive Error",
+                    @"Deleting items from '$base_name' is not supported.\n\nOnly .zip, .7z, and uncompressed .tar archives support direct item deletion."
+                );
+                return;
+            }
+
+            string arc_name = Path.get_basename(arc_path);
+            string prompt_msg;
+            if (items_to_delete.length == 1) {
+                var single_item = items_to_delete.get(0);
+                prompt_msg = single_item.is_dir
+                    ? @"Permanently delete folder '$(single_item.display_name)' and all its contents from '$arc_name'? This action cannot be undone."
+                    : @"Permanently delete '$(single_item.display_name)' from '$arc_name'? This action cannot be undone.";
+            } else {
+                prompt_msg = @"Permanently delete $(items_to_delete.length) items from '$arc_name'? This action cannot be undone.";
+            }
+
+            var dialog = new Adw.AlertDialog("Delete from Archive", prompt_msg);
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("delete", "Delete Permanently");
+            dialog.set_default_response("cancel");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "delete") {
+                    do_delete_archive_items.begin(panel, arc_path, items_to_delete, select_above_name);
+                } else {
+                    panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private async void do_delete_archive_items(FilePanel panel, string arc_path, GenericArray<FileItem> items, string? select_above_name) {
+            var cancellable = new Cancellable();
+            string arc_name = Path.get_basename(arc_path);
+            string op_title = (items.length > 1)
+                ? @"Deleting $(items.length) items from $arc_name"
+                : @"Deleting '$(items.get(0).display_name)' from $arc_name";
+
+            var dlg = new OperationProgressDialog(op_title, cancellable);
+            File arc_file = File.new_for_path(arc_path);
+            var disks = DriveQueueManager.get_required_disks(arc_file, null);
+            register_operation(dlg, disks);
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+                while (true) {
+                    try {
+                        yield ArchiveOperationService.delete_archive_items(arc_path, items, dlg, cancellable);
+                        break;
+                    } catch (ArchivePasswordError e) {
+                        bool is_retry = (e is ArchivePasswordError.INVALID);
+                        string? pwd = yield ArchivePasswordDialog.prompt_async(this, arc_name, is_retry);
+                        if (pwd == null) {
+                            cancellable.cancel();
+                            break;
+                        }
+                        ArchiveTreeService.set_cached_password(arc_path, pwd);
+                    }
+                }
+                if (!cancellable.is_cancelled()) {
+                    show_command_toast(@"Deleted $(items.length) item(s) from $arc_name");
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_command_toast("Archive deletion cancelled");
+                } else {
+                    show_error_dialog("Archive Error", @"Failed to delete items from archive:\n$(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                ArchiveTreeService.clear_cache(arc_path);
+                panel.clear_tags();
+                if (panel.current_directory != null) {
+                    panel.load_directory(panel.current_directory, select_above_name);
+                } else {
+                    panel.refresh();
+                }
+                var opp = (panel == left_panel) ? right_panel : left_panel;
+                if (opp.is_archive_location && opp.current_directory != null &&
+                    opp.current_directory.get_uri().has_prefix("archive://" + Uri.escape_string(arc_path))) {
                     opp.refresh();
                 }
                 panel.grab_focus_to_list();
@@ -3923,7 +4079,18 @@ row:selected .file-item-tagged {
             File? dest_dir = opp.current_directory;
 
             if (dest_dir != null && dest_dir.get_uri_scheme() == "archive") {
-                show_error_dialog("Copy Error", "Copying files directly into an archive is not supported.");
+                if (tagged_items.length > 0) {
+                    prompt_copy_into_archive(tagged_items, dest_dir, opp);
+                    return;
+                }
+                var item = active_panel.get_selected_item();
+                if (item == null || item.is_parent_dir) {
+                    show_error_dialog("Copy", "Please select a file or folder to copy.");
+                    return;
+                }
+                var single_list = new GenericArray<FileItem>();
+                single_list.add(item);
+                prompt_copy_into_archive(single_list, dest_dir, opp);
                 return;
             }
 
@@ -3966,12 +4133,6 @@ row:selected .file-item-tagged {
             var item = active_panel.get_selected_item();
             if (item == null || item.is_parent_dir) {
                 show_error_dialog("Copy", "Please select a file or folder to copy.");
-                return;
-            }
-
-            if (!item.is_dir && ArchiverRegistry.get_instance().is_archive_filename(item.name) &&
-                dest_dir != null && dest_dir.get_uri_scheme() != "archive" && dest_dir.get_uri_scheme() != "trash") {
-                prompt_archive_outside_actions(item, dest_dir, opp);
                 return;
             }
 
@@ -4033,6 +4194,110 @@ row:selected .file-item-tagged {
                 entry.set_position(-1);
                 return GLib.Source.REMOVE;
             });
+        }
+
+        private void prompt_copy_into_archive(GenericArray<FileItem> items, File dest_dir, FilePanel opp_panel) {
+            string? arc_path = null;
+            string? inner_dir = null;
+            if (!ArchiveTreeService.split_archive_uri(dest_dir.get_uri(), out arc_path, out inner_dir) || arc_path == null) {
+                show_error_dialog("Archive Error", "Cannot determine destination archive location.");
+                return;
+            }
+
+            if (!File.new_for_path(arc_path).query_exists()) {
+                show_error_dialog("Archive Error", "Destination archive must exist on local filesystem.");
+                return;
+            }
+
+            string lower = arc_path.down();
+            bool is_supported = lower.has_suffix(".zip") || lower.has_suffix(".7z") ||
+                (lower.has_suffix(".tar") && !lower.has_suffix(".tar.gz") && !lower.has_suffix(".tar.xz") &&
+                 !lower.has_suffix(".tar.zst") && !lower.has_suffix(".tar.bz2"));
+
+            if (!is_supported) {
+                string base_name = Path.get_basename(arc_path);
+                show_error_dialog(
+                    "Archive Error",
+                    @"Adding files directly into '$base_name' is not supported.\n\nOnly .zip, .7z, and uncompressed .tar archives support direct addition."
+                );
+                return;
+            }
+
+            string clean_inner = (inner_dir != null) ? inner_dir.strip() : "";
+            while (clean_inner.has_prefix("/")) clean_inner = clean_inner.substring(1);
+            while (clean_inner.has_suffix("/")) clean_inner = clean_inner.substring(0, clean_inner.length - 1);
+
+            string arc_name = Path.get_basename(arc_path);
+            string target_desc = (clean_inner.length > 0) ? @"'$arc_name/$clean_inner/'" : @"'$arc_name'";
+
+            string prompt_msg = (items.length > 1)
+                ? @"Add $(items.length) items into $target_desc?"
+                : @"Add '$(items.get(0).display_name)' into $target_desc?";
+
+            var dialog = new Adw.AlertDialog("Add to Archive", prompt_msg);
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("add", "Add to Archive");
+            dialog.set_default_response("add");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED);
+
+            dialog.choose.begin(this, null, (obj, res) => {
+                string resp = dialog.choose.end(res);
+                if (resp == "add") {
+                    do_add_items_to_archive.begin(arc_path, clean_inner, items, opp_panel);
+                } else {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
+                }
+            });
+        }
+
+        private async void do_add_items_to_archive(string arc_path, string inner_dir, GenericArray<FileItem> items, FilePanel opp_panel) {
+            var cancellable = new Cancellable();
+            string arc_name = Path.get_basename(arc_path);
+            string op_title = (items.length > 1)
+                ? @"Adding $(items.length) items to $arc_name"
+                : @"Adding '$(items.get(0).display_name)' to $arc_name";
+
+            var dlg = new OperationProgressDialog(op_title, cancellable);
+            File arc_file = File.new_for_path(arc_path);
+            File src_file = items.length > 0 ? items.get(0).file : arc_file;
+            var disks = DriveQueueManager.get_required_disks(src_file, arc_file);
+            register_operation(dlg, disks);
+
+            try {
+                yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
+                while (true) {
+                    try {
+                        yield ArchiveOperationService.add_items_to_archive(arc_path, inner_dir, items, dlg, cancellable);
+                        break;
+                    } catch (ArchivePasswordError e) {
+                        bool is_retry = (e is ArchivePasswordError.INVALID);
+                        string? pwd = yield ArchivePasswordDialog.prompt_async(this, arc_name, is_retry);
+                        if (pwd == null) {
+                            cancellable.cancel();
+                            break;
+                        }
+                        ArchiveTreeService.set_cached_password(arc_path, pwd);
+                    }
+                }
+                if (!cancellable.is_cancelled()) {
+                    string target_desc = (inner_dir.length > 0) ? @"$arc_name/$inner_dir/" : arc_name;
+                    show_command_toast(@"Added $(items.length) item(s) to $target_desc");
+                    if (active_panel != null) active_panel.clear_tags();
+                }
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    show_command_toast("Adding to archive cancelled");
+                } else {
+                    show_error_dialog("Archive Error", @"Failed to add items to archive:\n$(e.message)");
+                }
+            } finally {
+                DriveQueueManager.get_instance().release_disks(disks, dlg);
+                dlg.finish();
+                ArchiveTreeService.clear_cache(arc_path);
+                opp_panel.refresh();
+                if (active_panel != null) active_panel.grab_focus_to_list();
+            }
         }
 
         public static string strip_archive_extension(string filename) {
