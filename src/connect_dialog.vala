@@ -104,15 +104,15 @@ namespace VCommander {
             bottom.append(spacer);
             connect_button = new Gtk.Button.with_label("Connect");
             connect_button.add_css_class("suggested-action");
-            connect_button.clicked.connect(() => connect.begin());
+            connect_button.clicked.connect(() => do_connect.begin());
             bottom.append(connect_button);
             toolbar.add_bottom_bar(bottom);
             dialog.set_child(toolbar);
 
-            host_entry.activate.connect(() => connect.begin());
-            user_entry.activate.connect(() => connect.begin());
-            directory_entry.activate.connect(() => connect.begin());
-            name_entry.activate.connect(() => connect.begin());
+            host_entry.activate.connect(() => do_connect.begin());
+            user_entry.activate.connect(() => do_connect.begin());
+            directory_entry.activate.connect(() => do_connect.begin());
+            name_entry.activate.connect(() => do_connect.begin());
 
             dialog.closed.connect(() => {
                 closed = true;
@@ -149,7 +149,7 @@ namespace VCommander {
             }
         }
 
-        private async void connect() {
+        private async void do_connect() {
             if (connecting || closed) {
                 return;
             }

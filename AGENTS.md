@@ -37,5 +37,9 @@
 
 ## Workflow & Testing
 - **Local Build & Test:** Run `make` to compile and `make run` to test changes.
+- **Automated Tests:** Run `make test` before installing. The suite lives in `tests/`, compiles the application sources except `src/main.vala`, and runs each test in an isolated process through `tests/run_tests.sh`. Run a single test with `./tests/run_tests.sh <test.name>` and list tests with `make test-list`.
+- **Test Isolation:** Automated tests must never touch the real home directory, real bookmarks, real Trash, or the network. Use `TestFs.create_temp_root()` and the wrapper's isolated `XDG_*`/`TMPDIR` environment. Tests that need an external tool must report `SKIP` when it is unavailable.
+- **Test Scope:** Do not add tests that require a GTK display, polkit, a physical device, or network access to the display-free suite. Keep those checks in `tests/MANUAL_UI.md`.
+- **Test Language:** Test names, descriptions, comments, and documentation use English.
 - **Local Installation:** Always run `./install.sh lite` (or `make install-lite`) upon completing changes / after each build so the user can immediately test the live application without redundant rebuilds.
 - **Git Restrictions:** Do not run `git commit` or `git push` autonomously; all git commits and repository pushes are managed directly by the user.

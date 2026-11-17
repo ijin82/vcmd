@@ -2,6 +2,67 @@ namespace VCommander {
 
     public class ArchiveOperationService : Object {
 
+        /**
+         * Runs a non-interactive archive tool while draining stderr.
+         * Returns the exit code and leaves the diagnostic text in stderr_text.
+         */
+        private static async int run_tool_capture(
+            string[] argv,
+            string? cwd,
+            Cancellable? cancellable,
+            out string stderr_text
+        ) throws Error {
+            stderr_text = "";
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_SILENCE | SubprocessFlags.STDERR_PIPE);
+            if (cwd != null && cwd.length > 0) {
+                launcher.set_cwd(cwd);
+            }
+
+            Subprocess proc;
+            try {
+                proc = launcher.spawnv(argv);
+            } catch (Error e) {
+                throw new IOError.FAILED(@"Failed to start '$(argv[0])': $(e.message)");
+            }
+
+            ulong cancel_handler_id = 0;
+            if (cancellable != null) {
+                cancel_handler_id = cancellable.connect(() => {
+                    proc.force_exit();
+                });
+            }
+
+            Error? proc_error = null;
+            string? captured = null;
+            try {
+                yield proc.communicate_utf8_async(null, cancellable, null, out captured);
+            } catch (Error e) {
+                proc_error = e;
+            } finally {
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                }
+            }
+
+            if (proc_error != null) {
+                proc.force_exit();
+                if (proc_error.matches(IOError.quark(), IOError.CANCELLED)) {
+                    throw proc_error;
+                }
+                throw new IOError.FAILED(@"Archive tool '$(argv[0])' failed: $(proc_error.message)");
+            }
+
+            stderr_text = (captured != null) ? captured : "";
+            if (!proc.get_if_exited()) {
+                return -1;
+            }
+            return proc.get_exit_status();
+        }
+
+        private static string safe_tool_path(string path) {
+            return path.has_prefix("-") ? "./" + path : path;
+        }
+
         public static async void pack_archive(
             ArchivePackRequest request,
             OperationProgressDialog dlg,
@@ -23,8 +84,23 @@ namespace VCommander {
                 throw new IOError.NOT_SUPPORTED("Source directory must be a local filesystem path.");
             }
 
+            for (uint i = 0; i < request.source_items.length; i++) {
+                var item = request.source_items.get(i);
+                var item_parent = item.file.get_parent();
+                if (item_parent == null || parent_dir == null || !item_parent.equal(parent_dir)) {
+                    throw new IOError.INVALID_ARGUMENT(
+                        "All selected items must be located in the same folder to create an archive."
+                    );
+                }
+                if (PathUtils.is_same_or_descendant(item.file, dest_file)) {
+                    throw new IOError.INVALID_ARGUMENT(
+                        @"Cannot create '$(dest_file.get_basename())' inside the item being archived."
+                    );
+                }
+            }
+
             // Remove existing destination file if overwriting
-            bool dest_exists = yield FileOperationService.file_exists_async(dest_file, cancellable);
+            bool dest_exists = yield FileOperationService.file_exists_checked_async(dest_file, cancellable);
             if (dest_exists) {
                 try {
                     yield dest_file.delete_async(Priority.DEFAULT, cancellable);
@@ -207,7 +283,7 @@ namespace VCommander {
 
             // Append item filenames relative to working directory
             for (uint i = 0; i < request.source_items.length; i++) {
-                args.add(request.source_items.get(i).name);
+                args.add(safe_tool_path(request.source_items.get(i).name));
             }
 
             return args;
@@ -307,6 +383,9 @@ namespace VCommander {
             File temp_file,
             Cancellable? cancellable = null
         ) throws Error {
+            if (inner_path.has_prefix("-")) {
+                throw new IOError.INVALID_ARGUMENT(@"Unsafe archive member name: $inner_path");
+            }
             var registry = ArchiverRegistry.get_instance();
             string lower = archive_path.down();
 
@@ -339,10 +418,11 @@ namespace VCommander {
                     string[] argv = new string[args.length];
                     for (int i = 0; i < args.length; i++) argv[i] = args[i];
 
-                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
-                    launcher.set_cwd(cache_dir);
-                    var proc = launcher.spawnv(argv);
-                    yield proc.wait_check_async(cancellable);
+                    string tool_err = "";
+                    int tool_code = yield run_tool_capture(argv, cache_dir, cancellable, out tool_err);
+                    if (tool_code != 0) {
+                        throw new IOError.FAILED(@"Failed to update archive: $(tool_err.strip()) (exit code $tool_code)");
+                    }
                     return;
                 } else if (registry.has_tool("7z") || registry.has_tool("7zz")) {
                     string tool = registry.has_tool("7z") ? "7z" : "7zz";
@@ -357,10 +437,11 @@ namespace VCommander {
                     string[] argv = new string[args.length];
                     for (int i = 0; i < args.length; i++) argv[i] = args[i];
 
-                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
-                    launcher.set_cwd(cache_dir);
-                    var proc = launcher.spawnv(argv);
-                    yield proc.wait_check_async(cancellable);
+                    string tool_err = "";
+                    int tool_code = yield run_tool_capture(argv, cache_dir, cancellable, out tool_err);
+                    if (tool_code != 0) {
+                        throw new IOError.FAILED(@"Failed to update archive: $(tool_err.strip()) (exit code $tool_code)");
+                    }
                     return;
                 }
             }
@@ -380,10 +461,11 @@ namespace VCommander {
                     string[] argv = new string[args.length];
                     for (int i = 0; i < args.length; i++) argv[i] = args[i];
 
-                    var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
-                    launcher.set_cwd(cache_dir);
-                    var proc = launcher.spawnv(argv);
-                    yield proc.wait_check_async(cancellable);
+                    string tool_err = "";
+                    int tool_code = yield run_tool_capture(argv, cache_dir, cancellable, out tool_err);
+                    if (tool_code != 0) {
+                        throw new IOError.FAILED(@"Failed to update archive: $(tool_err.strip()) (exit code $tool_code)");
+                    }
                     return;
                 }
             }
@@ -452,7 +534,7 @@ namespace VCommander {
                     var item = items.get(i);
                     string dest_item_path = Path.build_filename(stage_target, item.name);
                     string rel_item = (clean_inner.length > 0) ? clean_inner + "/" + item.name : item.name;
-                    rel_items.add(rel_item);
+                    rel_items.add(safe_tool_path(rel_item));
 
                     string? local_path = item.file.get_path();
                     if (local_path != null) {
@@ -624,6 +706,11 @@ namespace VCommander {
             if (rel_paths.length == 0) {
                 return;
             }
+            for (uint i = 0; i < rel_paths.length; i++) {
+                if (rel_paths.get(i).has_prefix("-")) {
+                    throw new IOError.INVALID_ARGUMENT(@"Unsafe archive member name: $(rel_paths.get(i))");
+                }
+            }
 
             dlg.update_progress(@"Deleting $(rel_paths.length) item(s)...", 0, rel_paths.length);
 
@@ -757,7 +844,8 @@ namespace VCommander {
             GenericArray<FileItem> items,
             File dest_dir,
             OperationProgressDialog dlg,
-            Cancellable cancellable
+            Cancellable cancellable,
+            ConflictResolver? resolver = null
         ) throws Error {
             try {
                 yield FileOperationService.make_directory_with_parents_async(dest_dir, cancellable);
@@ -783,7 +871,15 @@ namespace VCommander {
                 if (in_p == null || in_p.length == 0) continue;
 
                 if (!item.is_dir) {
+                    if (!PathUtils.is_valid_child_name(item.name)) {
+                        AppLogger.warn("Archive", @"Skipping unsafe extraction name: '$(item.name)'");
+                        continue;
+                    }
                     File target_file = dest_dir.get_child(item.name);
+                    if (!PathUtils.is_same_or_descendant(dest_dir, target_file)) {
+                        AppLogger.warn("Archive", @"Skipping extraction outside destination: '$(item.name)'");
+                        continue;
+                    }
                     targets.add(new VfsExtractionTarget(in_p, target_file, item.size));
                     total_size += item.size;
                 } else {
@@ -805,6 +901,36 @@ namespace VCommander {
 
                 var target = targets.get(i);
                 dlg.update_progress(target.dest_file.get_basename(), bytes_extracted, total_size);
+
+                if (resolver != null) {
+                    bool target_exists = yield FileOperationService.file_exists_checked_async(target.dest_file, cancellable);
+                    if (target_exists) {
+                        // A non-existent synthetic path is used so the conflict
+                        // dialog can show the member name without querying a
+                        // same-named real file from the process cwd.
+                        var conflict_source = File.new_for_path(
+                            Path.build_filename(archive_path, target.inner_path)
+                        );
+                        var decision = yield resolver.resolve_conflict(conflict_source, target.dest_file);
+                        if (decision == ConflictResolution.CANCEL) {
+                            throw new IOError.CANCELLED("Extraction cancelled");
+                        }
+                        if (decision == ConflictResolution.SKIP) {
+                            bytes_extracted += target.size;
+                            continue;
+                        }
+                        var target_info = yield target.dest_file.query_info_async(
+                            FileAttribute.STANDARD_TYPE,
+                            FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                            Priority.DEFAULT,
+                            cancellable
+                        );
+                        if (target_info.get_file_type() == FileType.DIRECTORY) {
+                            yield FileOperationService.delete_recursive(target.dest_file, cancellable);
+                        }
+                    }
+                }
+
                 yield ArchiveTreeService.extract_single_file_to(archive_path, target.inner_path, target.dest_file, cancellable);
                 bytes_extracted += target.size;
                 dlg.update_progress(target.dest_file.get_basename(), bytes_extracted, total_size);
@@ -832,6 +958,10 @@ namespace VCommander {
                     while (rel.has_prefix("/")) rel = rel.substring(1);
 
                     File dest_file = (rel.length > 0) ? base_dest_dir.resolve_relative_path(rel) : base_dest_dir.get_child(child.name);
+                    if (!PathUtils.is_same_or_descendant(base_dest_dir, dest_file)) {
+                        AppLogger.warn("Archive", @"Skipping archive leaf outside destination: '$(child.full_path)'");
+                        continue;
+                    }
                     int64 sz = (child.entry != null) ? child.entry.size : 0;
                     targets.add(new VfsExtractionTarget(child.full_path, dest_file, sz));
                     total_size += sz;
@@ -843,7 +973,8 @@ namespace VCommander {
             File archive_file,
             File dest_dir,
             OperationProgressDialog dlg,
-            Cancellable cancellable
+            Cancellable cancellable,
+            ConflictResolver? resolver = null
         ) throws Error {
             try {
                 yield FileOperationService.make_directory_with_parents_async(dest_dir, cancellable);
@@ -913,51 +1044,20 @@ namespace VCommander {
                     );
                     vfs_items.add(fi);
                 }
-                yield extract_vfs_items(archive_path, vfs_items, dest_dir, dlg, cancellable);
+                yield extract_vfs_items(archive_path, vfs_items, dest_dir, dlg, cancellable, resolver);
                 return;
             }
 
             if (is_bulk_cli) {
-                var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
-                Subprocess proc = launcher.spawnv(cmd_argv);
-
-                ulong cancel_handler_id = 0;
-                if (cancellable != null) {
-                    cancel_handler_id = cancellable.connect(() => {
-                        proc.force_exit();
-                    });
-                }
-
-                var err_stream = new DataInputStream(proc.get_stderr_pipe());
-                var err_sb = new StringBuilder();
-
-                Error? proc_error = null;
-                try {
-                    yield proc.wait_check_async(cancellable);
-                } catch (Error e) {
-                    proc_error = e;
-                }
-
-                if (cancel_handler_id != 0 && cancellable != null) {
-                    cancellable.disconnect(cancel_handler_id);
-                }
+                string stderr_text = "";
+                int exit_code = yield run_tool_capture(cmd_argv, null, cancellable, out stderr_text);
 
                 if (cancellable.is_cancelled()) {
                     throw new IOError.CANCELLED("Archive extraction cancelled by user");
                 }
 
-                if (proc_error != null) {
-                    size_t len;
-                    string? err_line;
-                    try {
-                        while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
-                            err_sb.append(err_line);
-                            err_sb.append("\n");
-                        }
-                    } catch (Error ignored) {}
-
-                    int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
-                    string lower_err = err_sb.str.down();
+                if (exit_code != 0) {
+                    string lower_err = stderr_text.down();
                     bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
                                       lower_err.contains("encrypted") || lower_err.contains("break signaled") ||
                                       exit_code == 82 || (!has_pwd && (exit_code == 2 || exit_code == 255));
@@ -971,7 +1071,7 @@ namespace VCommander {
                         }
                     }
 
-                    string err_msg = err_sb.str.strip();
+                    string err_msg = stderr_text.strip();
                     if (err_msg.length > 0) {
                         throw new IOError.FAILED(@"Failed to extract $(archive_file.get_basename()):\n$err_msg");
                     } else {

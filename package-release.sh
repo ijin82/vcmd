@@ -25,6 +25,11 @@ if [ -z "${VERSION}" ]; then
     exit 1
 fi
 
+if [[ ! "${VERSION}" =~ ^v?[0-9]+(\.[0-9]+){1,3}([-.+][A-Za-z0-9.-]+)?$ ]]; then
+    echo "Error: Release version contains unsupported characters: ${VERSION}" >&2
+    exit 1
+fi
+
 ARCH="$(uname -m)"
 RELEASE_TAG="${APP_NAME}-${VERSION}-linux-${ARCH}"
 STAGE_DIR="${DIST_DIR}/${RELEASE_TAG}"

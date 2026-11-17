@@ -474,9 +474,7 @@ namespace VCommander {
                 if (action_executed) return;
                 action_executed = true;
                 string new_name = entry.text.strip();
-                if (new_name.char_count() > 15) {
-                    new_name = new_name.substring(0, 15);
-                }
+                new_name = PathUtils.truncate_chars(new_name, 15);
                 if (new_name.length > 0) {
                     page_widget.custom_title = new_name;
                 } else {
@@ -496,9 +494,7 @@ namespace VCommander {
                 if (response == "apply") {
                     action_executed = true;
                     string new_name = entry.text.strip();
-                    if (new_name.char_count() > 15) {
-                        new_name = new_name.substring(0, 15);
-                    }
+                    new_name = PathUtils.truncate_chars(new_name, 15);
                     if (new_name.length > 0) {
                         page_widget.custom_title = new_name;
                     } else {
@@ -611,9 +607,7 @@ namespace VCommander {
 
             if (page_widget.custom_title != null && page_widget.custom_title.length > 0) {
                 string title = page_widget.custom_title;
-                if (title.char_count() > 15) {
-                    title = title.substring(0, 15);
-                }
+                title = PathUtils.truncate_chars(title, 15);
                 page.title = title;
                 if (page_widget.current_directory != null) {
                     page.tooltip = page_widget.current_directory.get_parse_name();
@@ -628,9 +622,7 @@ namespace VCommander {
                 if (in_path != null && in_path.length > 0) {
                     title = Path.get_basename(in_path);
                 }
-                if (title.char_count() > 15) {
-                    title = title.substring(0, 15);
-                }
+                title = PathUtils.truncate_chars(title, 15);
                 page.title = title;
                 page.tooltip = (in_path != null && in_path.length > 0)
                     ? @"$(arc_name)/$(in_path)"
@@ -641,9 +633,7 @@ namespace VCommander {
                 if (name == null || name.length == 0) {
                     name = "/";
                 }
-                if (name.char_count() > 15) {
-                    name = name.substring(0, 15);
-                }
+                name = PathUtils.truncate_chars(name, 15);
                 page.title = name;
                 page.tooltip = page_widget.current_directory.get_parse_name();
                 page.icon = new ThemedIcon("folder-symbolic");
@@ -1020,12 +1010,15 @@ namespace VCommander {
                         var pin_img = new Gtk.Image.from_icon_name("view-pin-symbolic");
                         pin_box.append(pin_img);
 
+                        weak Gtk.Widget weak_pin_tab = tab_widget;
                         var pin_click = new Gtk.GestureClick();
                         pin_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
                         pin_click.pressed.connect((n, x, y) => {
                             pin_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            var current_tab = weak_pin_tab;
+                            if (current_tab == null) return;
                             GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
-                            tab_widget.get_property("page", ref cur_val);
+                            current_tab.get_property("page", ref cur_val);
                             var cur_p = (Adw.TabPage) cur_val.get_object();
                             if (cur_p != null && cur_p.child is FilePanelPage) {
                                 toggle_tab_pinned((FilePanelPage) cur_p.child);
@@ -1039,12 +1032,15 @@ namespace VCommander {
                         var mode_img = new Gtk.Image.from_icon_name("view-fullscreen-symbolic");
                         mode_box.append(mode_img);
 
+                        weak Gtk.Widget weak_mode_tab = tab_widget;
                         var mode_click = new Gtk.GestureClick();
                         mode_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
                         mode_click.pressed.connect((n, x, y) => {
                             mode_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            var current_tab = weak_mode_tab;
+                            if (current_tab == null) return;
                             GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
-                            tab_widget.get_property("page", ref cur_val);
+                            current_tab.get_property("page", ref cur_val);
                             var cur_p = (Adw.TabPage) cur_val.get_object();
                             if (cur_p != null) {
                                 tab_view.set_selected_page(cur_p);
@@ -1062,12 +1058,15 @@ namespace VCommander {
                         var up_img = new Gtk.Image.from_icon_name("pan-up-symbolic");
                         up_box.append(up_img);
 
+                        weak Gtk.Widget weak_up_tab = tab_widget;
                         var up_click = new Gtk.GestureClick();
                         up_click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
                         up_click.pressed.connect((n, x, y) => {
                             up_click.set_state(Gtk.EventSequenceState.CLAIMED);
+                            var current_tab = weak_up_tab;
+                            if (current_tab == null) return;
                             GLib.Value cur_val = GLib.Value(typeof(Adw.TabPage));
-                            tab_widget.get_property("page", ref cur_val);
+                            current_tab.get_property("page", ref cur_val);
                             var cur_p = (Adw.TabPage) cur_val.get_object();
                             if (cur_p != null && cur_p.child is FilePanelPage) {
                                 tab_view.set_selected_page(cur_p);

@@ -42,7 +42,7 @@ namespace VCommander {
             }
 
             // Fallback: internal Libadwaita dialog
-            WallpaperDialog.show(parent_window, file);
+            WallpaperDialog.open_dialog(parent_window, file);
         }
     }
 
@@ -52,7 +52,7 @@ namespace VCommander {
         private unowned Gtk.Window parent_win;
         private File image_file;
 
-        public static void show(Gtk.Window parent_window, File file) {
+        public static void open_dialog(Gtk.Window parent_window, File file) {
             if (active_dialog != null) {
                 active_dialog.present(parent_window);
                 return;

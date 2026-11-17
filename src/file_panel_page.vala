@@ -60,6 +60,7 @@ namespace VCommander {
         private Gtk.Label status_label;
         private Cancellable? load_cancellable = null;
         private Cancellable? dir_calc_cancellable = null;
+        private File? previous_directory = null;
         private FileItem? calculating_item = null;
         private uint shift_anchor_pos = Gtk.INVALID_LIST_POSITION;
         private bool is_shift_navigating = false;
@@ -3195,6 +3196,7 @@ namespace VCommander {
                 }
             }
 
+            previous_directory = current_directory;
             current_directory = dir;
             directory_changed(dir);
             update_columns_for_current_location();
@@ -3203,10 +3205,24 @@ namespace VCommander {
             load_directory_async.begin(dir, cursor_select_name, preserved_tags, load_cancellable);
         }
 
+        private void restore_directory_after_failure(Cancellable cancellable) {
+            if (load_cancellable != cancellable) {
+                return;
+            }
+            if (previous_directory != null) {
+                current_directory = previous_directory;
+                directory_changed(current_directory);
+            }
+            update_columns_for_current_location();
+            update_trash_banner_state();
+            update_status_bar();
+        }
+
         private async void load_archive_directory_async(File dir, string? target_select_name, GenericSet<string>? preserved_tags, Cancellable cancellable) {
             string? archive_path;
             string? inner_path;
             if (!ArchiveTreeService.split_archive_uri(dir.get_uri(), out archive_path, out inner_path)) {
+                restore_directory_after_failure(cancellable);
                 error_occurred("Archive Error", @"Invalid archive path: $(dir.get_uri())");
                 status_label.label = "Error opening archive";
                 return;
@@ -3230,6 +3246,7 @@ namespace VCommander {
                 } catch (IOError.CANCELLED e) {
                     return;
                 } catch (Error e) {
+                    restore_directory_after_failure(cancellable);
                     error_occurred("Archive Error", @"Cannot read archive $(Path.get_basename(archive_path)): $(e.message)");
                     status_label.label = @"Error: $(e.message)";
                     return;
@@ -3326,6 +3343,7 @@ namespace VCommander {
                 }
             }
             store.splice(0, old_count, array);
+            previous_directory = current_directory;
             ThumbnailService.malloc_trim(0);
 
             update_columns_for_current_location();
@@ -3463,6 +3481,7 @@ namespace VCommander {
             } catch (IOError.CANCELLED e) {
                 return;
             } catch (Error e) {
+                restore_directory_after_failure(cancellable);
                 error_occurred("Directory Error", @"Cannot read directory $(dir.get_parse_name()): $(e.message)");
                 status_label.label = @"Error: $(e.message)";
                 return;
@@ -3509,6 +3528,7 @@ namespace VCommander {
                 }
             }
             store.splice(0, old_count, array);
+            previous_directory = current_directory;
             ThumbnailService.malloc_trim(0);
 
             string free_space_str = "";

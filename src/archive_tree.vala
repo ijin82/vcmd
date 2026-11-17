@@ -82,19 +82,39 @@ namespace VCommander {
     public class ArchiveTree : Object {
         public string archive_path { get; construct set; }
         public int64 file_mtime { get; construct set; default = 0; }
+        public int64 file_size { get; construct set; default = 0; }
         public ArchiveTreeNode root { get; construct set; }
 
-        public ArchiveTree(string archive_path, int64 file_mtime) {
+        public ArchiveTree(string archive_path, int64 file_mtime, int64 file_size = 0) {
             var root_node = new ArchiveTreeNode("", "", true, null);
-            Object(archive_path: archive_path, file_mtime: file_mtime, root: root_node);
+            Object(archive_path: archive_path, file_mtime: file_mtime, file_size: file_size, root: root_node);
         }
 
         public void add_entry(ArchiveEntry entry) {
-            string path = entry.full_path.strip();
-            while (path.has_prefix("/")) path = path.substring(1);
-            while (path.has_suffix("/")) path = path.substring(0, path.length - 1);
-            if (path.length == 0) return;
+            string? safe_path = PathUtils.sanitize_archive_member(entry.full_path, false);
+            if (safe_path == null) {
+                AppLogger.warn("Archive", @"Skipping unsafe archive entry path: '$(entry.full_path)'");
+                return;
+            }
 
+            ArchiveEntry resolved_entry = entry;
+            if (safe_path != entry.full_path) {
+                resolved_entry = new ArchiveEntry(
+                    safe_path,
+                    Path.get_basename(safe_path),
+                    entry.is_dir,
+                    entry.size,
+                    entry.mtime,
+                    entry.mode,
+                    entry.owner,
+                    entry.group,
+                    entry.is_symlink,
+                    entry.symlink_target,
+                    entry.raw_entry_path
+                );
+            }
+
+            string path = safe_path;
             string[] parts = path.split("/");
             ArchiveTreeNode current = root;
             string current_path = "";
@@ -108,13 +128,13 @@ namespace VCommander {
 
                 var child = current.find_child(part);
                 if (child == null) {
-                    bool child_is_dir = is_leaf ? entry.is_dir : true;
-                    ArchiveEntry? child_entry = is_leaf ? entry : null;
+                    bool child_is_dir = is_leaf ? resolved_entry.is_dir : true;
+                    ArchiveEntry? child_entry = is_leaf ? resolved_entry : null;
                     child = new ArchiveTreeNode(part, current_path, child_is_dir, child_entry);
                     current.add_child(child);
                 } else if (is_leaf && child.entry == null) {
-                    child.entry = entry;
-                    child.is_dir = entry.is_dir;
+                    child.entry = resolved_entry;
+                    child.is_dir = resolved_entry.is_dir;
                 }
                 current = child;
             }
@@ -152,6 +172,7 @@ namespace VCommander {
         private static HashTable<string, ArchiveTree>? cache = null;
         private static HashTable<string, string>? password_cache = null;
         private static HashTable<string, NestedArchiveOrigin>? nested_origins = null;
+        private static string? secure_tmp_root = null;
 
         public static void init() {
             if (cache == null) {
@@ -202,9 +223,16 @@ namespace VCommander {
             init();
             if (archive_path != null) {
                 cache.remove(archive_path);
-                password_cache.remove(archive_path);
             } else {
                 cache.remove_all();
+            }
+        }
+
+        public static void clear_password_cache(string? archive_path = null) {
+            init();
+            if (archive_path != null) {
+                password_cache.remove(archive_path);
+            } else {
                 password_cache.remove_all();
             }
         }
@@ -288,15 +316,21 @@ namespace VCommander {
                 throw new IOError.NOT_FOUND(@"Archive file not found: $archive_path");
             }
 
-            var file_info = yield file.query_info_async(FileAttribute.TIME_MODIFIED, FileQueryInfoFlags.NONE, Priority.DEFAULT, cancellable);
+            var file_info = yield file.query_info_async(
+                FileAttribute.TIME_MODIFIED + "," + FileAttribute.STANDARD_SIZE,
+                FileQueryInfoFlags.NONE,
+                Priority.DEFAULT,
+                cancellable
+            );
             int64 mtime = (int64) file_info.get_attribute_uint64(FileAttribute.TIME_MODIFIED);
+            int64 size = file_info.get_size();
 
             var cached = cache.lookup(archive_path);
-            if (cached != null && cached.file_mtime == mtime) {
+            if (cached != null && cached.file_mtime == mtime && cached.file_size == size) {
                 return cached;
             }
 
-            var tree = new ArchiveTree(archive_path, mtime);
+            var tree = new ArchiveTree(archive_path, mtime, size);
             yield populate_tree(tree, archive_path, cancellable);
 
             cache.insert(archive_path, tree);
@@ -344,10 +378,21 @@ namespace VCommander {
             var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
             Subprocess proc = launcher.spawnv(cmd_argv);
 
+            var stderr_stream = new DataInputStream(proc.get_stderr_pipe());
+            var stderr_capture = new StderrCapture();
+            stderr_capture.read.begin(stderr_stream);
+
+            ulong cancel_handler_id = 0;
+            if (cancellable != null) {
+                cancel_handler_id = cancellable.connect(() => {
+                    proc.force_exit();
+                });
+            }
+
             var stdout_stream = new DataInputStream(proc.get_stdout_pipe());
 
             size_t length;
-            while (!cancellable.is_cancelled()) {
+            while (cancellable == null || !cancellable.is_cancelled()) {
                 string? line = yield stdout_stream.read_line_utf8_async(Priority.DEFAULT, cancellable, out length);
                 if (line == null) break;
 
@@ -373,19 +418,17 @@ namespace VCommander {
             try {
                 yield proc.wait_check_async(cancellable);
             } catch (Error e) {
-                // Read stderr
-                string err_text = "";
-                try {
-                    var err_stream = new DataInputStream(proc.get_stderr_pipe());
-                    size_t len;
-                    string? err_line;
-                    var err_sb = new StringBuilder();
-                    while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
-                        err_sb.append(err_line);
-                        err_sb.append("\n");
-                    }
-                    err_text = err_sb.str;
-                } catch (Error ignored) {}
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                    cancel_handler_id = 0;
+                }
+                if (e.matches(IOError.quark(), IOError.CANCELLED)) {
+                    proc.force_exit();
+                    throw e;
+                }
+
+                yield stderr_capture.wait_done();
+                string err_text = stderr_capture.text.str;
 
                 int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
                 string lower_err = err_text.down();
@@ -406,6 +449,10 @@ namespace VCommander {
                 // If nothing was parsed and process returned error, bubble up
                 if (tree.root.children.length == 0) {
                     throw e;
+                }
+            } finally {
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
                 }
             }
         }
@@ -786,11 +833,51 @@ namespace VCommander {
         }
 
         public static string get_secure_tmp_dir() {
-            string tmp = Environment.get_tmp_dir();
-            string root = Path.build_filename(tmp, @"vcmd-$((int)Posix.getuid())");
-            DirUtils.create_with_parents(root, 0700);
-            Posix.chmod(root, 0700);
-            return root;
+            if (secure_tmp_root != null) {
+                return secure_tmp_root;
+            }
+
+            string tmp_base = Environment.get_user_runtime_dir();
+            if (tmp_base == null || tmp_base.length == 0) {
+                tmp_base = Environment.get_tmp_dir();
+            }
+
+            string? created = null;
+            // DirUtils.make_tmp() accepts only a basename, so create a
+            // randomized directory inside the per-user runtime directory
+            // explicitly. O_EXCL semantics are provided by DirUtils.create():
+            // an existing path makes it fail.
+            for (int attempt = 0; attempt < 5 && created == null; attempt++) {
+                string candidate = Path.build_filename(
+                    tmp_base,
+                    @"vcmd-$((int)Posix.getpid())-$(Uuid.string_random())"
+                );
+                if (DirUtils.create(candidate, 0700) == 0) {
+                    created = candidate;
+                }
+            }
+            if (created == null) {
+                try {
+                    created = DirUtils.make_tmp("vcmd-XXXXXX");
+                } catch (Error e) {
+                    AppLogger.warn("Archive", @"Failed to create fallback temp directory: $(e.message)");
+                }
+            }
+            if (created == null) {
+                AppLogger.warn("Archive", "Could not create any temporary directory");
+                return Path.build_filename(tmp_base, "vcmd-unavailable");
+            }
+
+            secure_tmp_root = created;
+            Posix.Stat st;
+            if (Posix.lstat(created, out st) == 0 &&
+                Posix.S_ISDIR(st.st_mode) &&
+                st.st_uid == (Posix.uid_t) Posix.getuid()) {
+                Posix.chmod(created, 0700);
+            } else {
+                AppLogger.warn("Archive", @"Temporary directory is not a secure user-owned directory: $created");
+            }
+            return created;
         }
 
         public static string get_preview_root_dir() {
@@ -819,39 +906,54 @@ namespace VCommander {
 
         public static File get_temp_extracted_file(string archive_path, string inner_path) {
             string base_dir = get_preview_archive_dir(archive_path);
-            string dest_path = Path.build_filename(base_dir, inner_path);
+            string safe_inner = PathUtils.storage_safe_path(inner_path);
+            string dest_path = Path.build_filename(base_dir, safe_inner);
             return File.new_for_path(dest_path);
         }
 
         public static void clean_temporary_directories() {
-            try {
-                string tmp = Environment.get_tmp_dir();
-                string root = Path.build_filename(tmp, @"vcmd-$((int)Posix.getuid())");
-                var root_file = File.new_for_path(root);
-                if (root_file.query_exists()) {
-                    delete_recursive_sync(root_file);
-                }
-            } catch (Error e) {
-                AppLogger.warn("Archive", @"Failed to clean temp directory: $(e.message)");
+            if (secure_tmp_root != null) {
+                delete_recursive_sync(File.new_for_path(secure_tmp_root));
+                secure_tmp_root = null;
             }
 
-            try {
-                string legacy_preview = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview");
-                var preview_file = File.new_for_path(legacy_preview);
-                if (preview_file.query_exists()) {
-                    delete_recursive_sync(preview_file);
-                }
-                string legacy_staging = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "staging");
-                var staging_file = File.new_for_path(legacy_staging);
-                if (staging_file.query_exists()) {
-                    delete_recursive_sync(staging_file);
-                }
-            } catch (Error e) {
-                AppLogger.warn("Archive", @"Failed to clean legacy cache: $(e.message)");
+            cleanup_legacy_tmp_root();
+
+            string legacy_preview = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "preview");
+            var preview_file = File.new_for_path(legacy_preview);
+            if (preview_file.query_exists()) {
+                delete_recursive_sync(preview_file);
+            }
+            string legacy_staging = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "staging");
+            var staging_file = File.new_for_path(legacy_staging);
+            if (staging_file.query_exists()) {
+                delete_recursive_sync(staging_file);
             }
         }
 
+        private static void cleanup_legacy_tmp_root() {
+            string root = Path.build_filename(Environment.get_tmp_dir(), @"vcmd-$((int)Posix.getuid())");
+            Posix.Stat st;
+            if (Posix.lstat(root, out st) != 0) {
+                return;
+            }
+            if (!Posix.S_ISDIR(st.st_mode) || st.st_uid != (Posix.uid_t) Posix.getuid()) {
+                AppLogger.warn("Archive", @"Refusing to clean unsafe legacy temp path: $root");
+                return;
+            }
+            delete_recursive_sync(File.new_for_path(root));
+        }
+
         private static void delete_recursive_sync(File file) {
+            string? path = file.get_path();
+            if (path != null) {
+                Posix.Stat st;
+                if (Posix.lstat(path, out st) == 0 && Posix.S_ISLNK(st.st_mode)) {
+                    AppLogger.warn("Archive", @"Refusing to recursively delete symlink: $path");
+                    return;
+                }
+            }
+
             try {
                 var enumerator = file.enumerate_children(
                     FileAttribute.STANDARD_NAME + "," + FileAttribute.STANDARD_TYPE,
@@ -956,36 +1058,48 @@ namespace VCommander {
                 throw new IOError.NOT_SUPPORTED(@"Unsupported archive format: $(Path.get_basename(archive_path))");
             }
 
+            if (member_path.has_prefix("-")) {
+                throw new IOError.INVALID_ARGUMENT(@"Unsafe archive member name: $member_path");
+            }
+
             var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_PIPE | SubprocessFlags.STDERR_PIPE);
             Subprocess proc = launcher.spawnv(cmd_argv);
 
             var in_stream = proc.get_stdout_pipe();
-            var out_stream = yield dest_file.replace_async(null, false, FileCreateFlags.REPLACE_DESTINATION, Priority.DEFAULT, cancellable);
+            var stderr_stream = new DataInputStream(proc.get_stderr_pipe());
+            var stderr_capture = new StderrCapture();
+            stderr_capture.read.begin(stderr_stream);
 
-            yield out_stream.splice_async(in_stream, OutputStreamSpliceFlags.CLOSE_SOURCE | OutputStreamSpliceFlags.CLOSE_TARGET, Priority.DEFAULT, cancellable);
+            ulong cancel_handler_id = 0;
+            if (cancellable != null) {
+                cancel_handler_id = cancellable.connect(() => {
+                    proc.force_exit();
+                });
+            }
 
+            Error? proc_error = null;
             try {
+                var out_stream = yield dest_file.replace_async(null, false, FileCreateFlags.REPLACE_DESTINATION, Priority.DEFAULT, cancellable);
+                yield out_stream.splice_async(in_stream, OutputStreamSpliceFlags.CLOSE_SOURCE | OutputStreamSpliceFlags.CLOSE_TARGET, Priority.DEFAULT, cancellable);
                 yield proc.wait_check_async(cancellable);
             } catch (Error e) {
-                // Read stderr for error analysis
-                string err_text = "";
-                try {
-                    var err_stream = new DataInputStream(proc.get_stderr_pipe());
-                    size_t len;
-                    string? err_line;
-                    var err_sb = new StringBuilder();
-                    while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
-                        err_sb.append(err_line);
-                        err_sb.append("\n");
-                    }
-                    err_text = err_sb.str;
-                } catch (Error ignored) {}
+                proc_error = e;
+            } finally {
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                }
+            }
+
+            if (proc_error != null) {
+                proc.force_exit();
+                yield stderr_capture.wait_done();
 
                 // Clean up partially written / empty output file
                 if (dest_file.query_exists()) {
                     try { dest_file.delete(); } catch (Error ignored) {}
                 }
 
+                string err_text = stderr_capture.text.str;
                 int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
                 string lower_err = err_text.down();
                 bool is_pwd_err = lower_err.contains("password") || lower_err.contains("wrong password") ||
@@ -1001,12 +1115,16 @@ namespace VCommander {
                     }
                 }
 
+                if (proc_error.matches(IOError.quark(), IOError.CANCELLED)) {
+                    throw proc_error;
+                }
+
                 string err_msg = err_text.strip();
                 if (err_msg.length > 0) {
                     throw new IOError.FAILED(@"Failed to extract '$member_path' from $(Path.get_basename(archive_path)): $err_msg (exit code $exit_code)");
                 }
 
-                throw e;
+                throw proc_error;
             }
         }
     }

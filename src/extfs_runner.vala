@@ -69,26 +69,39 @@ namespace VCommander {
         }
 
         private async void run_command_with_check(string[] argv, Cancellable? cancellable) throws Error {
-            var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE);
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_SILENCE | SubprocessFlags.STDERR_PIPE);
             Subprocess proc = launcher.spawnv(argv);
 
-            var err_stream = new DataInputStream(proc.get_stderr_pipe());
-            var err_sb = new StringBuilder();
+            ulong cancel_handler_id = 0;
+            if (cancellable != null) {
+                cancel_handler_id = cancellable.connect(() => {
+                    proc.force_exit();
+                });
+            }
 
+            Error? proc_error = null;
+            string? stderr_text = null;
             try {
-                yield proc.wait_check_async(cancellable);
+                yield proc.communicate_utf8_async(null, cancellable, null, out stderr_text);
             } catch (Error e) {
-                size_t len;
-                string? err_line;
-                try {
-                    while ((err_line = yield err_stream.read_line_utf8_async(Priority.DEFAULT, null, out len)) != null) {
-                        err_sb.append(err_line);
-                        err_sb.append("\n");
-                    }
-                } catch (Error ignored) {}
+                proc_error = e;
+            } finally {
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                }
+            }
 
-                string msg = err_sb.str.strip();
-                int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+            if (proc_error != null) {
+                proc.force_exit();
+                if (proc_error.matches(IOError.quark(), IOError.CANCELLED)) {
+                    throw proc_error;
+                }
+                throw new IOError.FAILED(@"ExtFS helper failed: $(proc_error.message)");
+            }
+
+            int exit_code = proc.get_if_exited() ? proc.get_exit_status() : -1;
+            if (exit_code != 0) {
+                string msg = (stderr_text != null) ? stderr_text.strip() : "";
                 string helper_name = Path.get_basename(argv[0]);
                 if (msg.length > 0) {
                     throw new IOError.FAILED(@"ExtFS helper '$helper_name' failed (exit code $exit_code): $msg");

@@ -288,7 +288,7 @@ namespace VCommander {
                 if (!closed) {
                     string short_path = path;
                     if (short_path.char_count() > 72) {
-                        short_path = "…" + short_path.substring(short_path.length - 68);
+                        short_path = "…" + PathUtils.suffix_chars(short_path, 68);
                     }
                     status_label.label = @"$found found, $scanned scanned\n$short_path";
                 }

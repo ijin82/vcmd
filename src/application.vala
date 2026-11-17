@@ -6,8 +6,17 @@ namespace VCommander {
         public Application() {
             Object(
                 application_id: "org.vcmd.ValaCommander",
-                flags: ApplicationFlags.DEFAULT_FLAGS
+                flags: ApplicationFlags.DEFAULT_FLAGS | ApplicationFlags.HANDLES_OPEN
             );
+            open.connect(on_open);
+        }
+
+        private void on_open(File[] files, string hint) {
+            if (main_window == null) {
+                main_window = new MainWindow(this);
+            }
+            main_window.present();
+            main_window.open_external_paths(files);
         }
 
         protected override void startup() {

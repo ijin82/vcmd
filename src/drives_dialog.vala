@@ -72,7 +72,7 @@ namespace VCommander {
         private Gtk.ListBox list_box;
         private ulong changed_handler_id = 0;
 
-        public static void show(MainWindow window) {
+        public static void open_dialog(MainWindow window) {
             if (active_dialog != null) {
                 active_dialog.present(window);
                 return;
@@ -85,7 +85,7 @@ namespace VCommander {
             if (active_dialog != null) {
                 active_dialog.close();
             } else {
-                show(window);
+                open_dialog(window);
             }
         }
 

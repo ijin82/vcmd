@@ -35,6 +35,8 @@ namespace VCommander {
 
     public class VolumeService : Object {
         private static VolumeService? instance = null;
+        private static HashTable<string, bool>? luks_cache = null;
+        private static HashTable<string, bool>? luks_probing = null;
         private VolumeMonitor monitor;
 
         public signal void changed();
@@ -474,11 +476,36 @@ namespace VCommander {
                 }
             }
 
-            // 2. Check if it's a locked LUKS container
+            // 2. Check UDisks for a locked LUKS container. Never call DBus
+            // synchronously from the UI thread: probe in the background and
+            // refresh the locations list when the answer arrives.
+            if (luks_cache == null) {
+                luks_cache = new HashTable<string, bool>(str_hash, str_equal);
+            }
+            if (luks_probing == null) {
+                luks_probing = new HashTable<string, bool>(str_hash, str_equal);
+            }
+            if (luks_cache.contains(device_node)) {
+                if (luks_cache.get(device_node)) {
+                    backing_device = device_node;
+                    return true;
+                }
+                return false;
+            }
+            if (!luks_probing.contains(device_node)) {
+                luks_probing.insert(device_node, true);
+                probe_luks_async.begin(device_node);
+            }
+
+            return false;
+        }
+
+        private static async void probe_luks_async(string device_node) {
+            bool is_luks = false;
             try {
-                var bus = Bus.get_sync(BusType.SYSTEM, null);
+                var bus = yield Bus.get(BusType.SYSTEM, null);
                 string udisks_path = get_udisks_block_path(device_node);
-                var res = bus.call_sync(
+                var res = yield bus.call(
                     "org.freedesktop.UDisks2",
                     udisks_path,
                     "org.freedesktop.DBus.Properties",
@@ -486,21 +513,25 @@ namespace VCommander {
                     new Variant("(ss)", "org.freedesktop.UDisks2.Block", "IdType"),
                     new VariantType("(v)"),
                     DBusCallFlags.NONE,
-                    500,
+                    1000,
                     null
                 );
                 Variant inner;
                 res.get("(v)", out inner);
-                string id_type = inner.get_string();
-                if (id_type == "crypto_LUKS") {
-                    backing_device = device_node;
-                    return true;
-                }
+                is_luks = (inner.get_string() == "crypto_LUKS");
             } catch (Error e) {
-                // ignore
+                is_luks = false;
             }
 
-            return false;
+            if (luks_probing != null) {
+                luks_probing.remove(device_node);
+            }
+            if (luks_cache != null) {
+                luks_cache.insert(device_node, is_luks);
+            }
+            if (is_luks) {
+                VolumeService.get_instance().changed();
+            }
         }
 
         public static async bool lock_encrypted_container(string backing_device_node) {

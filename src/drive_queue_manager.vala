@@ -75,12 +75,12 @@ namespace VCommander {
             if (dst_id.length > 0 && dst_id != "unknown") {
                 list.add(dst_id);
             }
-            if (items.length > 0) {
-                string src_id = DeviceDetector.get_device_id(items[0].file);
+            for (uint i = 0; i < items.length; i++) {
+                string src_id = DeviceDetector.get_device_id(items[i].file);
                 if (src_id.length > 0 && src_id != "unknown") {
                     bool already = false;
-                    for (int i = 0; i < list.length; i++) {
-                        if (list[i] == src_id) { already = true; break; }
+                    for (int j = 0; j < list.length; j++) {
+                        if (list[j] == src_id) { already = true; break; }
                     }
                     if (!already) {
                         list.add(src_id);
@@ -188,15 +188,24 @@ namespace VCommander {
         }
 
         public void release_disks(GenericArray<string> disks, OperationProgressDialog dlg) {
-            unmark_disks_active(disks);
-
+            bool was_active = false;
             for (int i = 0; i < active_tasks.length; i++) {
                 if (active_tasks[i].dlg == dlg) {
                     active_tasks.remove_index(i);
+                    was_active = true;
                     break;
                 }
             }
 
+            if (!was_active) {
+                // acquire_disks_async() can fail before a lock is registered
+                // (for example when a queued operation is cancelled). Releasing
+                // in that case would decrement another operation's disk count.
+                AppLogger.warn("DriveQueue", @"Ignoring release for operation without an active disk lock: '$(dlg.op_title)'");
+                return;
+            }
+
+            unmark_disks_active(disks);
             AppLogger.info("DriveQueue", @"Released disk lock for '$(dlg.op_title)' on: $(format_disks_str(disks))");
             queue_changed();
             check_and_dispatch_next();

@@ -178,8 +178,30 @@ namespace VCommander {
             }
         }
 
+        /**
+         * Like file_exists_async(), but preserves cancellation and unexpected
+         * I/O errors. Use this for operations that must stop when the user
+         * cancels; use file_exists_async() only for best-effort UI checks.
+         */
+        public static async bool file_exists_checked_async(File file, Cancellable? cancellable = null) throws Error {
+            try {
+                var info = yield file.query_info_async(
+                    FileAttribute.STANDARD_NAME,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    cancellable
+                );
+                return (info != null);
+            } catch (Error e) {
+                if (e.matches(IOError.quark(), IOError.NOT_FOUND)) {
+                    return false;
+                }
+                throw e;
+            }
+        }
+
         public static async void make_directory_with_parents_async(File dir, Cancellable? cancellable = null) throws Error {
-            bool exists = yield file_exists_async(dir, cancellable);
+            bool exists = yield file_exists_checked_async(dir, cancellable);
             if (exists) return;
 
             var parent = dir.get_parent();
@@ -211,7 +233,7 @@ namespace VCommander {
             }
 
             if (overwrite) {
-                bool d_exists = yield file_exists_async(dest_file, cancellable);
+                bool d_exists = yield file_exists_checked_async(dest_file, cancellable);
                 if (d_exists) {
                     try {
                         yield dest_file.delete_async(Priority.DEFAULT, cancellable);
@@ -231,7 +253,13 @@ namespace VCommander {
             } catch (Error e) {
                 if (e.matches(IOError.quark(), IOError.NOT_SUPPORTED) || e.matches(IOError.quark(), IOError.WOULD_RECURSE)) {
                     var resolver = new SimpleConflictResolver(overwrite ? ConflictResolution.OVERWRITE : ConflictResolution.SKIP);
-                    yield copy_file_or_dir(trash_file, dest_file, resolver, cancellable);
+                    var restore_tracker = new CopyProgressTracker();
+                    yield copy_file_or_dir(trash_file, dest_file, resolver, cancellable, null, restore_tracker);
+                    if (restore_tracker.has_skipped_items) {
+                        throw new IOError.EXISTS(
+                            @"Restore target already exists: $(dest_file.get_parse_name())"
+                        );
+                    }
                     yield trash_file.delete_async(Priority.DEFAULT, cancellable);
                 } else {
                     throw e;
@@ -306,6 +334,43 @@ namespace VCommander {
             }
         }
 
+        private static async void preserve_directory_metadata(
+            File source,
+            File dest,
+            Cancellable? cancellable
+        ) {
+            try {
+                var info = yield source.query_info_async(
+                    FileAttribute.UNIX_MODE + "," + FileAttribute.TIME_MODIFIED,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    cancellable
+                );
+                var attributes = new FileInfo();
+                if (info.has_attribute(FileAttribute.UNIX_MODE)) {
+                    uint32 mode = info.get_attribute_uint32(FileAttribute.UNIX_MODE) & 07777;
+                    attributes.set_attribute_uint32(FileAttribute.UNIX_MODE, mode);
+                }
+                var mtime = info.get_modification_date_time();
+                if (mtime != null) {
+                    attributes.set_modification_date_time(mtime);
+                }
+                var listed = attributes.list_attributes(null);
+                if (listed != null && listed.length > 0) {
+                    FileInfo? applied = null;
+                    yield dest.set_attributes_async(
+                        attributes,
+                        FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                        Priority.DEFAULT,
+                        cancellable,
+                        out applied
+                    );
+                }
+            } catch (Error e) {
+                AppLogger.warn("FileOperation", @"Could not preserve directory metadata for '$(dest.get_parse_name())': $(e.message)");
+            }
+        }
+
         public static async void copy_file_or_dir(
             File source,
             File dest,
@@ -314,6 +379,12 @@ namespace VCommander {
             OperationProgressCallback? progress_cb = null,
             CopyProgressTracker? tracker = null
         ) throws Error {
+            if (PathUtils.is_same_or_descendant(source, dest)) {
+                throw new IOError.INVALID_ARGUMENT(
+                    @"Cannot copy '$(source.get_parse_name())' onto itself or into its own subdirectory."
+                );
+            }
+
             var src_info = yield source.query_info_async(
                 FileAttribute.STANDARD_TYPE + "," + FileAttribute.STANDARD_NAME + "," + FileAttribute.STANDARD_SIZE,
                 FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
@@ -322,9 +393,11 @@ namespace VCommander {
             );
 
             if (src_info.get_file_type() == FileType.DIRECTORY) {
-                bool dest_exists = yield file_exists_async(dest, cancellable);
+                bool dest_exists = yield file_exists_checked_async(dest, cancellable);
+                bool created_destination = false;
                 if (!dest_exists) {
                     yield dest.make_directory_async(Priority.DEFAULT, cancellable);
+                    created_destination = true;
                 } else {
                     var dest_info = yield dest.query_info_async(
                         FileAttribute.STANDARD_TYPE,
@@ -347,6 +420,7 @@ namespace VCommander {
                         } else if (decision == ConflictResolution.OVERWRITE) {
                             yield dest.delete_async(Priority.DEFAULT, cancellable);
                             yield dest.make_directory_async(Priority.DEFAULT, cancellable);
+                            created_destination = true;
                         }
                     }
                 }
@@ -376,6 +450,10 @@ namespace VCommander {
                         yield copy_file_or_dir(child_src, child_dest, resolver, cancellable, progress_cb, tracker);
                     }
                 }
+
+                if (created_destination) {
+                    yield preserve_directory_metadata(source, dest, cancellable);
+                }
             } else {
                 bool is_symlink = (src_info.get_file_type() == FileType.SYMBOLIC_LINK);
                 int64 current_file_bytes_done = 0;
@@ -383,7 +461,7 @@ namespace VCommander {
                 int64 total_bytes = (tracker != null) ? tracker.total_bytes : 0;
                 string filename = source.get_basename();
 
-                bool dest_exists = yield file_exists_async(dest, cancellable);
+                bool dest_exists = yield file_exists_checked_async(dest, cancellable);
                 if (dest_exists) {
                     ConflictResolution decision = ConflictResolution.OVERWRITE;
                     if (resolver != null) {
@@ -457,7 +535,13 @@ namespace VCommander {
             OperationProgressCallback? progress_cb = null,
             CopyProgressTracker? tracker = null
         ) throws Error {
-            bool dest_exists = yield file_exists_async(dest, cancellable);
+            if (PathUtils.is_same_or_descendant(source, dest)) {
+                throw new IOError.INVALID_ARGUMENT(
+                    @"Cannot move '$(source.get_parse_name())' onto itself or into its own subdirectory."
+                );
+            }
+
+            bool dest_exists = yield file_exists_checked_async(dest, cancellable);
             if (dest_exists) {
                 ConflictResolution decision = ConflictResolution.OVERWRITE;
                 if (resolver != null) {

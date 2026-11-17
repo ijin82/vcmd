@@ -59,7 +59,8 @@ namespace VCommander {
                     }
                 }
 
-                if (first_ts != null && last_ts != null && first_ts < last_ts) {
+                // Normalize legacy newest-first logs to chronological order.
+                if (first_ts != null && last_ts != null && first_ts > last_ts) {
                     var reversed = new StringBuilder();
                     for (int i = lines.length - 1; i >= 0; i--) {
                         var line = lines[i].strip();
@@ -150,11 +151,10 @@ namespace VCommander {
             stderr.printf("%s", formatted_line);
 
             try {
-                string existing = "";
-                if (FileUtils.test(path, FileTest.EXISTS)) {
-                    FileUtils.get_contents(path, out existing);
-                }
-                FileUtils.set_contents(path, formatted_line + existing);
+                var file = File.new_for_path(path);
+                var stream = file.append_to(FileCreateFlags.PRIVATE, null);
+                stream.write_all(formatted_line.data, null);
+                stream.close(null);
             } catch (Error e) {
                 stderr.printf("AppLogger: Failed to write log entry: %s\n", e.message);
             }

@@ -320,6 +320,58 @@ namespace VCommander {
             return null;
         }
 
+        private static bool is_safe_ssh_user(string value) {
+            if (value.length == 0 || value.has_prefix("-")) return false;
+            for (int i = 0; i < value.length; i++) {
+                char c = value[i];
+                if (!(c.isalnum() || c == '.' || c == '_' || c == '-')) return false;
+            }
+            return true;
+        }
+
+        private static bool is_safe_ssh_host(string value) {
+            if (value.length == 0 || value.has_prefix("-")) return false;
+            for (int i = 0; i < value.length; i++) {
+                char c = value[i];
+                if (!(c.isalnum() || c == '.' || c == '_' || c == '-' || c == ':' || c == '[' || c == ']')) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static string safe_mount_label(string value) {
+            var sb = new StringBuilder();
+            for (int i = 0; i < value.length; i++) {
+                char c = value[i];
+                if (c.isalnum() || c == '.' || c == '_' || c == '-') {
+                    sb.append_c(c);
+                } else {
+                    sb.append_c('_');
+                }
+            }
+            return sb.len > 0 ? sb.str : "remote";
+        }
+
+        private static async void unmount_stale_sshfs(string mountpoint, Cancellable? cancellable) {
+            string fusermount = "fusermount3";
+            if (Environment.find_program_in_path(fusermount) == null) {
+                fusermount = "fusermount";
+            }
+            if (Environment.find_program_in_path(fusermount) == null) {
+                return;
+            }
+
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDOUT_SILENCE | SubprocessFlags.STDERR_SILENCE);
+            string[] argv = { fusermount, "-u", "-z", mountpoint };
+            try {
+                var proc = launcher.spawnv(argv);
+                yield proc.wait_check_async(cancellable);
+            } catch (Error e) {
+                AppLogger.warn("RemoteMount", @"Failed to release stale sshfs mount '$mountpoint': $(e.message)");
+            }
+        }
+
         private static async File? try_sshfs(File file, string? agent_sock, Cancellable? cancellable) throws Error {
             if (!agent_usable(agent_sock)) {
                 return null;
@@ -342,16 +394,27 @@ namespace VCommander {
                 return null;
             }
             string user = uri.get_user() ?? "";
+            if (!is_safe_ssh_host(host) || (user.length > 0 && !is_safe_ssh_user(user))) {
+                AppLogger.warn("RemoteMount", @"Refusing unsafe SSH URI host/user: $host");
+                return null;
+            }
             int port = uri.get_port();
             string remote_path = uri.get_path();
             if (remote_path == null || remote_path.length == 0) {
                 remote_path = "/";
             }
+            string? safe_remote_path = PathUtils.sanitize_archive_member(remote_path, true);
+            if (safe_remote_path == null) {
+                AppLogger.warn("RemoteMount", @"Refusing SSH URI path with parent traversal: $remote_path");
+                return null;
+            }
+            remote_path = safe_remote_path;
 
             string label = user.length > 0 ? @"$user@$host" : host;
             if (port > 0) {
                 label += @"_$port";
             }
+            label = safe_mount_label(label);
             string mount_root = Path.build_filename(Environment.get_user_cache_dir(), "vcmd", "ssh");
             DirUtils.create_with_parents(mount_root, 0700);
             string mountpoint = Path.build_filename(mount_root, label);
@@ -360,10 +423,13 @@ namespace VCommander {
             if (mount_contains(mountpoint)) {
                 return local_target(mountpoint, remote_path);
             } else {
-                Posix.system("fusermount -u -z " + mountpoint + " 2>/dev/null");
+                yield unmount_stale_sshfs(mountpoint, cancellable);
             }
 
             string target = user.length > 0 ? @"$user@$host:/" : @"$host:/";
+            if (target.has_prefix("-")) {
+                return null;
+            }
             var argv = new GenericArray<string>();
             argv.add("sshfs");
             if (port > 0) {
@@ -388,16 +454,28 @@ namespace VCommander {
                 args[i] = argv.get(i);
             }
 
-            var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_PIPE | SubprocessFlags.STDOUT_SILENCE);
+            var launcher = new SubprocessLauncher(SubprocessFlags.STDERR_SILENCE | SubprocessFlags.STDOUT_SILENCE);
             launcher.setenv("SSH_AUTH_SOCK", agent_sock, true);
+
+            Subprocess? proc = null;
+            ulong cancel_handler_id = 0;
             try {
-                var proc = launcher.spawnv(args);
+                proc = launcher.spawnv(args);
+                if (cancellable != null) {
+                    cancel_handler_id = cancellable.connect(() => {
+                        if (proc != null) proc.force_exit();
+                    });
+                }
                 yield proc.wait_check_async(cancellable);
-                if (proc.get_exit_status() != 0) {
+                if (!proc.get_if_exited() || proc.get_exit_status() != 0) {
                     return null;
                 }
             } catch (Error e) {
                 return null;
+            } finally {
+                if (cancel_handler_id != 0 && cancellable != null) {
+                    cancellable.disconnect(cancel_handler_id);
+                }
             }
             return local_target(mountpoint, remote_path);
         }

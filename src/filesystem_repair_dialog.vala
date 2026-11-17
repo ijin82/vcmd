@@ -191,7 +191,7 @@ namespace VCommander {
             terminal_button.clicked.connect(() => {
                 if (device_node != null) {
                     dialog.close();
-                    window.open_terminal_with_command(@"pkexec fsck -y '$device_node'");
+                    window.open_terminal_with_command(@"pkexec fsck $(Shell.quote(device_node))");
                 }
             });
             action_bar.pack_start(terminal_button);

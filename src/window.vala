@@ -48,6 +48,7 @@ namespace VCommander {
         private int terminal_child_pid = 0;
         private Gtk.ScrolledWindow console_scrolled;
         private bool terminal_alive = false;
+        private string? pending_terminal_command = null;
         private ulong terminal_child_exited_id = 0;
         private string? last_terminal_dir = null;
         private Gtk.Box command_bar;
@@ -302,7 +303,6 @@ row:selected .file-item-tagged {
 .thumbnail-img-box {
     border-radius: 6px;
     background-color: alpha(currentColor, 0.05);
-    overflow: hidden;
 }
 
 .thumbnail-img-box.file-item-tagged {
@@ -1154,6 +1154,18 @@ row:selected .file-item-tagged {
                 (term, pid, err) => {
                     if (err == null) {
                         terminal_child_pid = (int) pid;
+                        if (pending_terminal_command != null) {
+                            string queued = pending_terminal_command;
+                            pending_terminal_command = null;
+                            if (vte_terminal != null) {
+                                vte_terminal.feed_child((queued + "\n").data);
+                            }
+                        }
+                    } else {
+                        terminal_alive = false;
+                        terminal_child_pid = 0;
+                        pending_terminal_command = null;
+                        AppLogger.error("Terminal", @"Failed to spawn shell: $(err.message)");
                     }
                 }
             );
@@ -2461,8 +2473,12 @@ row:selected .file-item-tagged {
         }
 
         public void show_command_toast(string message) {
-            // Toasts disabled per user request
-            AppLogger.info("UI", @"Toast suppressed: $message");
+            AppLogger.info("UI", message);
+            if (toast_overlay != null) {
+                var toast = new Adw.Toast(message);
+                toast.timeout = 3;
+                toast_overlay.add_toast(toast);
+            }
         }
 
         public void handle_mount_removed(File unmounted_root) {
@@ -2535,7 +2551,7 @@ row:selected .file-item-tagged {
         }
 
         public void show_drives_menu() {
-            DrivesDialog.show(this);
+            DrivesDialog.open_dialog(this);
         }
 
         public void toggle_operations_menu() {
@@ -2631,6 +2647,7 @@ row:selected .file-item-tagged {
 
             int64 src_size = -1;
             int64 dest_size = -1;
+            bool dest_is_dir = false;
             string src_time_str = "Unknown";
             string dest_time_str = "Unknown";
 
@@ -2650,17 +2667,25 @@ row:selected .file-item-tagged {
 
             try {
                 var d_info = yield dest.query_info_async(
-                    FileAttribute.STANDARD_SIZE + "," + FileAttribute.TIME_MODIFIED,
+                    FileAttribute.STANDARD_SIZE + "," + FileAttribute.TIME_MODIFIED + "," + FileAttribute.STANDARD_TYPE,
                     FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
                     Priority.DEFAULT,
                     null
                 );
+                dest_is_dir = (d_info.get_file_type() == FileType.DIRECTORY);
                 dest_size = d_info.get_size();
                 var d_mtime = d_info.get_modification_date_time();
                 if (d_mtime != null) {
                     dest_time_str = d_mtime.format("%Y-%m-%d %H:%M:%S");
                 }
             } catch (Error e) {}
+
+            if (dest_is_dir) {
+                dialog.heading = "Folder Already Exists";
+                dialog.body = @"A folder named '$(dest.get_basename())' already exists in the destination folder.\nReplacing it will permanently delete everything inside that folder. Do you want to replace it?";
+                dialog.set_response_label("overwrite", "Replace Folder");
+                dialog.set_response_label("overwrite_all", "Replace All Folders");
+            }
 
             var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 6);
             box.margin_start = 12;
@@ -2757,10 +2782,12 @@ row:selected .file-item-tagged {
                 attempts++;
             }
             if (get_visible_dialog() != null) {
-                var stuck_dlg = get_visible_dialog();
-                if (stuck_dlg is Adw.AlertDialog) {
-                    AppLogger.warn("DialogManager", @"Stuck dialog detected ($(stuck_dlg.get_type().name())), forcing close");
-                    stuck_dlg.force_close();
+                // Do not close user-facing dialogs here. A slow answer to a
+                // conflict/password prompt must not be force-cancelled by a
+                // background notification. Adw.Dialog supports stacking.
+                var visible = get_visible_dialog();
+                if (visible != null) {
+                    AppLogger.warn("DialogManager", @"A dialog is still visible; presenting the next dialog above it");
                 }
             }
         }
@@ -3135,8 +3162,11 @@ row:selected .file-item-tagged {
         }
 
         private async void do_make_directory(FilePanel panel, File parent_dir, string name) {
-            if (name.contains("/")) {
-                show_error_dialog("Invalid Folder Name", "Folder name cannot contain '/' path separators.");
+            if (!PathUtils.is_valid_child_name(name)) {
+                show_error_dialog(
+                    "Invalid Folder Name",
+                    "The folder name must not be empty, '.', '..', or contain '/' path separators."
+                );
                 panel.grab_focus_to_list();
                 return;
             }
@@ -4108,6 +4138,10 @@ row:selected .file-item-tagged {
                     show_error_dialog("Copy Error", "Cannot copy selected files: destination is the same directory.");
                     return;
                 }
+                if (contains_recursive_target(tagged_items, dest_dir)) {
+                    show_error_dialog("Copy Error", "Cannot copy a folder into itself or one of its own subfolders.");
+                    return;
+                }
 
                 string dest_path = dest_dir.get_path();
                 if (dest_path == null) dest_path = dest_dir.get_parse_name();
@@ -4439,19 +4473,50 @@ row:selected .file-item-tagged {
             });
         }
 
+        private async bool confirm_bulk_extract_overwrite(File dest_dir, string archive_name) {
+            bool has_entries = false;
+            try {
+                var enumerator = yield dest_dir.enumerate_children_async(
+                    FileAttribute.STANDARD_NAME,
+                    FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                    Priority.DEFAULT,
+                    null
+                );
+                var batch = yield enumerator.next_files_async(1, Priority.DEFAULT, null);
+                has_entries = (batch != null && batch.length() > 0);
+            } catch (Error e) {
+                return true;
+            }
+
+            if (!has_entries) return true;
+
+            var dialog = new Adw.AlertDialog(
+                "Destination Is Not Empty",
+                @"The destination folder already contains files. Extracting '$(archive_name)' can overwrite them. Continue?"
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("extract", "Extract");
+            dialog.set_default_response("cancel");
+            dialog.set_close_response("cancel");
+            dialog.set_response_appearance("extract", Adw.ResponseAppearance.DESTRUCTIVE);
+            string resp = yield dialog.choose(this, null);
+            return resp == "extract";
+        }
+
         private async void do_extract_vfs_items(string arc_path, GenericArray<FileItem> items, File dest_dir, FilePanel opp_panel) {
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Extracting $(items.length) item(s) from $(Path.get_basename(arc_path))", cancellable);
 
             File arc_file = File.new_for_path(arc_path);
             var disks = DriveQueueManager.get_required_disks(arc_file, dest_dir);
+            var conf_resolver = new DialogConflictResolver(this);
             register_operation(dlg, disks);
 
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
                 while (true) {
                     try {
-                        yield ArchiveOperationService.extract_vfs_items(arc_path, items, dest_dir, dlg, cancellable);
+                        yield ArchiveOperationService.extract_vfs_items(arc_path, items, dest_dir, dlg, cancellable, conf_resolver);
                         break;
                     } catch (ArchivePasswordError e) {
                         bool is_retry = (e is ArchivePasswordError.INVALID);
@@ -4489,17 +4554,22 @@ row:selected .file-item-tagged {
                 return;
             }
 
+            if (!(yield confirm_bulk_extract_overwrite(dest_dir, archive_file.get_basename()))) {
+                return;
+            }
+
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Extracting $(archive_file.get_basename())", cancellable);
 
             var disks = DriveQueueManager.get_required_disks(archive_file, dest_dir);
+            var conf_resolver = new DialogConflictResolver(this);
             register_operation(dlg, disks);
 
             try {
                 yield DriveQueueManager.get_instance().acquire_disks_async(disks, dlg, cancellable);
                 while (true) {
                     try {
-                        yield ArchiveOperationService.extract_full_archive(archive_file, dest_dir, dlg, cancellable);
+                        yield ArchiveOperationService.extract_full_archive(archive_file, dest_dir, dlg, cancellable, conf_resolver);
                         break;
                     } catch (ArchivePasswordError e) {
                         bool is_retry = (e is ArchivePasswordError.INVALID);
@@ -4536,6 +4606,10 @@ row:selected .file-item-tagged {
 
             if (dest_target.equal(item.file)) {
                 show_error_dialog("Copy Error", "Source and destination cannot be the same.");
+                return;
+            }
+            if (item.is_dir && PathUtils.is_same_or_descendant(item.file, dest_target)) {
+                show_error_dialog("Copy Error", "Cannot copy a folder into itself or one of its own subfolders.");
                 return;
             }
 
@@ -4778,7 +4852,20 @@ row:selected .file-item-tagged {
             }
         }
 
+        private bool contains_recursive_target(GenericArray<FileItem> items, File dest_dir) {
+            for (int i = 0; i < items.length; i++) {
+                if (items[i].is_dir && PathUtils.is_same_or_descendant(items[i].file, dest_dir)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private async void do_copy_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            if (contains_recursive_target(items, dest_dir)) {
+                show_error_dialog("Copy Error", "Cannot copy a folder into itself or one of its own subfolders.");
+                return;
+            }
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Copying $(items.length) items", cancellable);
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
@@ -4958,6 +5045,7 @@ row:selected .file-item-tagged {
             }
 
             bool dest_exists = false;
+            bool dest_is_dir = false;
             try {
                 var info = yield dest_target.query_info_async(
                     FileAttribute.STANDARD_TYPE,
@@ -4966,6 +5054,7 @@ row:selected .file-item-tagged {
                     null
                 );
                 dest_exists = (info != null);
+                dest_is_dir = (info.get_file_type() == FileType.DIRECTORY);
             } catch (Error e) {
                 dest_exists = false;
             }
@@ -4974,12 +5063,13 @@ row:selected .file-item-tagged {
 
             if (dest_exists) {
                 yield wait_for_dialogs_to_clear();
-                var conflict_dlg = new Adw.AlertDialog(
-                    "File Already Exists",
-                    @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?"
-                );
+                string heading = dest_is_dir ? "Folder Already Exists" : "File Already Exists";
+                string message = dest_is_dir
+                    ? @"Destination '$(dest_target.get_basename())' is a folder. Replacing it will permanently delete everything inside it. Do you want to replace it?"
+                    : @"Destination '$(dest_target.get_basename())' already exists. Do you want to overwrite it?";
+                var conflict_dlg = new Adw.AlertDialog(heading, message);
                 conflict_dlg.add_response("cancel", "Cancel");
-                conflict_dlg.add_response("overwrite", "Overwrite");
+                conflict_dlg.add_response("overwrite", dest_is_dir ? "Replace Folder" : "Overwrite");
                 conflict_dlg.set_default_response("cancel");
                 conflict_dlg.set_close_response("cancel");
                 conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
@@ -5020,6 +5110,42 @@ row:selected .file-item-tagged {
         }
 
         private async void do_symlink_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            int existing_targets = 0;
+            bool existing_directory = false;
+            for (int i = 0; i < items.length; i++) {
+                var candidate = dest_dir.get_child(items[i].name);
+                if (yield FileOperationService.file_exists_async(candidate)) {
+                    existing_targets++;
+                    try {
+                        var info = yield candidate.query_info_async(
+                            FileAttribute.STANDARD_TYPE,
+                            FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                            Priority.DEFAULT,
+                            null
+                        );
+                        if (info.get_file_type() == FileType.DIRECTORY) {
+                            existing_directory = true;
+                        }
+                    } catch (Error e) {}
+                }
+            }
+            if (existing_targets > 0) {
+                string body = existing_directory
+                    ? @"$(existing_targets) destination item(s) already exist, including folders. Replacing them will permanently delete their contents. Continue?"
+                    : @"$(existing_targets) destination item(s) already exist. Replacing them will overwrite those items. Continue?";
+                var confirm = new Adw.AlertDialog("Destination Already Contains Items", body);
+                confirm.add_response("cancel", "Cancel");
+                confirm.add_response("replace", "Replace");
+                confirm.set_default_response("cancel");
+                confirm.set_close_response("cancel");
+                confirm.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE);
+                string resp = yield confirm.choose(this, null);
+                if (resp != "replace") {
+                    if (active_panel != null) active_panel.grab_focus_to_list();
+                    return;
+                }
+            }
+
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Creating $(items.length) symbolic links", cancellable);
             attach_progress_dialog(dlg);
@@ -5248,8 +5374,11 @@ row:selected .file-item-tagged {
         }
 
         private async void prompt_execute_rename(FileItem item, string new_name) {
-            if (new_name.contains("/")) {
-                show_error_dialog("Rename Error", "File or folder name cannot contain '/' path separators.");
+            if (!PathUtils.is_valid_child_name(new_name)) {
+                show_error_dialog(
+                    "Rename Error",
+                    "The new name must not be empty, '.', '..', or contain '/' path separators."
+                );
                 if (active_panel != null) active_panel.grab_focus_to_list();
                 return;
             }
@@ -5260,13 +5389,25 @@ row:selected .file-item-tagged {
 
             bool dest_exists = yield FileOperationService.file_exists_async(dest_target);
             if (dest_exists) {
+                bool dest_is_dir = false;
+                try {
+                    var dest_info = yield dest_target.query_info_async(
+                        FileAttribute.STANDARD_TYPE,
+                        FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                        Priority.DEFAULT,
+                        null
+                    );
+                    dest_is_dir = (dest_info.get_file_type() == FileType.DIRECTORY);
+                } catch (Error e) {}
+
                 yield wait_for_dialogs_to_clear();
-                var conflict_dlg = new Adw.AlertDialog(
-                    "File Already Exists",
-                    @"A file or folder named '$new_name' already exists. Do you want to overwrite it?"
-                );
+                string heading = dest_is_dir ? "Folder Already Exists" : "File Already Exists";
+                string body = dest_is_dir
+                    ? @"A folder named '$new_name' already exists. Replacing it will permanently delete everything inside that folder. Do you want to replace it?"
+                    : @"A file or folder named '$new_name' already exists. Do you want to overwrite it?";
+                var conflict_dlg = new Adw.AlertDialog(heading, body);
                 conflict_dlg.add_response("cancel", "Cancel");
-                conflict_dlg.add_response("overwrite", "Overwrite");
+                conflict_dlg.add_response("overwrite", dest_is_dir ? "Replace Folder" : "Overwrite");
                 conflict_dlg.set_default_response("cancel");
                 conflict_dlg.set_close_response("cancel");
                 conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
@@ -5353,6 +5494,10 @@ row:selected .file-item-tagged {
                 show_error_dialog("Move Error", "Source and destination cannot be the same.");
                 return;
             }
+            if (item.is_dir && PathUtils.is_same_or_descendant(item.file, dest_target)) {
+                show_error_dialog("Move Error", "Cannot move a folder into itself or one of its own subfolders.");
+                return;
+            }
 
             yield do_move_file(item.file, dest_target);
         }
@@ -5406,6 +5551,10 @@ row:selected .file-item-tagged {
         }
 
         private async void do_move_multiple_items(GenericArray<FileItem> items, File dest_dir) {
+            if (contains_recursive_target(items, dest_dir)) {
+                show_error_dialog("Move Error", "Cannot move a folder into itself or one of its own subfolders.");
+                return;
+            }
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Moving $(items.length) items", cancellable);
             var disks = DriveQueueManager.get_required_disks_multi(items, dest_dir);
@@ -5604,13 +5753,25 @@ row:selected .file-item-tagged {
             var dest_file = File.new_for_path(orig_path);
             bool dest_exists = yield FileOperationService.file_exists_async(dest_file);
             if (dest_exists) {
+                bool dest_is_dir = false;
+                try {
+                    var dest_info = yield dest_file.query_info_async(
+                        FileAttribute.STANDARD_TYPE,
+                        FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                        Priority.DEFAULT,
+                        null
+                    );
+                    dest_is_dir = (dest_info.get_file_type() == FileType.DIRECTORY);
+                } catch (Error e) {}
+
                 yield wait_for_dialogs_to_clear();
-                var conflict_dlg = new Adw.AlertDialog(
-                    "File Already Exists",
-                    @"A file or folder already exists at:\n$orig_path\n\nDo you want to overwrite it?"
-                );
+                string heading = dest_is_dir ? "Folder Already Exists" : "File Already Exists";
+                string message = dest_is_dir
+                    ? @"A folder already exists at:\n$orig_path\n\nRestoring will permanently delete everything inside that folder. Do you want to replace it?"
+                    : @"A file or folder already exists at:\n$orig_path\n\nDo you want to overwrite it?";
+                var conflict_dlg = new Adw.AlertDialog(heading, message);
                 conflict_dlg.add_response("cancel", "Cancel");
-                conflict_dlg.add_response("overwrite", "Overwrite");
+                conflict_dlg.add_response("overwrite", dest_is_dir ? "Replace Folder" : "Overwrite");
                 conflict_dlg.set_default_response("cancel");
                 conflict_dlg.set_close_response("cancel");
                 conflict_dlg.set_response_appearance("overwrite", Adw.ResponseAppearance.DESTRUCTIVE);
@@ -5659,6 +5820,46 @@ row:selected .file-item-tagged {
         }
 
         private async void do_restore_multiple_items(FilePanel panel, GenericArray<FileItem> items) {
+            int existing_targets = 0;
+            bool existing_directory = false;
+            for (int i = 0; i < items.length; i++) {
+                string orig_path = items[i].trash_orig_path;
+                if (orig_path == null || orig_path.length == 0) {
+                    orig_path = Path.build_filename(Environment.get_home_dir(), items[i].name);
+                }
+                var candidate = File.new_for_path(orig_path);
+                if (yield FileOperationService.file_exists_async(candidate)) {
+                    existing_targets++;
+                    try {
+                        var info = yield candidate.query_info_async(
+                            FileAttribute.STANDARD_TYPE,
+                            FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                            Priority.DEFAULT,
+                            null
+                        );
+                        if (info.get_file_type() == FileType.DIRECTORY) {
+                            existing_directory = true;
+                        }
+                    } catch (Error e) {}
+                }
+            }
+            if (existing_targets > 0) {
+                string body = existing_directory
+                    ? @"$(existing_targets) original location(s) already contain items, including folders. Restoring will permanently delete their contents. Continue?"
+                    : @"$(existing_targets) original location(s) already contain files. Restoring will overwrite them. Continue?";
+                var confirm = new Adw.AlertDialog("Original Location Is Not Empty", body);
+                confirm.add_response("cancel", "Cancel");
+                confirm.add_response("restore", "Restore");
+                confirm.set_default_response("cancel");
+                confirm.set_close_response("cancel");
+                confirm.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE);
+                string resp = yield confirm.choose(this, null);
+                if (resp != "restore") {
+                    panel.grab_focus_to_list();
+                    return;
+                }
+            }
+
             var cancellable = new Cancellable();
             var dlg = new OperationProgressDialog(@"Restoring $(items.length) items from Trash", cancellable);
 
@@ -5862,10 +6063,21 @@ row:selected .file-item-tagged {
         }
 
         public void open_terminal_with_command(string command) {
-            set_console_visible(true);
-            if (vte_terminal != null) {
+            if (vte_terminal != null && terminal_alive) {
                 vte_terminal.feed_child((command + "\n").data);
                 vte_terminal.grab_focus();
+                return;
+            }
+
+            // Feed the command from the spawn callback, once the PTY exists.
+            pending_terminal_command = command;
+            set_console_visible(true);
+            if (!terminal_alive) {
+                string? cwd = null;
+                if (active_panel != null && active_panel.current_directory != null) {
+                    cwd = resolve_local_path_for_file(active_panel.current_directory);
+                }
+                spawn_terminal(cwd);
             }
         }
 
@@ -5882,6 +6094,60 @@ row:selected .file-item-tagged {
             apply_terminal_font();
             apply_terminal_theme();
             FilesystemRepairDialog.apply_active_console_theme();
+        }
+
+        public void open_external_paths(File[] files) {
+            if (files.length == 0 || active_panel == null) return;
+
+            for (int i = 0; i < files.length; i++) {
+                File target = files[i];
+                if (i == 0) {
+                    open_external_path_in_panel(active_panel, target);
+                } else {
+                    File tab_target = target;
+                    if (target.get_uri_scheme() == "file" && target.get_path() != null) {
+                        string? path = target.get_path();
+                        if (path != null) {
+                            if (ArchiverRegistry.get_instance().is_archive_filename(path)) {
+                                tab_target = File.new_for_uri(@"archive://$path");
+                            } else {
+                                FileType type = target.query_file_type(FileQueryInfoFlags.NONE);
+                                if (type != FileType.DIRECTORY) {
+                                    var parent = target.get_parent();
+                                    if (parent != null) {
+                                        tab_target = parent;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    active_panel.open_new_tab(tab_target);
+                }
+            }
+            active_panel.grab_focus_to_list();
+        }
+
+        private void open_external_path_in_panel(FilePanel panel, File target) {
+            if (target.get_uri_scheme() == "file") {
+                string? path = target.get_path();
+                if (path != null) {
+                    if (ArchiverRegistry.get_instance().is_archive_filename(path)) {
+                        panel.load_directory(File.new_for_uri(@"archive://$path"));
+                        return;
+                    }
+                    FileType type = target.query_file_type(FileQueryInfoFlags.NONE);
+                    if (type == FileType.DIRECTORY) {
+                        panel.load_directory(target);
+                        return;
+                    }
+                    var parent = target.get_parent();
+                    if (parent != null) {
+                        panel.load_directory(parent, target.get_basename());
+                        return;
+                    }
+                }
+            }
+            panel.load_directory(target);
         }
 
         public void show_about_dialog(Gtk.Widget? parent_widget = null) {

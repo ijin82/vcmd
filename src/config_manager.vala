@@ -31,12 +31,14 @@ namespace VCommander {
                 return cached_version;
             }
 
+            // Prefer installation-owned version data. The current working
+            // directory is only a development fallback and must never override
+            // an installed application's version.
             string[] candidate_paths = {
-                "VERSION",
-                Path.build_filename(Environment.get_current_dir(), "VERSION"),
                 Path.build_filename(Environment.get_user_data_dir(), "vcmd", "VERSION"),
                 "/usr/share/vcmd/VERSION",
-                "/usr/local/share/vcmd/VERSION"
+                "/usr/local/share/vcmd/VERSION",
+                Path.build_filename(Environment.get_current_dir(), "VERSION")
             };
 
             foreach (var p in candidate_paths) {
@@ -53,7 +55,7 @@ namespace VCommander {
                 }
             }
 
-            cached_version = "v0.7.2";
+            cached_version = "development";
             return cached_version;
         }
 
@@ -69,7 +71,7 @@ namespace VCommander {
 
         public string[] left_tabs { get; set; }
         public string[] left_tab_titles { get; set; }
-        public bool[]? left_pinned_tabs { get; set; default = null; }
+        public bool[]? left_pinned_tabs = null;
         public string[] left_sort_cols { get; set; }
         public string[] left_sort_orders { get; set; }
         public string[]? left_view_modes { get; set; default = null; }
@@ -79,7 +81,7 @@ namespace VCommander {
 
         public string[] right_tabs { get; set; }
         public string[] right_tab_titles { get; set; }
-        public bool[]? right_pinned_tabs { get; set; default = null; }
+        public bool[]? right_pinned_tabs = null;
         public string[] right_sort_cols { get; set; }
         public string[] right_sort_orders { get; set; }
         public string[]? right_view_modes { get; set; default = null; }
@@ -233,9 +235,7 @@ namespace VCommander {
 
         public void add_bookmark(string name, string uri_or_path) {
             string trimmed_name = name.strip();
-            if (trimmed_name.char_count() > 50) {
-                trimmed_name = trimmed_name.substring(0, 50);
-            }
+            trimmed_name = PathUtils.truncate_chars(trimmed_name, 50);
             bookmarks.add(new BookmarkItem(trimmed_name, uri_or_path.strip()));
             save();
         }
@@ -275,9 +275,7 @@ namespace VCommander {
             if (index < bookmarks.length) {
                 var bm = bookmarks.get(index);
                 string trimmed = (new_name != null) ? new_name.strip() : "";
-                if (trimmed.char_count() > 50) {
-                    trimmed = trimmed.substring(0, 50);
-                }
+                trimmed = PathUtils.truncate_chars(trimmed, 50);
                 bm.name = trimmed;
                 save();
             }
@@ -755,15 +753,30 @@ namespace VCommander {
                 key_file.set_string("Console", "FontStyle", terminal_font_style);
                 key_file.set_string("Console", "ColorTheme", terminal_color_theme);
 
-                // Ensure directory exists
+                // Ensure directory exists with private permissions
                 string config_dir = Path.get_dirname(config_path);
-                var dir = File.new_for_path(config_dir);
-                if (!dir.query_exists()) {
-                    dir.make_directory_with_parents(null);
+                if (!FileUtils.test(config_dir, FileTest.IS_DIR)) {
+                    DirUtils.create_with_parents(config_dir, 0700);
                 }
+                Posix.chmod(config_dir, 0700);
 
+                // Write to a temporary file and atomically rename it over the
+                // previous config. A crash mid-write must not corrupt settings.
                 string data = key_file.to_data();
-                FileUtils.set_contents(config_path, data);
+                string tmp_path = @"$config_path.tmp.$((int)Posix.getpid())";
+                var tmp_file = File.new_for_path(tmp_path);
+                try {
+                    var stream = tmp_file.replace(null, false, FileCreateFlags.PRIVATE, null);
+                    stream.write_all(data.data, null);
+                    stream.close(null);
+                    tmp_file.move(File.new_for_path(config_path), FileCopyFlags.OVERWRITE, null, null);
+                    Posix.chmod(config_path, 0600);
+                } catch (Error e) {
+                    try {
+                        if (tmp_file.query_exists()) tmp_file.delete(null);
+                    } catch (Error ignored) {}
+                    throw e;
+                }
             } catch (Error e) {
                 warning("Failed to save configuration: %s", e.message);
             }

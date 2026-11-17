@@ -2,6 +2,9 @@
 
 VALAC = valac
 TARGET = vcmd
+TEST_TARGET = tests/vcmd-tests
+TEST_SOURCES = $(wildcard tests/test_*.vala)
+APP_SOURCES = $(filter-out src/main.vala,$(SOURCES))
 
 VALAFLAGS = \
 	--vapidir=vapi \
@@ -17,6 +20,8 @@ VALAFLAGS = \
 	-g
 
 SOURCES = \
+	src/path_utils.vala \
+	src/process_utils.vala \
 	src/config_manager.vala \
 	src/key_utils.vala \
 	src/app_logger.vala \
@@ -58,6 +63,15 @@ build: $(TARGET)
 $(TARGET): $(SOURCES)
 	$(VALAC) $(VALAFLAGS) -o $(TARGET) $(SOURCES)
 
+$(TEST_TARGET): $(TEST_SOURCES) $(APP_SOURCES) Makefile
+	$(VALAC) $(VALAFLAGS) -o $(TEST_TARGET) $(TEST_SOURCES) $(APP_SOURCES)
+
+test: $(TEST_TARGET)
+	./tests/run_tests.sh
+
+test-list: $(TEST_TARGET)
+	./tests/vcmd-tests --list
+
 run: build
 	./$(TARGET)
 
@@ -76,6 +90,6 @@ package:
 release: package
 
 clean:
-	rm -f $(TARGET) src/*.c src/*.vala.c
+	rm -f $(TARGET) $(TEST_TARGET) src/*.c src/*.vala.c tests/*.c tests/*.vala.c
 
-.PHONY: all build run install install-lite uninstall clean package release
+.PHONY: all build run install install-lite uninstall clean package release test test-list

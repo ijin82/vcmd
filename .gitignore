@@ -55,3 +55,8 @@ Thumbs.db
 dist/
 *.tar.gz
 *.sha256
+
+# --- Test Build Artifacts ---
+tests/vcmd-tests
+tests/*.c
+tests/*.vala.c
