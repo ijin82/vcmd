@@ -706,7 +706,7 @@ directory under `$XDG_RUNTIME_DIR`, never the user's home.
   The code uses libadwaita APIs added in 1.5 (`get_visible_dialog()`) and
   `Adw.TabView`/`Adw.AlertDialog` from earlier 1.x releases, so Debian/Ubuntu
   versions listed as generic examples may fail to compile or run.
-- `DEV_PLAN.md:21,271` still marks the archive/ExtFS stage as “Planned”, while
+- `docs/DEV_PLAN.md` (historical) marks the archive/ExtFS stage as “Planned”, while
   the feature is substantially implemented. Either update the plan or mark it
   as implemented with known gaps (the P0/P1 findings above are those gaps).
 - The README claims “sub-second incremental builds”; the Makefile invokes

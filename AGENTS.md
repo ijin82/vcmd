@@ -41,5 +41,6 @@
 - **Test Isolation:** Automated tests must never touch the real home directory, real bookmarks, real Trash, or the network. Use `TestFs.create_temp_root()` and the wrapper's isolated `XDG_*`/`TMPDIR` environment. Tests that need an external tool must report `SKIP` when it is unavailable.
 - **Test Scope:** Do not add tests that require a GTK display, polkit, a physical device, or network access to the display-free suite. Keep those checks in `tests/MANUAL_UI.md`.
 - **Test Language:** Test names, descriptions, comments, and documentation use English.
+- **Planning Records:** Project assessments, quality plans, and manual test plans live in `docs/` (starting with `docs/PROJECT_ASSESSMENT.md` and `docs/CODE_QUALITY_RELIABILITY_PLAN.md`). Keep them current after major phases. Historical documents such as `docs/DEV_PLAN.md` are preserved for project history and must not be treated as the current roadmap.
 - **Local Installation:** Always run `./install.sh lite` (or `make install-lite`) upon completing changes / after each build so the user can immediately test the live application without redundant rebuilds.
 - **Git Restrictions:** Do not run `git commit` or `git push` autonomously; all git commits and repository pushes are managed directly by the user.

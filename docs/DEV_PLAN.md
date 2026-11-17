@@ -1,6 +1,14 @@
-# Development Plan (`DEV_PLAN.md`): Vala Commander (`vcmd`)
+# Development Plan (Historical): Vala Commander (`vcmd`)
 
-This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`)**, showing completed features, recent enhancements, and remaining roadmap tasks.
+> **Historical document.** This plan is kept for project history. Its stage
+> statuses and roadmap are outdated; do not use it as the current source of
+> truth. Current assessment and active planning live in
+> [PROJECT_ASSESSMENT.md](PROJECT_ASSESSMENT.md) and
+> [CODE_QUALITY_RELIABILITY_PLAN.md](CODE_QUALITY_RELIABILITY_PLAN.md).
+
+This document tracked the 7-stage architectural plan for **Vala Commander
+(`vcmd`)**, showing completed features, recent enhancements, and remaining
+roadmap tasks at the time it was written.
 
 ---
 
@@ -258,7 +266,7 @@ This document tracks the 7-stage architectural plan for **Vala Commander (`vcmd`
     - Native image formats: JPG, JPEG, PNG, GIF, SVG, WEBP, BMP, ICO, TIFF.
     - Fallback: Non-image files show standard system MIME / icon at the current tile size.
     - Suppress non-critical thumbnail generation errors without interrupting directory browsing.
-- [x] Non-Blocking Live Streaming ("Дотекание"):
+- [x] Non-Blocking Live Streaming ("Incremental delivery"):
   - Generation occurs in a background worker pool (`GLib.ThreadPool`).
   - As each thumbnail is finished, dispatches an idle signal to the GTK main loop (`GLib.Idle.add`).
   - Binds the newly loaded texture/paintable directly to the `FileItem` without reloading or re-sorting the `GListStore`.
